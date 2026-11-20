@@ -1,0 +1,161 @@
+#include "omarchy.h"
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QProcess>
+#include <QRegularExpression>
+#include <QStandardPaths>
+#include <algorithm>
+
+namespace {
+
+QString fromEnv(const char *name, const QString &fallback) {
+    const QString value = qEnvironmentVariable(name);
+    return value.isEmpty() ? fallback : value;
+}
+
+QStringList imagesIn(const QString &directory) {
+    if (directory.isEmpty())
+        return {};
+    static const QStringList suffixes{"jpg", "jpeg", "png", "webp"};
+    QStringList images;
+    const auto entries = QDir(directory).entryInfoList(QDir::Files | QDir::Readable, QDir::Name);
+    for (const QFileInfo &entry : entries)
+        if (suffixes.contains(entry.suffix().toLower()))
+            images << entry.absoluteFilePath();
+    return images;
+}
+
+} // namespace
+
+OmarchyPaths OmarchyPaths::fromEnvironment() {
+    const QString config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+    const QString state = QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation);
+    OmarchyPaths paths;
+    paths.state = fromEnv("LIMGEN_OMARCHY_STATE", state + "/omarchy/current");
+    paths.backgrounds = fromEnv("LIMGEN_OMARCHY_BACKGROUNDS", config + "/omarchy/backgrounds");
+    paths.omarchy = fromEnv("LIMGEN_OMARCHY_BIN", QStandardPaths::findExecutable("omarchy"));
+    // Without a running Hyprland, hyprctl has nothing to answer, so it is not
+    // used even when installed.
+    paths.hyprctl = fromEnv("LIMGEN_HYPRCTL", qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")
+                                                  ? QString()
+                                                  : QStandardPaths::findExecutable("hyprctl"));
+    paths.language = config + "/omarchy/language";
+    return paths;
+}
+
+Omarchy::Omarchy(const OmarchyPaths &paths, QObject *parent) : QObject(parent), m_paths(paths) {
+    m_debounce.setSingleShot(true);
+    m_debounce.setInterval(150);
+    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_debounce.start(); });
+    connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { m_debounce.start(); });
+    connect(&m_debounce, &QTimer::timeout, this, [this] {
+        rearm();
+        emit changed();
+    });
+    rearm();
+}
+
+bool Omarchy::isSafeSlug(const QString &slug) {
+    // anchoredPattern, because a plain `$` would also accept a final newline.
+    static const QRegularExpression valid(QRegularExpression::anchoredPattern("[A-Za-z0-9][A-Za-z0-9._-]*"));
+    return valid.match(slug).hasMatch() && !slug.contains("..");
+}
+
+QString Omarchy::slug() const {
+    QFile file(m_paths.state + "/theme.name");
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    const QString slug = QString::fromUtf8(file.readLine()).trimmed();
+    return isSafeSlug(slug) ? slug : QString();
+}
+
+QString Omarchy::colorsPath() const { return m_paths.state + "/theme/colors.toml"; }
+
+QString Omarchy::readColors(QString *error) const {
+    QFile file(colorsPath());
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error)
+            *error = QCoreApplication::translate("Omarchy", "Cannot read %1: %2").arg(colorsPath(), file.errorString());
+        return {};
+    }
+    return QString::fromUtf8(file.readAll());
+}
+
+QStringList Omarchy::themeBackgrounds() const { return imagesIn(m_paths.state + "/theme/backgrounds"); }
+
+QString Omarchy::userBackgroundDirectory() const {
+    const QString name = slug();
+    return name.isEmpty() ? QString() : m_paths.backgrounds + "/" + name;
+}
+
+QStringList Omarchy::userBackgrounds() const { return imagesIn(userBackgroundDirectory()); }
+
+QList<Monitor> Omarchy::monitors() const {
+    if (m_paths.hyprctl.isEmpty())
+        return {};
+    QProcess process;
+    process.start(m_paths.hyprctl, {"monitors", "-j"});
+    if (!process.waitForFinished(2000)) {
+        process.kill();
+        process.waitForFinished(1000);
+        return {};
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+        return {};
+    return parseMonitors(process.readAllStandardOutput());
+}
+
+QList<Monitor> Omarchy::parseMonitors(const QByteArray &json) {
+    QList<Monitor> monitors;
+    for (const QJsonValue &value : QJsonDocument::fromJson(json).array()) {
+        const QJsonObject object = value.toObject();
+        if (object.value("disabled").toBool())
+            continue;
+        Monitor monitor{object.value("name").toString(), object.value("width").toInt(),
+                        object.value("height").toInt()};
+        if (monitor.width <= 0 || monitor.height <= 0)
+            continue;
+        // Hyprland reports the mode's size; transforms 1, 3, 5 and 7 turn the
+        // monitor a quarter, so its background is taller than wide.
+        if (object.value("transform").toInt() % 2 == 1)
+            std::swap(monitor.width, monitor.height);
+        monitors << monitor;
+    }
+    return monitors;
+}
+
+Monitor Omarchy::largest(const QList<Monitor> &monitors) {
+    Monitor best;
+    for (const Monitor &monitor : monitors)
+        if (qint64(monitor.width) * monitor.height > qint64(best.width) * best.height)
+            best = monitor;
+    return best;
+}
+
+void Omarchy::rearm() {
+    const auto watched = m_watcher.files() + m_watcher.directories();
+    if (!watched.isEmpty())
+        m_watcher.removePaths(watched);
+
+    // A theme switch replaces files and symlinks, which drops them from the
+    // watch, so the parents are watched too and everything is re-armed after
+    // each change. Watching the nearest existing ancestor means Omarchy
+    // installed later is noticed without a restart.
+    QString ancestor = m_paths.state;
+    while (!ancestor.isEmpty() && !QFileInfo::exists(ancestor) && ancestor != "/")
+        ancestor = QFileInfo(ancestor).absolutePath();
+    QStringList candidates{ancestor, m_paths.state, m_paths.state + "/theme", m_paths.state + "/theme.name",
+                           colorsPath(), m_paths.state + "/theme/backgrounds", m_paths.backgrounds,
+                           userBackgroundDirectory()};
+    candidates.removeAll(QString());
+    candidates.removeDuplicates();
+    for (const QString &path : candidates)
+        if (QFileInfo::exists(path))
+            m_watcher.addPath(path);
+}

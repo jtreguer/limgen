@@ -1,0 +1,16 @@
+#!/bin/sh
+# Builds the app and the Qt Test binary, runs the tests offscreen, then runs
+# the tests of the L0 benchmark scripts. The Qt tests run the built app for
+# its headless commands, found through LIMGEN_BINARY.
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+"$ROOT/bin/build"
+
+mkdir -p "$ROOT/build/tests"
+cd "$ROOT/build/tests"
+qmake6 "$ROOT/tests/limgen_tests.pro"
+make -j"$(nproc)"
+LIMGEN_BINARY="$ROOT/build/limgen" QT_QPA_PLATFORM=offscreen ./limgen_tests
+
+"$ROOT/tests/bench-tools.sh"

@@ -3,8 +3,8 @@
 How limgen is built. Read `design.md` first for what it does and why. Model
 choices and benchmarks live in `models.md`.
 
-Status: design. No app code yet; milestone L0 done, L1 next. Section 12
-lists the milestones.
+Status: milestones L0 and L1 done, L2 next. Section 12 lists the
+milestones.
 
 ## 1. Stack
 
@@ -22,7 +22,7 @@ lists the milestones.
 
 ```text
 limgen.pro
-bin/build               qmake6 + make into build/limgen
+bin/build               qmake6 + make in build/app/, then build/limgen
 bin/test                builds and runs the tests offscreen
 bin/install             makepkg -fsi from pkgbuild/
 bin/build-engine        builds sd-cli at the pinned release into build/engine/ (section 10)
@@ -68,17 +68,29 @@ README.md  LICENSE  .gitignore
   reads `hyprctl monitors -j`. Watches the files with `QFileSystemWatcher`,
   re-arming after every change because a theme switch replaces files and
   symlinks. Every path has an environment override for tests (section 11).
-- **Palette** (pure). Parses the flat `key = "value"` lines of `colors.toml`
-  (no full TOML parser needed; unknown keys are ignored, a missing file is an
-  error the window shows). Converts each colour to a descriptive name: hue
-  family from a small table, qualifiers from Lab lightness and chroma
-  ("deep", "muted", "pale", "near-black"). Picks background, foreground,
-  accent and the two named colours with the highest chroma. Output: palette
-  words, mood words from `mode`, and the Lab statistics used by the colour
-  pass.
-- **Prompt** (pure). Subject + palette words + mood + style preset words ->
-  positive prompt; style preset -> negative prompt and default settings. The
-  user's edits to the full prompt win over the builder.
+- **Palette** (pure). Parses the flat `key = "value"` lines of the text of
+  `colors.toml` it is given (no full TOML parser needed; unknown keys are
+  ignored; a missing background, foreground or accent is an error the window
+  and `limgen palette` show). Picks background, foreground, accent and the
+  two of the eight named colours (`red` to `brown`) with the highest chroma.
+  Names each colour in OKLCH, because CIELAB puts pure blue and violet only
+  6 degrees apart: greys and very dark colours by lightness ("near-black
+  indigo", "charcoal", "off-white"), others by a hue family from a table of
+  twelve, with the usual names at the light or dark end ("lavender",
+  "navy", "brown"), plus at most one lightness word ("pale", "light",
+  "dark", "deep") and one chroma word ("muted", "vivid"). `mode` falls back
+  to the background's lightness when missing. Output: the words, mood words
+  from `mode`, and each colour's CIELAB value, from which the colour pass
+  (L5) derives its target. The words are English in every UI language,
+  because they are model input.
+- **Prompt** (pure). "subject, style lead, palette words colour palette,
+  mood, style details, desktop wallpaper"; the style preset (Photo,
+  Cinematic, Painting, Minimal) also gives the negative prompt, which only
+  models with guidance read. The Cinematic words are the L0 benchmark's, so
+  its results describe the default. Steps, guidance and sampler come from
+  the model catalogue. Without a valid palette the palette and mood parts
+  are left out. The user's edits to the full prompt win over the builder
+  (L4).
 - **Catalogue.** `models.json` lists each supported model: id, display name,
   publisher, licence id, short licence summary and URL, native sizes, files
   per quantisation level (role, URL, size, SHA-256), minimum free video
@@ -280,7 +292,7 @@ the codes below. Hype's `src/cli.cpp` is the pattern.
 
 | Command | Does |
 |---|---|
-| `limgen palette` | current theme palette, palette words, mood |
+| `limgen palette` | current theme palette, palette words, mood; exit 1 when there is no theme or its `colors.toml` is unreadable |
 | `limgen doctor` | engine version, backend, GPU, memory, models, problems found |
 | `limgen models [list]` | catalogue with installed state and fit on this machine |
 | `limgen models pull <id> [--level q4_k] [--yes]` | download (asks unless `--yes`) |
@@ -332,8 +344,9 @@ not enough memory, model missing), 130 interrupted.
   `LIMGEN_OMARCHY_STATE` (instead of `~/.local/state/omarchy/current`),
   `LIMGEN_OMARCHY_BACKGROUNDS` (instead of `~/.config/omarchy/backgrounds`),
   `LIMGEN_OMARCHY_BIN` (a fake `omarchy` that logs its arguments),
-  `LIMGEN_HYPRCTL`, `LIMGEN_SD_CLI` and the XDG variables. Tests never read
-  or write the real theme folders.
+  `LIMGEN_HYPRCTL`, `LIMGEN_SD_CLI` and the XDG variables (the Omarchy
+  language file is read from `$XDG_CONFIG_HOME/omarchy/language`). Tests
+  never read or write the real theme folders.
 - Window checks: the offscreen QML harness from the Omarchy app conventions,
   screenshots with the default accent, and one language switch.
 - Real engine runs are manual (they need a GPU and downloaded models) and are

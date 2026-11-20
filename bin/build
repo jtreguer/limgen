@@ -1,0 +1,13 @@
+#!/bin/sh
+# Builds the app into build/limgen with qmake6 and make.
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+mkdir -p "$ROOT/build/app"
+cd "$ROOT/build/app"
+
+qmake6 "$ROOT/limgen.pro"
+make -j"$(nproc)"
+cp limgen "$ROOT/build/limgen"
+
+echo "Built $ROOT/build/limgen"

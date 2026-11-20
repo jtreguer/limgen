@@ -1,0 +1,13 @@
+#!/bin/sh
+# Builds the Arch package with makepkg and installs it, so limgen shows up in
+# the app launcher. The package files arrive with milestone L7.
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+if [ ! -f "$ROOT/pkgbuild/PKGBUILD" ]; then
+  echo "bin/install: pkgbuild/PKGBUILD does not exist yet (milestone L7); use bin/build" >&2
+  exit 1
+fi
+"$ROOT/bin/build"
+cd "$ROOT/pkgbuild"
+exec makepkg -fsi "$@"
