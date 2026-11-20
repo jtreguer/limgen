@@ -1,0 +1,9 @@
+# The five L0 benchmark subjects, one per kind of background limgen should
+# handle. bench/run crosses them with every palette in bench/palettes.tsv.
+#
+# id	subject
+industrial	oil refinery at dusk, towers and pipes, steam rising
+spaceship	derelict starship drifting above a cloudy planet
+landscape	mountain lake under low clouds, pine forest on the shore
+city	empty city street after rain, reflections on the asphalt
+abstract	layered paper hills, minimal abstract shapes, soft gradients

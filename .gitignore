@@ -1,0 +1,10 @@
+/build/
+/pkgbuild/pkg/
+/pkgbuild/src/
+/pkgbuild/*.tar.*
+/pkgbuild/*.pkg.tar.*
+*.gguf
+*.safetensors
+*.part
+.qmake.stash
+Makefile

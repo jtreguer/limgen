@@ -1,0 +1,22 @@
+# Files for the L0 benchmark (docs/models.md section 6), fetched by bench/fetch
+# into ~/.local/share/limgen/models/<folder>/. Hugging Face files are pinned to
+# the repository commit they were checked at; SHA-256 sums come from the
+# publisher (Hugging Face LFS) except where a comment says otherwise.
+#
+# folder	file	bytes	sha256	url
+z-image-turbo	z_image_turbo-Q4_K.gguf	3864250304	14b375ab4f226bc5378f68f37e899ef3c2242b8541e61e2bc1aff40976086fbd	https://huggingface.co/leejet/Z-Image-Turbo-GGUF/resolve/c61c0e422dc8b541b7548cf33a4ef8302b0f8085/z_image_turbo-Q4_K.gguf
+z-image-turbo	z_image_turbo-Q8_0.gguf	6577440704	df1c5baa86d1398c979495a6072dbcee79444fdb884a2445582ba0769c44e9a1	https://huggingface.co/leejet/Z-Image-Turbo-GGUF/resolve/c61c0e422dc8b541b7548cf33a4ef8302b0f8085/z_image_turbo-Q8_0.gguf
+z-image-turbo	ae.safetensors	335304388	afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38	https://huggingface.co/Comfy-Org/z_image_turbo/resolve/6fc90a3b1b653e935a0d175e260736de25b84df5/split_files/vae/ae.safetensors
+z-image-turbo	taef1.safetensors	9848636	47a6c2bff850da04b267cab70fe3553fef57255eb9a8e76852baa0a87850e54d	https://huggingface.co/madebyollin/taef1/resolve/b1b2d00e9e440cfbf3dedb34266864da86016ceb/diffusion_pytorch_model.safetensors
+flux2-klein-4b	flux-2-klein-4b-Q4_0.gguf	2460378560	d1023499ef3f2f82ff7c50e6778495195c1b6cc34835741778868428111f9ff4	https://huggingface.co/leejet/FLUX.2-klein-4B-GGUF/resolve/3b1f5a9dc3abb32238b053aeb3d823c30afdacbd/flux-2-klein-4b-Q4_0.gguf
+flux2-klein-4b	flux-2-klein-4b-Q8_0.gguf	4300629440	0bba6951258ec8f92d51114a8fa13e66828297bfff58a738f52729b3ef66fa28	https://huggingface.co/leejet/FLUX.2-klein-4B-GGUF/resolve/3b1f5a9dc3abb32238b053aeb3d823c30afdacbd/flux-2-klein-4b-Q8_0.gguf
+flux2-klein-4b	flux2-vae.safetensors	336211292	868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3	https://huggingface.co/Comfy-Org/flux2-klein-4B/resolve/5b3abca5c0dc1ecd4eaf3340868d09063fc1c965/split_files/vae/flux2-vae.safetensors
+flux2-klein-4b	taef2.safetensors	10723524	701d31c0ecbef3b609fe236e2e3a65ffb17f3a94237acdd771e8ea3194df557a	https://huggingface.co/madebyollin/taef2/resolve/bd244ebfe4398c84fbf312a2f1c868c676b500e3/taef2.safetensors
+qwen3-4b	Qwen3-4B-Q4_K_M.gguf	2497281312	f6f851777709861056efcdad3af01da38b31223a3ba26e61a4f8bf3a2195813a	https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/22c9fc8a8c7700b76a1789366280a6a5a1ad1120/Qwen3-4B-Q4_K_M.gguf
+qwen3-4b	Qwen3-4B-Q8_0.gguf	4280405792	eed555233267a33c7e8ee31682762cc7751b3f6d224039086e0e846f05fffa5d	https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/22c9fc8a8c7700b76a1789366280a6a5a1ad1120/Qwen3-4B-Q8_0.gguf
+sdxl-base-1.0	sd_xl_base_1.0.safetensors	6938078334	31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b	https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/462165984030d82259a11f4367a4eed129e94a7b/sd_xl_base_1.0.safetensors
+sdxl-base-1.0	sdxl-vae-fp16-fix.safetensors	334641162	235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1	https://huggingface.co/madebyollin/sdxl-vae-fp16-fix/resolve/207b116dae70ace3637169f1ddd2434b91b3a8cd/sdxl_vae.safetensors
+sdxl-base-1.0	taesdxl.safetensors	9793292	ff4824aca94dd6111e0340fa749347fb74101060d9712cb5ef1ca8f1cf17502f	https://huggingface.co/madebyollin/taesdxl/resolve/b20258aaef75ef61e659c1e0f14f251cf0ad153e/diffusion_pytorch_model.safetensors
+# GitHub publishes no checksum for this release asset; this is the SHA-256
+# widely quoted for it, confirmed on first download.
+realesrgan-x4plus	RealESRGAN_x4plus.pth	67040989	4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1	https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth

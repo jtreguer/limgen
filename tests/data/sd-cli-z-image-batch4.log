@@ -1,0 +1,129 @@
+[V] version: stable-diffusion.cpp version master-1106-532d2c1, commit 532d2c1 --- main.cpp:760
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 7891 MiB):
+  Device 0: NVIDIA GeForce RTX 3070 Ti, compute capability 8.6, VMM: yes, VRAM: 7891 MiB
+[V] System Info: 
+   SSE3 = 1 |    SSSE3 = 1 |    AVX = 1 |    AVX2 = 1 |    F16C = 1 |    FMA = 1 |    BMI2 = 1 |    OPENMP = 1 |    REPACK = 1 |  --- main.cpp:761
+[V] using 8 threads for model loading --- model_loader.cpp:194
+[I] loading diffusion model from '/models/z-image-turbo/z_image_turbo-Q4_K.gguf' --- diffusion_engine.cpp:697
+[I] load /models/z-image-turbo/z_image_turbo-Q4_K.gguf using gguf format --- model_loader.cpp:220
+[V] init from '/models/z-image-turbo/z_image_turbo-Q4_K.gguf' --- model_loader.cpp:266
+[V] GGUF v3, tensor_count=453, metadata_kv_count=0 --- gguf_reader_ext.h:224
+[I] loading llm from '/models/qwen3-4b/Qwen3-4B-Q4_K_M.gguf' --- diffusion_engine.cpp:754
+[I] load /models/qwen3-4b/Qwen3-4B-Q4_K_M.gguf using gguf format --- model_loader.cpp:220
+[V] init from '/models/qwen3-4b/Qwen3-4B-Q4_K_M.gguf' --- model_loader.cpp:266
+[V] GGUF v3, tensor_count=398, metadata_kv_count=32 --- gguf_reader_ext.h:224
+[I] loading vae from '/models/z-image-turbo/ae.safetensors' --- diffusion_engine.cpp:768
+[I] load /models/z-image-turbo/ae.safetensors using safetensors format --- model_loader.cpp:226
+[V] init from '/models/z-image-turbo/ae.safetensors', prefix = 'vae.' --- model_loader.cpp:294
+[I] Version: Z-Image  --- diffusion_engine.cpp:982
+[I] auto-fit plan: --- backend_fit.cpp:335
+[I]   devices: --- backend_fit.cpp:336
+[I]     CUDA0        NVIDIA GeForce RTX 3070 Ti       free   6295 MiB, budget   5783 MiB --- backend_fit.cpp:338
+[I]     RAM          free  19838 MiB, params budget  17790 MiB --- backend_fit.cpp:345
+[I]   compute-device weight cache priority: diffusion > te > vae --- backend_fit.cpp:348
+[I]   components (params: compute device -> RAM -> other GPU -> disk): --- backend_fit.cpp:349
+[I]     DiT          params   3685 MiB, compute reserve  2048 MiB -> compute CUDA0, params cpu --- backend_fit.cpp:358
+[I]     Conditioner  params   2375 MiB, compute reserve  2048 MiB -> compute CUDA0, params cpu --- backend_fit.cpp:358
+[I]     VAE          params    319 MiB, compute reserve  1024 MiB -> compute CUDA0, params cpu --- backend_fit.cpp:358
+[I] auto-fit: --backend "diffusion=CUDA0,te=CUDA0,vae=CUDA0" --params-backend "diffusion=cpu,te=cpu,vae=cpu" --- backend_fit.cpp:486
+[V] Initializing backend: CUDA0 --- ggml_extend_backend.cpp:421
+[V] Initializing backend: CPU --- ggml_extend_backend.cpp:421
+[V] using 8 threads for model loading --- model_loader.cpp:194
+[I] Weight type stat:                      f32: 640  |    q8_0: 22   |    q4_K: 396  |    q6_K: 37    --- diffusion_engine.cpp:1560
+[I] Conditioner weight type stat:          f32: 145  |    q4_K: 216  |    q6_K: 37    --- diffusion_engine.cpp:1561
+[I] Diffusion model weight type stat:      f32: 251  |    q8_0: 22   |    q4_K: 180   --- diffusion_engine.cpp:1562
+[I] VAE weight type stat:                  f32: 244   --- diffusion_engine.cpp:1563
+[V] llm: num_layers = 36, vocab_size = 151936, hidden_size = 2560, intermediate_size = 9728 --- llm.hpp:460
+[V] z_image: num_layers = 30, num_refiner_layers = 2, hidden_size = 3840, num_heads = 30, num_kv_heads = 30, in_channels = 16, out_channels = 16 --- z_image.hpp:118
+[I] using VAE for encoding / decoding --- model_builders.cpp:226
+[I] vae decoder: ch = 128 --- auto_encoder_kl.hpp:529
+[I] flash attention auto: CUDA0 -> on (CUDA MMA) --- flash_attn.cpp:74
+[I] conv2d direct auto: CUDA0 -> on (implicit GEMM) --- conv_direct.cpp:87
+[I] conv3d direct auto: CUDA0 -> on (implicit GEMM) --- conv_direct.cpp:87
+[V] validating model metadata --- diffusion_engine.cpp:1314
+[V] model metadata validated; weights will be prepared lazily --- diffusion_engine.cpp:1384
+[I] total params memory size = 6221.12MB (VRAM 0.00MB, RAM 6221.12MB): text_encoders 2375.91MB(RAM), diffusion_model 3685.21MB(RAM), vae 160.00MB(RAM), controlnet 0.00MB(N/A), extensions 0.00MB(N/A) --- diffusion_engine.cpp:1430
+[I] running in FLOW mode --- diffusion_engine.cpp:1485
+[I] generate_image 1344x768 --- image.cpp:954
+[V] using 8 threads for model loading --- model_loader.cpp:194
+[I] get_sigmas with discrete scheduler --- denoiser.hpp:1132
+[I] sampling using Euler method --- request.cpp:478
+[V] parse '<|im_start|>user\noil refinery at dusk, towers and pipes, steam rising, cinematic wide shot, near-black indigo, deep violet, muted lavender, soft periwinkle blue colour palette, night, low-key lighting, deep shadows, atmospheric, highly detailed, desktop wallpaper<|im_end|>\n<|im_start|>assistant\n' to [['<|im_start|>user\n', 1], ['oil refinery at dusk, towers and pipes, steam rising, cinematic wide shot, near-black indigo, deep violet, muted lavender, soft periwinkle blue colour palette, night, low-key lighting, deep shadows, atmospheric, highly detailed, desktop wallpaper', 1], ['<|im_end|>\n<|im_start|>assistant\n', 1], ] --- conditioner.hpp:2246
+[V] split prompt "<|im_start|>user\n" to 3 tokens ["<|im_start|>", "user", "Ċ", ] --- bpe_tokenizer.cpp:245
+[V] split prompt "oil refinery at dusk, towers and pipes, steam rising, cinematic wide shot, near-black indigo, deep violet, muted lavender, soft periwinkle blue colour palette, night, low-key lighting, deep shadows, atmospheric, highly detailed, desktop wallpaper" to 51 tokens ["oil", "Ġrefinery", "Ġat", "Ġdusk", ",", "Ġtowers", "Ġand", "Ġpipes", ",", "Ġsteam", "Ġrising", ",", "Ġcinematic", "Ġwide", "Ġshot", ",", "Ġnear", "-black", "Ġind", "igo", ",", "Ġdeep", "Ġviolet", ",", "Ġmuted", "Ġlavender", ",", "Ġsoft", "Ġper", "iw", "inkle", "Ġblue", "Ġcolour", "Ġpalette", ",", "Ġnight", ",", "Ġlow", "-key", "Ġlighting", ",", "Ġdeep", "Ġshadows", ",", "Ġatmospheric", ",", "Ġhighly", "Ġdetailed", ",", "Ġdesktop", "Ġwallpaper", ] --- bpe_tokenizer.cpp:245
+[V] split prompt "<|im_end|>\n<|im_start|>assistant\n" to 5 tokens ["<|im_end|>", "Ċ", "<|im_start|>", "assistant", "Ċ", ] --- bpe_tokenizer.cpp:245
+[I] qwen3 build cached graph cut plan done (taking 2 ms) --- ggml_graph_cut.cpp:1032
+[V] loading 386/398 tensors from /models/qwen3-4b/Qwen3-4B-Q4_K_M.gguf --- model_loader.cpp:1167
+  |##                                                |  12/386 -   1.39GB/s[K  |#############                                     | 100/386 -   3.59GB/s[K  |################                                  | 119/386 -   2.02GB/s[K  |#################                                 | 131/386 -   1.47GB/s[K  |###################                               | 143/386 -   1.18GB/s[K  |####################                              | 153/386 - 997.02MB/s[K  |######################                            | 164/386 - 881.28MB/s[K  |#######################                           | 177/386 - 804.19MB/s[K  |#########################                         | 188/386 - 741.11MB/s[K  |###########################                       | 206/386 - 710.27MB/s[K  |#############################                     | 219/386 - 674.06MB/s[K  |##############################                    | 228/386 - 630.73MB/s[K  |################################                  | 244/386 - 618.21MB/s[K  |##################################                | 259/386 - 594.22MB/s[K  |#######################################           | 294/386 - 561.09MB/s[K  |#########################################         | 310/386 - 553.88MB/s[K  |###########################################       | 327/386 - 544.54MB/s[K  |#############################################     | 346/386 - 542.58MB/s[K  |###############################################   | 361/386 - 534.13MB/s[K  |##################################################| 380/386 - 532.70MB/s[K  |##################################################| 386/386 - 535.13MB/s[K
+[I] loading tensors completed, taking 4.33s (read: 4.24s, memcpy: 0.00s, convert: 0.00s, copy_to_backend: 0.00s) --- model_loader.cpp:1437
+[V] model manager prepared params backend buffers (2314.97 MB, 386 tensors, 1 blocks, RAM) on CUDA_Host --- model_manager.cpp:504
+[V] model manager staged compute params (2314.97 MB, 386 tensors, 3 blocks) to CUDA0, taking 0.19s --- model_manager.cpp:632
+[V] qwen3 compute buffer size: 7.85 MB(VRAM) on CUDA0 (peak across 1 segment) --- execution_engine.cpp:727
+[V] qwen3 compute buffer size: 0.01 MB(RAM) on CPU (peak across 1 segment) --- execution_engine.cpp:727
+[V] computing condition graph completed, taking 5811 ms --- conditioner.hpp:3450
+[V] conditioning cache stored (1/4) --- conditioning_cache.h:118
+[I] get_learned_condition completed, taking 5.81s --- image.cpp:664
+[I] generating image: 1/4 - seed 42 --- image.cpp:1005
+[I] z_image build cached graph cut plan done (taking 3 ms) --- ggml_graph_cut.cpp:1032
+[V] loading 452/453 tensors from /models/z-image-turbo/z_image_turbo-Q4_K.gguf --- model_loader.cpp:1167
+  |#                                                 |   9/452 -   0.00MB/s[K  |##                                                |  18/452 -   0.50MB/s[K  |###                                               |  19/452 -  37.60MB/s[K  |#############                                     | 112/452 - 627.68MB/s[K  |##################                                | 162/452 - 794.68MB/s[K  |#######################                           | 207/452 - 881.64MB/s[K  |#############################                     | 260/452 - 977.69MB/s[K  |###################################               | 312/452 -   1.04GB/s[K  |#######################################           | 351/452 -   1.08GB/s[K  |############################################      | 394/452 -   1.12GB/s[K  |################################################  | 431/452 -   1.14GB/s[K  |##################################################| 452/452 -   1.20GB/s[K
+[I] loading tensors completed, taking 3.00s (read: 2.98s, memcpy: 0.00s, convert: 0.00s, copy_to_backend: 0.00s) --- model_loader.cpp:1437
+[V] model manager prepared params backend buffers (3685.19 MB, 452 tensors, 1 blocks, RAM) on CUDA_Host --- model_manager.cpp:504
+[V] model manager staged compute params (3685.24 MB, 452 tensors, 4 blocks) to CUDA0, taking 0.31s --- model_manager.cpp:632
+[V] z_image compute buffer size: 642.37 MB(VRAM) on CUDA0 (peak across 1 segment) --- execution_engine.cpp:727
+[V] z_image compute buffer size: 5.56 MB(RAM) on CPU (peak across 1 segment) --- execution_engine.cpp:727
+  |======>                                           | 1/8 -   6.62s/it - ETA 00:46[K  |============>                                     | 2/8 -   1.08s/it - ETA 00:23[K  |==================>                               | 3/8 -   1.08s/it - ETA 00:14[K  |=========================>                        | 4/8 -   1.09s/it - ETA 00:09[K  |===============================>                  | 5/8 -   1.11s/it - ETA 00:06[K  |=====================================>            | 6/8 -   1.10s/it - ETA 00:04[K  |===========================================>      | 7/8 -   1.10s/it - ETA 00:01[K  |==================================================| 8/8 -   1.12s/it[K
+[I] sampling completed, taking 14.32s --- image.cpp:1038
+[I] generating image: 2/4 - seed 43 --- image.cpp:1005
+[V] model manager staged compute params (3685.24 MB, 452 tensors, 4 blocks) to CUDA0, taking 0.38s --- model_manager.cpp:632
+[V] z_image compute buffer size: 642.37 MB(VRAM) on CUDA0 (peak across 1 segment) --- execution_engine.cpp:727
+[V] z_image compute buffer size: 5.56 MB(RAM) on CPU (peak across 1 segment) --- execution_engine.cpp:727
+  |======>                                           | 1/8 -   1.47s/it[K  |============>                                     | 2/8 -   1.09s/it[K  |==================>                               | 3/8 -   1.08s/it[K  |=========================>                        | 4/8 -   1.08s/it[K  |===============================>                  | 5/8 -   1.08s/it[K  |=====================================>            | 6/8 -   1.10s/it[K  |===========================================>      | 7/8 -   1.09s/it[K  |==================================================| 8/8 -   1.08s/it[K
+[I] sampling completed, taking 9.10s --- image.cpp:1038
+[I] generating image: 3/4 - seed 44 --- image.cpp:1005
+[V] model manager staged compute params (3685.24 MB, 452 tensors, 4 blocks) to CUDA0, taking 0.38s --- model_manager.cpp:632
+[V] z_image compute buffer size: 642.37 MB(VRAM) on CUDA0 (peak across 1 segment) --- execution_engine.cpp:727
+[V] z_image compute buffer size: 5.56 MB(RAM) on CPU (peak across 1 segment) --- execution_engine.cpp:727
+  |======>                                           | 1/8 -   1.47s/it[K  |============>                                     | 2/8 -   1.08s/it[K  |==================>                               | 3/8 -   1.07s/it[K  |=========================>                        | 4/8 -   1.08s/it[K  |===============================>                  | 5/8 -   1.07s/it[K  |=====================================>            | 6/8 -   1.09s/it[K  |===========================================>      | 7/8 -   1.09s/it[K  |==================================================| 8/8 -   1.08s/it[K
+[I] sampling completed, taking 9.03s --- image.cpp:1038
+[I] generating image: 4/4 - seed 45 --- image.cpp:1005
+[V] model manager staged compute params (3685.24 MB, 452 tensors, 4 blocks) to CUDA0, taking 0.38s --- model_manager.cpp:632
+[V] z_image compute buffer size: 642.37 MB(VRAM) on CUDA0 (peak across 1 segment) --- execution_engine.cpp:727
+[V] z_image compute buffer size: 5.56 MB(RAM) on CPU (peak across 1 segment) --- execution_engine.cpp:727
+  |======>                                           | 1/8 -   1.47s/it[K  |============>                                     | 2/8 -   1.08s/it[K  |==================>                               | 3/8 -   1.07s/it[K  |=========================>                        | 4/8 -   1.07s/it[K  |===============================>                  | 5/8 -   1.09s/it[K  |=====================================>            | 6/8 -   1.08s/it[K  |===========================================>      | 7/8 -   1.08s/it[K  |==================================================| 8/8 -   1.09s/it[K
+[I] sampling completed, taking 9.04s --- image.cpp:1038
+[I] generating 4 latent images completed, taking 41.49s --- image.cpp:1050
+[I] decoding 4 latents --- image.cpp:689
+[I] vae build cached graph cut plan done (taking 0 ms) --- ggml_graph_cut.cpp:1032
+[V] loading 138/244 tensors from /models/z-image-turbo/ae.safetensors --- model_loader.cpp:1167
+  |#########                                         |  24/138 -   0.00MB/s[K  |##################################################| 138/138 - 940.30MB/s[K
+[I] loading tensors completed, taking 0.22s (read: 0.01s, memcpy: 0.00s, convert: 0.02s, copy_to_backend: 0.00s) --- model_loader.cpp:1437
+[V] model manager prepared params backend buffers ( 94.57 MB, 138 tensors, 1 blocks, RAM) on CUDA_Host --- model_manager.cpp:504
+[V] model manager staged compute params ( 94.57 MB, 138 tensors, 1 blocks) to CUDA0, taking 0.01s --- model_manager.cpp:632
+[V] vae compute buffer size: 2772.00 MB(VRAM) on CUDA0 (peak across 1 segment) --- execution_engine.cpp:727
+[V] vae compute buffer size: 0.98 MB(RAM) on CPU (peak across 1 segment) --- execution_engine.cpp:727
+[V] computing vae decode graph completed, taking 1.03s --- vae.hpp:386
+[I] latent 1 decoded, taking 1.03s --- image.cpp:755
+[V] model manager staged compute params ( 94.57 MB, 138 tensors, 1 blocks) to CUDA0, taking 0.05s --- model_manager.cpp:632
+[V] vae compute buffer size: 2772.00 MB(VRAM) on CUDA0 (peak across 1 segment) --- execution_engine.cpp:727
+[V] vae compute buffer size: 0.98 MB(RAM) on CPU (peak across 1 segment) --- execution_engine.cpp:727
+[V] computing vae decode graph completed, taking 0.74s --- vae.hpp:386
+[I] latent 2 decoded, taking 0.74s --- image.cpp:755
+[V] model manager staged compute params ( 94.57 MB, 138 tensors, 1 blocks) to CUDA0, taking 0.05s --- model_manager.cpp:632
+[V] vae compute buffer size: 2772.00 MB(VRAM) on CUDA0 (peak across 1 segment) --- execution_engine.cpp:727
+[V] vae compute buffer size: 0.98 MB(RAM) on CPU (peak across 1 segment) --- execution_engine.cpp:727
+[V] computing vae decode graph completed, taking 0.74s --- vae.hpp:386
+[I] latent 3 decoded, taking 0.74s --- image.cpp:755
+[V] model manager staged compute params ( 94.57 MB, 138 tensors, 1 blocks) to CUDA0, taking 0.05s --- model_manager.cpp:632
+[V] vae compute buffer size: 2772.00 MB(VRAM) on CUDA0 (peak across 1 segment) --- execution_engine.cpp:727
+[V] vae compute buffer size: 0.98 MB(RAM) on CPU (peak across 1 segment) --- execution_engine.cpp:727
+[V] computing vae decode graph completed, taking 0.74s --- vae.hpp:386
+[I] latent 4 decoded, taking 0.74s --- image.cpp:755
+[I] decode_first_stage completed, taking 3.25s --- image.cpp:759
+[I] generate_image completed in 50.58s --- image.cpp:1227
+[V] model manager released params backend buffers (6094.74 MB, 976 tensors, 3 blocks, RAM) from CUDA_Host --- model_manager.cpp:1312
+[I] save result image 0 to '/out/dark-violet-industrial-0.png' (success) --- main.cpp:501
+[I] save result image 1 to '/out/dark-violet-industrial-1.png' (success) --- main.cpp:501
+[I] save result image 2 to '/out/dark-violet-industrial-2.png' (success) --- main.cpp:501
+[I] save result image 3 to '/out/dark-violet-industrial-3.png' (success) --- main.cpp:501
+[I] 4/4 images saved --- main.cpp:534

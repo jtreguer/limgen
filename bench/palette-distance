@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Measures how close benchmark images are to the palette they were made for.
+
+For each image, ImageMagick reduces it to its six dominant colours. Each
+colour's distance to the nearest palette colour is taken in CIELAB (CIE76
+delta E), and the distances are averaged, weighted by how much of the image
+each colour covers. Lower is closer; under about 10 reads as the same family
+of colours, over 25 as clearly different.
+
+The palette comes from the image name, <palette>-<subject>-<n>.png, looked up
+in bench/palettes.tsv. This is benchmark tooling, never part of the app.
+
+Usage: bench/palette-distance <run folder>...
+Prints one line per image, then the mean per run folder.
+"""
+import pathlib
+import re
+import subprocess
+import sys
+
+import numpy as np
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+
+def lab(rgb):
+    """Converts sRGB colours (N x 3, 0 to 255) to CIELAB under D65."""
+    c = np.asarray(rgb, dtype=float) / 255.0
+    c = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    m = np.array([[0.4124564, 0.3575761, 0.1804375],
+                  [0.2126729, 0.7151522, 0.0721750],
+                  [0.0193339, 0.1191920, 0.9503041]])
+    xyz = (c @ m.T) / np.array([0.95047, 1.0, 1.08883])
+    d = 6 / 29
+    f = np.where(xyz > d ** 3, np.cbrt(xyz), xyz / (3 * d * d) + 4 / 29)
+    return np.stack([116 * f[:, 1] - 16,
+                     500 * (f[:, 0] - f[:, 1]),
+                     200 * (f[:, 1] - f[:, 2])], axis=1)
+
+
+def hex_rgb(value):
+    value = value.lstrip("#")
+    return [int(value[i:i + 2], 16) for i in (0, 2, 4)]
+
+
+def palettes():
+    result = {}
+    for line in (ROOT / "bench" / "palettes.tsv").read_text().splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        result[fields[0]] = lab([hex_rgb(v) for v in fields[2:7]])
+    return result
+
+
+def dominant(image):
+    """Returns (weights, Lab colours) of the six dominant colours of an image."""
+    out = subprocess.run(
+        ["magick", str(image), "-resize", "192x108!", "-colors", "6",
+         "-format", "%c", "histogram:info:-"],
+        check=True, capture_output=True, text=True).stdout
+    counts, colours = [], []
+    for match in re.finditer(r"(\d+):.*?#([0-9A-Fa-f]{6})", out):
+        counts.append(int(match.group(1)))
+        colours.append(hex_rgb(match.group(2)))
+    weights = np.array(counts, dtype=float)
+    return weights / weights.sum(), lab(colours)
+
+
+def distance(image, palette):
+    weights, colours = dominant(image)
+    nearest = np.linalg.norm(colours[:, None, :] - palette[None, :, :], axis=2).min(axis=1)
+    return float((weights * nearest).sum())
+
+
+def main(folders):
+    if not folders:
+        print(__doc__.strip().splitlines()[-2], file=sys.stderr)
+        return 2
+    known = palettes()
+    for folder in map(pathlib.Path, folders):
+        values = []
+        for image in sorted(folder.glob("*.png")):
+            name = next((p for p in known if image.name.startswith(p + "-")), None)
+            if name is None:
+                continue
+            value = distance(image, known[name])
+            values.append(value)
+            print(f"{folder.name}\t{image.name}\t{value:.1f}")
+        if values:
+            print(f"{folder.name}\tmean of {len(values)}\t{np.mean(values):.1f}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

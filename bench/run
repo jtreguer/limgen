@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# Runs one L0 benchmark configuration over the fixed prompts (every palette in
+# bench/palettes.tsv crossed with every subject in bench/subjects.tsv) and
+# records time and peak video memory per prompt (docs/models.md section 6).
+# Memory is read from nvidia-smi, so this measures NVIDIA cards only.
+#
+# Usage: bench/run <model> [options] [-- extra sd-cli arguments]
+#   model          z-image-turbo, flux2-klein-4b or sdxl-base-1.0
+#   --level L      diffusion model level, q4 or q8 (default q4; SDXL runs fp16)
+#   --encoder L    Qwen3-4B text encoder level, q4 or q8 (default: --level)
+#   --backend B    cuda or vulkan (default cuda), the build in build/engine/
+#   --preview P    none, proj or tae (default none)
+#   --hold GiB     hold this much video memory in another process meanwhile
+#   --only TEXT    run only prompts whose id (palette-subject) contains TEXT
+#   --count N      images per prompt, made as one sd-cli batch (default 4)
+#   --seed N       seed of the first image of each batch (default 42)
+#   --name NAME    run name (default: built from the options)
+#
+# Images, previews and logs go to build/bench/<name>/. One row per prompt is
+# appended to build/bench/runs.tsv. Generated images are never committed.
+#
+# LIMGEN_BENCH_OUT replaces build/bench as the output folder (used by tests).
+# LIMGEN_SD_CLI replaces the engine build chosen by --backend (used by tests).
+#
+# A prompt counts as failed when sd-cli exits non-zero or logs an error line
+# ("[E] ..."): the pinned release can log a failure and still exit 0.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+bench_out=${LIMGEN_BENCH_OUT:-$root/build/bench}
+# shellcheck source=bench/lib.sh
+source "$root/bench/lib.sh"
+
+usage() {
+  sed -n '6,17p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+[[ $# -ge 1 ]] || usage
+model=$1
+shift
+level=q4 encoder= backend=cuda preview=none hold= only= count=4 seed=42 name=
+extra=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --level) level=$2; shift 2 ;;
+    --encoder) encoder=$2; shift 2 ;;
+    --backend) backend=$2; shift 2 ;;
+    --preview) preview=$2; shift 2 ;;
+    --hold) hold=$2; shift 2 ;;
+    --only) only=$2; shift 2 ;;
+    --count) count=$2; shift 2 ;;
+    --seed) seed=$2; shift 2 ;;
+    --name) name=$2; shift 2 ;;
+    --) shift; extra=("$@"); break ;;
+    *) usage ;;
+  esac
+done
+encoder=${encoder:-$level}
+[[ $level == q4 || $level == q8 ]] || usage
+[[ $encoder == q4 || $encoder == q8 ]] || usage
+[[ $preview == none || $preview == proj || $preview == tae ]] || usage
+[[ $count =~ ^[1-9][0-9]*$ ]] || usage
+[[ $seed =~ ^[0-9]+$ ]] || usage
+[[ -z $hold || $hold =~ ^[0-9]*\.?[0-9]+$ ]] || usage
+
+sd_cli=${LIMGEN_SD_CLI:-$root/build/engine/$backend/bin/sd-cli}
+if [[ ! -x $sd_cli ]]; then
+  echo "bench/run: no engine at $sd_cli; run bin/build-engine $backend" >&2
+  exit 3
+fi
+
+setup_status=0
+model_setup "$model" "$level" "$encoder" || setup_status=$?
+case $setup_status in
+  0) ;;
+  2) usage ;;
+  *) exit 3 ;;
+esac
+if [[ $preview == tae && ! -f $tae ]]; then
+  echo "bench/run: missing $tae; run bench/fetch" >&2
+  exit 3
+fi
+
+name=${name:-$model-$level-$encoder-$backend-$preview${hold:+-hold$hold}}
+out=$bench_out/$name
+mkdir -p "$out"
+runs=$bench_out/runs.tsv
+if [[ ! -f $runs ]]; then
+  printf 'run\tmodel\tlevel\tencoder\tbackend\tpreview\thold_gib\tprompt\tcount\texit\twall_s\tload_s\tsample_s_per_image\tdecode_s_per_image\tfree_mib_at_start\tpeak_mib_used\n' >"$runs"
+fi
+
+case $preview in
+  proj) preview_args=(--preview proj) ;;
+  tae) preview_args=(--preview tae --tae "$tae" --taesd-preview-only) ;;
+  *) preview_args=() ;;
+esac
+if [[ $preview != none ]]; then
+  mkdir -p "$out/preview"
+  preview_args+=(--preview-interval 1)
+fi
+
+holder=
+vram_sampler=
+cleanup() {
+  [[ -n $vram_sampler ]] && kill "$vram_sampler" 2>/dev/null || true
+  [[ -n $holder ]] && kill "$holder" 2>/dev/null || true
+}
+trap cleanup EXIT
+if [[ -n $hold ]]; then
+  [[ -x $bench_out/hold-vram ]] ||
+    nvcc -O2 -o "$bench_out/hold-vram" "$root/bench/hold-vram.cu"
+  # The holder prints its "holding" line only once the memory is allocated.
+  # Without that line the run would be recorded as a busy-card run while
+  # nothing was held, so a holder that dies or never confirms stops the run.
+  "$bench_out/hold-vram" "$hold" >"$out/hold-vram.log" 2>&1 &
+  holder=$!
+  for ((i = 0; i < 100; i++)); do
+    grep -q holding "$out/hold-vram.log" && break
+    if ! kill -0 "$holder" 2>/dev/null; then
+      echo "bench/run: hold-vram failed: $(cat "$out/hold-vram.log")" >&2
+      exit 3
+    fi
+    sleep 0.1
+  done
+  if ! grep -q holding "$out/hold-vram.log"; then
+    echo "bench/run: hold-vram did not confirm within 10 s" >&2
+    exit 3
+  fi
+fi
+
+total_mib=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
+
+# Sums the "... completed, taking N s"-style timings that match a pattern in
+# an sd-cli log. Returns an empty string when the log has no such line.
+# A failed prompt's log often has no such line; grep then exits 1, which
+# under pipefail would end the whole run, so a missing timing is not an error.
+seconds() {
+  { grep -aoE "$1[^0-9]*[0-9]+(\.[0-9]+)?s" "$2" || true; } | { grep -oE '[0-9]+(\.[0-9]+)?s$' || true; } |
+    tr -d s | awk '{t += $1; n++} END {if (n) printf "%.2f", t}'
+}
+
+# Divides a batch total by the batch size; empty stays empty.
+per() { if [[ -n $1 ]]; then awk -v t="$1" -v n="$count" 'BEGIN { printf "%.2f", t / n }'; fi; }
+
+while IFS=$'\t' read -r pid mode bg fg accent c1 c2 words; do
+  [[ -z $pid || $pid == \#* ]] && continue
+  if [[ $mode == light ]]; then
+    mood="bright airy daylight, high-key lighting, soft shadows"
+  else
+    mood="night, low-key lighting, deep shadows"
+  fi
+  while IFS=$'\t' read -r sid subject; do
+    [[ -z $sid || $sid == \#* ]] && continue
+    id=$pid-$sid
+    [[ -z $only || $id == *"$only"* ]] || continue
+    prompt="$subject, cinematic wide shot, $words colour palette, $mood, atmospheric, highly detailed, desktop wallpaper"
+    args=("${files[@]}" "${settings[@]}" -p "$prompt" -W 1344 -H 768 -s "$seed" -b "$count"
+      -o "$out/$id-%d.png" -v)
+    [[ -n $negative ]] && args+=(-n "$negative")
+    [[ $preview != none ]] && args+=("${preview_args[@]}" --preview-path "$out/preview/$id-%03d.png")
+    args+=("${extra[@]}")
+    printf '%q ' "$sd_cli" "${args[@]}" >"$out/$id.cmd"
+
+    used_mib=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1)
+    peak_vram_start "$out/$id.vram"
+    start=$(date +%s.%N)
+    status=0
+    "$sd_cli" "${args[@]}" >"$out/$id.log" 2>&1 </dev/null || status=$?
+    if [[ $status == 0 ]] && grep -aq '\[E\] ' "$out/$id.log"; then
+      status=1
+    fi
+    wall=$(awk -v a="$start" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }')
+    peak_vram_stop
+    peak=$vram_peak
+
+    load=$(seconds 'loading tensors completed' "$out/$id.log")
+    sample=$(seconds 'sampling completed' "$out/$id.log")
+    decode=$(seconds 'decode_first_stage completed' "$out/$id.log")
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%.1f\t%s\t%s\t%s\t%s\t%s\n' \
+      "$name" "$model" "$level" "$encoder" "$backend" "$preview" "${hold:-0}" "$id" "$count" \
+      "$status" "$wall" "$load" "$(per "$sample")" "$(per "$decode")" \
+      "$((total_mib - used_mib))" "$peak" | tee -a "$runs"
+  done <"$root/bench/subjects.tsv"
+done <"$root/bench/palettes.tsv"

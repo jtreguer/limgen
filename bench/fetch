@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Downloads the L0 benchmark files listed in bench/models.tsv (about 32 GB)
+# into limgen's model folder. Each file goes to a .part file first, resumes if
+# interrupted, and is renamed into place only once its size and SHA-256 match.
+# Files already in place are skipped, so it can be run again after a failure.
+#
+# Usage: bench/fetch [folder...]    (default: every folder in the list)
+#
+# LIMGEN_BENCH_LIST replaces bench/models.tsv as the list (used by tests).
+# LIMGEN_MODELS overrides the destination (default:
+# ${XDG_DATA_HOME:-~/.local/share}/limgen/models).
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+dest=${LIMGEN_MODELS:-${XDG_DATA_HOME:-$HOME/.local/share}/limgen/models}
+wanted=("$@")
+
+selected() {
+  [[ ${#wanted[@]} -eq 0 ]] && return 0
+  local w
+  for w in "${wanted[@]}"; do [[ $w == "$1" ]] && return 0; done
+  return 1
+}
+
+while IFS=$'\t' read -r folder name size sha url; do
+  [[ -z $folder || $folder == \#* ]] && continue
+  selected "$folder" || continue
+  target=$dest/$folder/$name
+  if [[ -f $target ]]; then
+    echo "have $folder/$name"
+    continue
+  fi
+  mkdir -p "$dest/$folder"
+  echo "get  $folder/$name ($((size / 1000000)) MB)"
+  # A .part larger than the file can only be wrong, and resuming would keep
+  # it wrong on every run, so it is thrown away and fetched again.
+  if [[ -f $target.part && $(stat -c %s "$target.part") -gt $size ]]; then
+    echo "fetch: $folder/$name.part is larger than expected; starting again" >&2
+    rm -f "$target.part"
+  fi
+  # A complete .part left by an interrupted check would make the range
+  # request fail, so only ask for the rest when something is missing.
+  if [[ ! -f $target.part || $(stat -c %s "$target.part") -lt $size ]]; then
+    curl --fail --location --continue-at - --retry 5 --retry-delay 5 \
+      --silent --show-error --output "$target.part" "$url" </dev/null
+  fi
+  got_size=$(stat -c %s "$target.part")
+  if [[ $got_size != "$size" ]]; then
+    echo "fetch: $folder/$name is $got_size bytes, expected $size" >&2
+    exit 1
+  fi
+  got_sha=$(sha256sum "$target.part" | cut -d' ' -f1)
+  if [[ $got_sha != "$sha" ]]; then
+    echo "fetch: $folder/$name has SHA-256 $got_sha, expected $sha; removed" >&2
+    rm -f "$target.part"
+    exit 1
+  fi
+  mv "$target.part" "$target"
+done <"${LIMGEN_BENCH_LIST:-$root/bench/models.tsv}"
+echo "fetch: done, files in $dest"

@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Makes a blind rating page from several benchmark runs.
+
+For each prompt, the first image of every run is shown in shuffled order,
+labelled A, B, C... with no model names, next to the palette it was made
+for. Each image gets two scores from 1 to 5: quality, and how well it
+belongs to the theme. The page keeps the scores in the browser while you
+work and saves them as ratings.tsv. bench/score then maps the letters back
+to runs with key.tsv; do not open the key before rating.
+
+Every sheet gets a random id, written into key.tsv, into the ratings.tsv the
+page saves, and into the name the page keeps its scores under in the
+browser. Letters are shuffled again each time a sheet is made, so scores
+from an older sheet would land on the wrong images; the id keeps them apart,
+and bench/score refuses ratings whose id does not match the key.
+
+The page is a local file; it loads nothing from the network.
+
+Usage: bench/sheet <run folder> <run folder>...
+Writes build/bench/sheets/index.html, its images and key.tsv.
+LIMGEN_BENCH_OUT replaces build/bench (used by tests); the sheets folder
+inside it is deleted and rewritten.
+"""
+import html
+import os
+import pathlib
+import random
+import secrets
+import shutil
+import subprocess
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+OUT = pathlib.Path(os.environ.get("LIMGEN_BENCH_OUT") or ROOT / "build" / "bench") / "sheets"
+LETTERS = "ABCDEFGHIJKL"
+
+
+def table(name):
+    rows = {}
+    for line in (ROOT / "bench" / name).read_text().splitlines():
+        if line.strip() and not line.startswith("#"):
+            fields = line.split("\t")
+            rows[fields[0]] = fields[1:]
+    return rows
+
+
+def main(runs):
+    if len(runs) < 2:
+        print("usage: bench/sheet <run folder> <run folder>...", file=sys.stderr)
+        return 2
+    runs = [pathlib.Path(r).resolve() for r in runs]
+    palettes, subjects = table("palettes.tsv"), table("subjects.tsv")
+    if OUT.exists():
+        shutil.rmtree(OUT)
+    (OUT / "img").mkdir(parents=True)
+    sheet = secrets.token_hex(4)
+    key = [f"# sheet {sheet}", "prompt\tletter\trun"]
+    sections = []
+    for pid, (mode, *colours) in palettes.items():
+        colours, words = colours[:5], colours[5]
+        for sid, (subject,) in subjects.items():
+            prompt = f"{pid}-{sid}"
+            order = [r for r in runs if (r / f"{prompt}-0.png").exists()]
+            random.shuffle(order)
+            tiles = []
+            for letter, run in zip(LETTERS, order):
+                image = f"img/{prompt}-{letter}.jpg"
+                subprocess.run(["magick", str(run / f"{prompt}-0.png"), "-resize", "960x",
+                                "-quality", "90", str(OUT / image)], check=True)
+                key.append(f"{prompt}\t{letter}\t{run.name}")
+                scores = "".join(
+                    f'<div class="row"><span>{label}</span>' + "".join(
+                        f'<label><input type="radio" name="{prompt}|{letter}|{kind}" value="{v}">{v}</label>'
+                        for v in range(1, 6)) + "</div>"
+                    for kind, label in (("quality", "Quality"), ("fit", "Theme fit")))
+                tiles.append(f'<figure><a href="{image}" target="_blank"><img src="{image}" '
+                             f'loading="lazy" alt="{letter}"></a><figcaption>{letter}</figcaption>'
+                             f"{scores}</figure>")
+            swatches = "".join(f'<i style="background:{c}" title="{c}"></i>' for c in colours)
+            sections.append(
+                f'<section><h2>{html.escape(prompt)}</h2><p class="meta">{swatches} '
+                f"{html.escape(mode)}: {html.escape(words)}<br>{html.escape(subject)}</p>"
+                f'<div class="grid">{"".join(tiles)}</div></section>')
+    (OUT / "key.tsv").write_text("\n".join(key) + "\n")
+    (OUT / "index.html").write_text(
+        PAGE.replace("@SECTIONS@", "\n".join(sections)).replace("@SHEET@", sheet))
+    print(OUT / "index.html")
+    return 0
+
+
+PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>limgen L0 rating</title>
+<style>
+body { margin: 0 auto; max-width: 1400px; padding: 16px; background: #161616;
+       color: #e4e4e4; font: 15px/1.4 system-ui, sans-serif; }
+h1 { font-size: 20px; } h2 { font-size: 17px; margin: 32px 0 4px; }
+.meta { color: #aaa; margin: 0 0 12px; }
+.meta i { display: inline-block; width: 18px; height: 18px; margin-right: 3px;
+          vertical-align: -4px; border: 1px solid #555; border-radius: 3px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; }
+figure { margin: 0; } img { width: 100%; border-radius: 6px; display: block; }
+figcaption { font-weight: 600; margin: 4px 0; }
+.row span { display: inline-block; width: 80px; color: #aaa; }
+.row label { margin-right: 10px; cursor: pointer; }
+.bar { position: sticky; bottom: 0; background: #161616; padding: 12px 0;
+       border-top: 1px solid #333; margin-top: 24px; }
+button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid #555;
+         background: #2a2a2a; color: inherit; cursor: pointer; }
+</style></head><body>
+<h1>limgen L0: blind rating</h1>
+<p>Rate each image from 1 (poor) to 5 (excellent) for quality, and for how well it
+belongs to a desktop theme with the palette shown. Click an image to see it full
+size. Scores stay in this browser until you save them.</p>
+@SECTIONS@
+<div class="bar"><button id="save">Save ratings.tsv</button> <span id="count"></span></div>
+<script>
+const SHEET = "@SHEET@";
+const KEY = "limgen-l0-ratings-" + SHEET;
+const inputs = [...document.querySelectorAll("input[type=radio]")];
+const total = new Set(inputs.map(i => i.name)).size;
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) {}
+for (const input of inputs) if (saved[input.name] === input.value) input.checked = true;
+function scores() {
+  const result = {};
+  for (const input of inputs) if (input.checked) result[input.name] = input.value;
+  return result;
+}
+function update() {
+  const s = scores();
+  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
+  document.getElementById("count").textContent = Object.keys(s).length + " of " + total + " scores given";
+}
+document.addEventListener("change", update);
+document.getElementById("save").addEventListener("click", () => {
+  const rows = ["# sheet " + SHEET, "prompt\\tletter\\tkind\\tscore"];
+  for (const [name, value] of Object.entries(scores())) rows.push(name.split("|").join("\\t") + "\\t" + value);
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([rows.join("\\n") + "\\n"], {type: "text/tab-separated-values"}));
+  link.download = "ratings.tsv";
+  link.click();
+});
+update();
+</script></body></html>
+"""
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

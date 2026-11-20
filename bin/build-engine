@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Builds stable-diffusion.cpp's sd-cli at the release limgen is pinned to, once
+# per GPU backend, into build/engine/<backend>/bin/sd-cli.
+#
+# limgen builds sd-cli arguments for this one release only (docs/technical.md
+# section 4). Change the tag and commit together with SdCppEngine::arguments(),
+# its tests, the captured help text in tests/data/ and docs/models.md.
+#
+# Usage: bin/build-engine [vulkan|cuda|all]    (default: all)
+#
+# Then point limgen at one build, for example:
+#   LIMGEN_SD_CLI=build/engine/cuda/bin/sd-cli build/limgen doctor
+#
+# Needs cmake and ninja; Vulkan also needs vulkan-headers, spirv-headers and
+# shaderc; CUDA needs cuda.
+#
+# LIMGEN_CUDA_ARCHS sets the CUDA architectures (default: native, the GPU in
+# this machine). Packages build for a list instead, such as "75;86;89;120".
+set -euo pipefail
+
+SD_CPP_TAG=master-1106-532d2c1
+SD_CPP_COMMIT=532d2c15c430a785a712b2d94281f04e733008a4
+SD_CPP_URL=https://github.com/leejet/stable-diffusion.cpp
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+src=$root/build/engine/src
+
+fetch() {
+  if [[ -d $src/.git && $(git -C "$src" rev-parse HEAD) == "$SD_CPP_COMMIT" ]]; then
+    return
+  fi
+  rm -rf "$src"
+  git clone --quiet --depth 1 --branch "$SD_CPP_TAG" \
+    --recurse-submodules --shallow-submodules "$SD_CPP_URL" "$src"
+  # A tag can be moved upstream; the commit is what was tested.
+  local head
+  head=$(git -C "$src" rev-parse HEAD)
+  if [[ $head != "$SD_CPP_COMMIT" ]]; then
+    echo "build-engine: $SD_CPP_TAG points at $head, expected $SD_CPP_COMMIT" >&2
+    exit 1
+  fi
+}
+
+build() {
+  local backend=$1
+  local options=()
+  case $backend in
+    vulkan) options=(-DSD_VULKAN=ON) ;;
+    cuda) options=(-DSD_CUDA=ON "-DCMAKE_CUDA_ARCHITECTURES=${LIMGEN_CUDA_ARCHS:-native}") ;;
+  esac
+  # WebM is only used for video output, which limgen never asks for. WebP stays
+  # on so variations can start from the WebP backgrounds many themes ship.
+  cmake -S "$src" -B "$root/build/engine/$backend" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release -DSD_WEBM=OFF "${options[@]}"
+  cmake --build "$root/build/engine/$backend" --target sd-cli
+  echo "build-engine: $root/build/engine/$backend/bin/sd-cli"
+}
+
+case ${1:-all} in
+  vulkan | cuda) backends=("$1") ;;
+  all) backends=(vulkan cuda) ;;
+  *)
+    echo "usage: bin/build-engine [vulkan|cuda|all]" >&2
+    exit 2
+    ;;
+esac
+
+fetch
+for backend in "${backends[@]}"; do
+  build "$backend"
+done

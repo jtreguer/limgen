@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# Finishes benchmark drafts at the final size in three ways, so their time,
+# peak video memory and look can be compared (docs/models.md section 6):
+#   esrgan   Real-ESRGAN x4plus upscale, then Lanczos down to the final size
+#   img2img  Lanczos up to the final size, then image to image with the
+#            draft's model and prompt at --strength
+#   both     the esrgan result as the start of the image to image pass
+# Drafts are 1344x768 (7:4), so scaling to 16:9 crops about 1.6% of height.
+#
+# Usage: bench/finish [options] <draft.png>...
+#   --model M      model of the drafts: z-image-turbo, flux2-klein-4b or sdxl-base-1.0
+#   --level L      q4 or q8 (default q4)
+#   --size WxH     final size (default 2560x1440)
+#   --strength S   image to image strength (default 0.3)
+#   --backend B    cuda or vulkan (default cuda)
+#   --tile N       ESRGAN tile size (default: the engine's, 128)
+#
+# Writes build/bench/finish/<draft>-<method>.png and one row per method to
+# build/bench/finish.tsv.
+#
+# LIMGEN_BENCH_OUT replaces build/bench as the output folder (used by tests).
+# LIMGEN_SD_CLI replaces the engine build chosen by --backend (used by tests).
+#
+# A step counts as failed when sd-cli exits non-zero, logs an error line
+# ("[E] ..."), or writes an image of the wrong size: the pinned release can
+# fail an upscale, save the unscaled input and still exit 0.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+bench_out=${LIMGEN_BENCH_OUT:-$root/build/bench}
+# shellcheck source=bench/lib.sh
+source "$root/bench/lib.sh"
+
+usage() {
+  sed -n '10,16p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+model= level=q4 size=2560x1440 strength=0.3 backend=cuda tile=
+drafts=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --model) model=$2; shift 2 ;;
+    --level) level=$2; shift 2 ;;
+    --size) size=$2; shift 2 ;;
+    --strength) strength=$2; shift 2 ;;
+    --backend) backend=$2; shift 2 ;;
+    --tile) tile=$2; shift 2 ;;
+    -*) usage ;;
+    *) drafts+=("$1"); shift ;;
+  esac
+done
+[[ -n $model && ${#drafts[@]} -gt 0 && $size =~ ^[0-9]+x[0-9]+$ ]] || usage
+[[ -z $tile || $tile =~ ^[1-9][0-9]*$ ]] || usage
+width=${size%x*} height=${size#*x}
+
+sd_cli=${LIMGEN_SD_CLI:-$root/build/engine/$backend/bin/sd-cli}
+[[ -x $sd_cli ]] || { echo "bench/finish: no engine at $sd_cli; run bin/build-engine $backend" >&2; exit 3; }
+setup_status=0
+model_setup "$model" "$level" "$level" || setup_status=$?
+case $setup_status in
+  0) ;;
+  2) usage ;;
+  *) exit 3 ;;
+esac
+esrgan=$models/realesrgan-x4plus/RealESRGAN_x4plus.pth
+[[ -f $esrgan ]] || { echo "bench/finish: missing $esrgan; run bench/fetch" >&2; exit 3; }
+
+out=$bench_out/finish
+mkdir -p "$out"
+table=$bench_out/finish.tsv
+if [[ ! -f $table ]]; then
+  printf 'draft\tmodel\tlevel\tbackend\tmethod\tsize\tstrength\texit\twall_s\tpeak_mib_used\n' >"$table"
+fi
+vram_sampler=
+trap '[[ -n $vram_sampler ]] && kill "$vram_sampler" 2>/dev/null || true' EXIT
+
+# Scales an image to cover the final size, then crops the centre to it.
+cover() {
+  magick "$1" -filter Lanczos -resize "${width}x${height}^" -gravity center \
+    -extent "${width}x${height}" "$2"
+}
+
+# Prints an image's size as WxH, or nothing when it cannot be read.
+dimensions() { magick identify -format '%wx%h' "$1" 2>/dev/null || true; }
+
+# step <name> <output> <expected WxH> <command...> runs one finishing step,
+# timed and with memory sampled. It leaves its status in step_status (1 for
+# an error line or an output of the wrong size, even when sd-cli exited 0),
+# its wall time in step_wall and its peak memory in step_peak.
+step() {
+  local name=$1 output=$2 expected=$3 start
+  shift 3
+  peak_vram_start "$work/$name.vram"
+  start=$(date +%s.%N)
+  step_status=0
+  "$@" >"$work/$name.log" 2>&1 </dev/null || step_status=$?
+  step_wall=$(awk -v a="$start" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }')
+  peak_vram_stop
+  step_peak=${vram_peak:-0}
+  if [[ $step_status == 0 ]]; then
+    if grep -aq '\[E\] ' "$work/$name.log"; then
+      step_status=1
+    elif [[ $(dimensions "$output") != "$expected" ]]; then
+      echo "bench/finish: $output is not $expected" >>"$work/$name.log"
+      step_status=1
+    fi
+  fi
+  # A failed step's output must not stay where later tools would read it.
+  if [[ $step_status != 0 ]]; then
+    rm -f "$output"
+  fi
+}
+
+record() {
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$model" "$level" "$backend" \
+    "$1" "$size" "$strength" "$2" "$3" "$4" | tee -a "$table"
+}
+
+for draft in "${drafts[@]}"; do
+  [[ -f $draft ]] || { echo "bench/finish: no such draft $draft" >&2; exit 1; }
+  draft=$(realpath "$draft")
+  id=$(basename "$(dirname "$draft")")-$(basename "$draft" .png)
+  work=$out/$id.work
+  mkdir -p "$work"
+  # Outputs of an earlier run must not stand in for a step that fails now.
+  rm -f "$work/x4.png" "$out/$id-esrgan.png" "$out/$id-img2img.png" "$out/$id-both.png"
+  # The engine stores the prompt in the draft's parameters chunk. A failure
+  # anywhere in the pipeline ends up as an empty prompt, reported below.
+  prompt=$("$sd_cli" -M metadata --image "$draft" --metadata-format json 2>/dev/null |
+    python3 -I -c 'import json, sys
+for entry in json.load(sys.stdin)["entries"]:
+    text = entry.get("data", {}).get("text", "")
+    if "SDCPP: " in text:
+        print(json.loads(text.split("SDCPP: ", 1)[1])["prompt"])
+        break' 2>/dev/null) || true
+  [[ -n $prompt ]] || { echo "bench/finish: no prompt in $draft" >&2; exit 1; }
+  draft_size=$(dimensions "$draft")
+  x4_size=$((${draft_size%x*} * 4))x$((${draft_size#*x} * 4))
+  img2img=("$sd_cli" "${files[@]}" "${settings[@]}" -p "$prompt" -W "$width" -H "$height"
+    -s 42 --strength "$strength" --vae-tiling -v)
+  [[ -n $negative ]] && img2img+=(-n "$negative")
+
+  upscale=("$sd_cli" -M upscale --upscale-model "$esrgan" -i "$draft" -o "$work/x4.png" -v)
+  [[ -n $tile ]] && upscale+=(--upscale-tile-size "$tile")
+
+  step esrgan-x4 "$work/x4.png" "$x4_size" "${upscale[@]}"
+  esrgan_status=$step_status esrgan_wall=$step_wall esrgan_peak=$step_peak
+  if [[ $esrgan_status == 0 ]]; then
+    cover "$work/x4.png" "$out/$id-esrgan.png"
+  fi
+  record esrgan "$esrgan_status" "$esrgan_wall" "$esrgan_peak"
+
+  cover "$draft" "$work/lanczos.png"
+  step img2img "$out/$id-img2img.png" "$size" "${img2img[@]}" -i "$work/lanczos.png" -o "$out/$id-img2img.png"
+  record img2img "$step_status" "$step_wall" "$step_peak"
+
+  if [[ $esrgan_status == 0 ]]; then
+    step both "$out/$id-both.png" "$size" "${img2img[@]}" -i "$out/$id-esrgan.png" -o "$out/$id-both.png"
+    record both "$step_status" \
+      "$(awk -v a="$esrgan_wall" -v b="$step_wall" 'BEGIN { printf "%.1f", a + b }')" \
+      "$((step_peak > esrgan_peak ? step_peak : esrgan_peak))"
+  fi
+done

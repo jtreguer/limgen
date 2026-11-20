@@ -1,0 +1,13 @@
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 7891 MiB):
+  Device 0: NVIDIA GeForce RTX 3070 Ti, compute capability 8.6, VMM: yes, VRAM: 7891 MiB
+[I] load /models/realesrgan-x4plus/RealESRGAN_x4plus.pth using torch zip format --- model_loader.cpp:229
+[I] Upscaler architecture: esrgan, weight type: f16 --- image_upscale.cpp:96
+[I] upscaling from (1344 x 768) to (5376 x 3072) --- upscaler.cpp:71
+[I] esrgan build cached graph cut plan done (taking 5 ms) --- ggml_graph_cut.cpp:1032
+[W] model manager memory on CUDA0: reported free 5916.61 MB / total 7891.75 MB, tracked weights 0.00 MB / other runtime 0.00 MB / current runtime 256.00 MB --- model_manager.cpp:1813
+[W] execution engine cannot make enough memory available on CUDA0: need 7168.07 MB device / 6912.07 MB budget, available 5916.61 MB device / unlimited budget --- execution_engine.cpp:944
+[E] esrgan segment 27/28 (esrgan.up2) failed during weight preparation --- execution_engine.cpp:595
+[E] upscaler compute failed --- image_upscale.cpp:125
+[E] upscale failed --- main.cpp:1038
+[I] save result image 0 to '/out/x4-512.png' (success) --- main.cpp:501
+[I] 1/1 images saved --- main.cpp:579

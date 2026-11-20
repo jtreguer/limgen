@@ -1,0 +1,10 @@
+# Made-up palettes for the L0 benchmark, shaped like an Omarchy colors.toml:
+# background, foreground, accent and the two most saturated named colours.
+# The words are what limgen's palette rules should produce once L1 exists;
+# here they are written by hand. Palette ΔE is measured against the hex values.
+#
+# id	mode	background	foreground	accent	colour1	colour2	words
+dark-violet	dark	#16131f	#d8d0ec	#9d7cd8	#c678dd	#7aa2f7	near-black indigo, deep violet, muted lavender, soft periwinkle blue
+dark-green	dark	#121a16	#cfe3d4	#5fb37f	#8fbf6a	#3e8c7a	near-black green, deep forest green, muted sage, pale mint
+warm-dark	dark	#1d1612	#ead8c0	#e0913f	#c8553d	#d9b44a	dark umber, burnt orange, muted rust red, warm amber
+light	light	#f4f1ea	#3a3f4b	#4f7fbf	#8fb3d9	#d9a38f	warm off-white, slate grey, soft cornflower blue, pale peach
