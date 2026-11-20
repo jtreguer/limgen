@@ -14,8 +14,9 @@ silently picking one, and update the docs in the same change as the code.
 ## Status
 
 Design done, MIT licence. Milestones L0 (the engine spike, results in
-`docs/models.md` section 6) and L1 (the skeleton and `limgen palette`) are
-done; L2 is next (`docs/technical.md` section 12):
+`docs/models.md` section 6), L1 (the skeleton and `limgen palette`) and L2
+(the engine, `limgen doctor` and `limgen generate`) are done; L3 is next
+(`docs/technical.md` section 12):
 
 | # | Deliverable |
 |---|---|

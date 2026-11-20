@@ -3,7 +3,7 @@
 How limgen is built. Read `design.md` first for what it does and why. Model
 choices and benchmarks live in `models.md`.
 
-Status: milestones L0 and L1 done, L2 next. Section 12 lists the
+Status: milestones L0, L1 and L2 done, L3 next. Section 12 lists the
 milestones.
 
 ## 1. Stack
@@ -39,8 +39,9 @@ src/prompt.{h,cpp}      builds the full prompt from subject, palette, style (pur
 src/catalogue.{h,cpp}   model catalogue from src/models.json
 src/modelstore.{h,cpp}  downloads, checksums, installed models
 src/hardware.{h,cpp}    GPU, backend, memory detection
-src/engine.h            abstract Engine
-src/sdcppengine.{h,cpp} Engine over sd-cli: arguments, progress, cancel, errors
+src/engine.h            abstract Engine, its request and its errors
+src/sdcppengine.{h,cpp} Engine over sd-cli: arguments, probe, cancel, errors, retry
+src/progress.{h,cpp}    sd-cli output to progress events (pure)
 src/library.{h,cpp}     stored drafts and finals with metadata
 src/keeper.{h,cpp}      finish a draft and install it into the theme folder
 src/Main.qml            the window
@@ -91,27 +92,41 @@ README.md  LICENSE  .gitignore
   the model catalogue. Without a valid palette the palette and mood parts
   are left out. The user's edits to the full prompt win over the builder
   (L4).
-- **Catalogue.** `models.json` lists each supported model: id, display name,
-  publisher, licence id, short licence summary and URL, native sizes, files
-  per quantisation level (role, URL, size, SHA-256), minimum free video
-  memory per level, recommended sampler, steps and guidance, and the
-  `sd-cli` options that model needs (for example `--llm` for a text encoder
-  that is a language model). Adding a model is a catalogue change plus a
-  benchmark row in `models.md`.
+- **Catalogue.** `src/models.json`, compiled in, has two tables. `files`
+  lists every downloadable file once: folder and name under the models
+  directory, size, SHA-256, a URL pinned to the publisher's revision, its
+  licence and its source page; a file several models use (the Qwen3-4B text
+  encoder) is stored once. `models` lists each model: id, display name,
+  publisher, licence id, a one-line licence summary and URL, native draft
+  size, steps, guidance and sampler, and its levels; a level names its
+  minimum free video memory and maps `sd-cli` roles (`diffusion-model`,
+  `llm`, `vae`, `tae`, or `model` for a single-file model) to file keys.
+  The upscaler is a file of its own. `Catalogue::load` rejects an incomplete
+  or inconsistent catalogue. Adding a model is a catalogue change plus a
+  benchmark row in `models.md`. Installed means present at the right size;
+  `limgen doctor --verify` also checks SHA-256.
 - **ModelStore.** Downloads catalogue files with `QNetworkAccessManager` to
   a `.part` file, resumes with HTTP range requests, checks size and SHA-256,
   renames into place. Never downloads without a confirmed request. Reports
   disk space before starting. Gated models are not in the catalogue.
-- **Hardware.** Detects the backend `sd-cli` was built with, the GPU name and
-  video memory: `nvidia-smi --query-gpu=name,memory.total,memory.used
+- **Hardware.** Finds the GPUs and their free video memory:
+  `nvidia-smi --query-gpu=name,memory.total,memory.used
   --format=csv,noheader,nounits` on NVIDIA, `mem_info_vram_total` and
-  `mem_info_vram_used` under `/sys/class/drm/card*/device/` on AMD, shared
-  memory and a low tier on Intel. Chooses the quantisation level and memory
-  options (section 6).
+  `mem_info_vram_used` under `/sys/class/drm/card*/device/` on AMD; Intel
+  GPUs share system memory, so theirs is unknown and not checked. The GPU
+  the engine uses is the one whose name appears in the engine's device
+  description; with a single GPU that is the one. With several GPUs and no
+  match, or an AMD reading under 2 GiB (an APU's carve-out, beside the
+  shared memory it also uses), the memory is unknown and not checked rather
+  than taken from the wrong figure. The backend comes from the engine itself
+  (`sd-cli --list-devices`: `Vulkan0`, `CUDA0`, `CPU`).
 - **Engine / SdCppEngine.** See section 4.
 - **Library.** Stores every draft and final with a JSON sidecar
   (section 8) and a copy of the key fields in the image's own metadata (a
-  PNG text chunk or a JPEG comment).
+  PNG text chunk or a JPEG comment). The image is copied in first and the
+  sidecar written after, so a crash between the two can leave an image
+  without a sidecar; `find()` ignores it, and listing the library (L6) must
+  too.
 - **Keeper.** Finishes a draft (section 5, steps 4 to 6), writes the result
   beside its target in the theme folder, renames it into place, and records
   the action for undo.
@@ -141,17 +156,24 @@ can be added if L0 shows `sd-cli` falls short.
 
 ### Invocation
 
-- Text to image: `sd-cli` with the model files from the catalogue, `-p`,
-  `-n`, `-W`, `-H`, `--steps`, `--cfg-scale`, `--sampling-method`, `-s`
-  (seed), `-b` (batch count, so a batch loads the model once), `-o`.
+- Before a batch, `probe()` runs `--version`, which must name the pinned
+  release, and `--list-devices`, which must list a GPU device.
+- Text to image: `sd-cli` with the level's files (`--diffusion-model`,
+  `--llm`, `--vae`, or `--model`), `--prompt`, `--width`, `--height`,
+  `--steps`, `--cfg-scale`, `--sampling-method`, `--seed`, `--batch-count`
+  (so a batch loads the model once; each draft's seed is one more than the
+  last) and `--output <batch>/draft-%d.png`. `--negative-prompt` only for
+  models that use guidance (cfg above 1). The batch folder is under
+  `~/.cache/limgen/` and is removed once the drafts are in the library.
 - Image to image: adds `-i <source>` (`--init-img`) and `--strength`.
 - Memory options as chosen by Hardware: `--vae-tiling`, `--offload-to-cpu`,
   `--backend te=cpu` (the text encoder on the CPU; `--clip-on-cpu` is
   deprecated at the pinned release), `--flash-attn`. The pinned release also
   has `--auto-fit` (on by default), which places weights on the GPU, in RAM
   or on disk to fit the memory available, and `--max-vram`, a budget that can
-  reserve free memory for other programs. On CUDA, L0 found auto-fit alone
-  ran every model with 5.1 GB free (section 6).
+  reserve free memory for other programs. L0 found auto-fit alone ran every
+  model with 5.1 GB free, so limgen passes no memory option except
+  `--vae-tiling` on the retry after running out of memory (section 6).
 - Live previews: `--preview tae --tae <file> --taesd-preview-only
   --preview-path <cache>/preview-%03d.png --preview-interval 2`.
   - `tae` decodes the latent with a tiny autoencoder, one file of about
@@ -172,8 +194,11 @@ can be added if L0 shows `sd-cli` falls short.
 ### Progress, cancel, errors
 
 - Progress comes from `sd-cli`'s step lines on stdout (`n/total` and
-  seconds per step, redrawn with carriage returns); parsing is a pure
-  function with tests on captured output (`tests/data/`). The time per step
+  seconds per step, redrawn with carriage returns); `ProgressParser`
+  (`progress.cpp`, pure) turns them into step, sampled, decoded, saved and
+  error events, with tests on captured output (`tests/data/`). The same
+  printer counts VAE tiles, so a line is a sampling step only while some
+  draft is still unsampled. The time per step
   feeds the estimates. The first step of a batch is several times slower
   than the rest (6.6 s against 1.1 s for Z-Image Turbo on the reference
   card) because the weights are copied to the GPU then, so estimates count
@@ -190,8 +215,13 @@ can be added if L0 shows `sd-cli` falls short.
   output name and exits 0 (seen in L0 with `--upscale-tile-size 512` on an
   8 GB card). SdCppEngine treats any `[E]` line as a failure and checks
   that every output file exists with the requested size.
-- An out-of-memory exit is retried once with more offload; a second failure
-  is reported with the memory figures.
+- Messages the engine prints for these: running out of memory ("cannot
+  make enough memory available", "out of memory", `cudaMalloc failed`,
+  `ErrorOutOfDeviceMemory`), a missing file ("cannot inspect model
+  source"), an unsupported file ("get sd version from file failed").
+- An out-of-memory exit is retried once with `--vae-tiling`, since decoding
+  every draft at once is the peak of a batch; a second failure is reported
+  with the memory figures and exit 3.
 
 ## 5. Generation pipeline
 
@@ -217,6 +247,13 @@ metadata.
 
 ## 6. Video memory
 
+- Implemented in L2 (this replaces the ladder below, which L0 made
+  unnecessary): the catalogue starts with one level per model, its
+  `minFreeMiB` (5000) sits just under the least free memory L0 ran it with
+  (5,092 MiB), and
+  `limgen generate` refuses with exit 3 below that, naming the figures. The
+  engine's auto-fit places the weights, and an out-of-memory failure is
+  retried once with `--vae-tiling` (section 4).
 - Hardware reads total and free video memory before every batch, because
   other programs may hold some.
 - Each catalogue model lists the minimum free memory for each quantisation
@@ -239,10 +276,10 @@ metadata.
 | Path | Contents |
 |---|---|
 | `~/.config/limgen/config.json` | chosen model, style, colour pass strength, output format (`png` or `jpeg`), JPEG quality |
-| `~/.local/share/limgen/models/<model-id>/` | downloaded model files |
+| `~/.local/share/limgen/models/<folder>/` | downloaded model files, one folder per file group as the catalogue names it (`LIMGEN_MODELS` overrides the whole path) |
 | `~/.local/share/limgen/library/<yyyy-mm>/<id>.{png,jpg}` and `.json` | drafts (always PNG) and finals (the output format) with metadata |
 | `~/.local/state/limgen/bench.json` | measured seconds per step per model, level and backend |
-| `~/.cache/limgen/` | temporary files during a batch |
+| `~/.cache/limgen/batch-<random>/` | a batch's drafts and previews while it runs; removed after |
 | `~/.config/omarchy/backgrounds/<slug>/limgen-*.{png,jpg}` | kept backgrounds (the only Omarchy path written) |
 | `/usr/lib/limgen/sd-cli` | the pinned engine build (section 10) |
 
@@ -293,10 +330,10 @@ the codes below. Hype's `src/cli.cpp` is the pattern.
 | Command | Does |
 |---|---|
 | `limgen palette` | current theme palette, palette words, mood; exit 1 when there is no theme or its `colors.toml` is unreadable |
-| `limgen doctor` | engine version, backend, GPU, memory, models, problems found |
+| `limgen doctor [--verify]` | engine version, backend, GPU, memory, models, problems found; exit 0 when the default model can run, 3 when not; `--verify` checks SHA-256 too |
 | `limgen models [list]` | catalogue with installed state and fit on this machine |
 | `limgen models pull <id> [--level q4_k] [--yes]` | download (asks unless `--yes`) |
-| `limgen generate <subject> [--count 4] [--style ...] [--model ...] [--seed ...] [--from <image>] [--strength 0.5] [--prompt <full>]` | make drafts, print ids and paths |
+| `limgen generate <subject> [--count 4] [--style ...] [--model ...] [--seed ...] [--prompt <full>]` | make drafts, add them to the library, print ids and paths; exit 3 when the model is missing, the engine unusable or memory short, 1 when the engine fails, 130 on Ctrl+C (nothing kept). `--from <image> [--strength 0.5]` arrive with variations in L6 |
 | `limgen keep <id> [--set] [--theme <slug>] [--color-pass 0.3]` | finish and install into the theme folder |
 | `limgen set <file-or-id>` | `omarchy theme bg set` on it (keeps it first if it is a draft) |
 | `limgen library [--theme <slug>]` | list stored images |
@@ -337,14 +374,21 @@ not enough memory, model missing), 130 interrupted.
   building, Lab conversion and colour transfer, `sd-cli` argument building,
   progress parsing (on captured real output), file naming, metadata round
   trip.
-- `bin/fake-sd-cli` stands in for the engine: it prints captured progress
-  lines, writes solid-colour PNGs of the requested size, and can be told to
-  fail with an out-of-memory message or hang (for cancel tests).
+- `bin/fake-sd-cli` stands in for the engine: it answers `--version`,
+  `--help` and `--list-devices` like the pinned release, prints progress in
+  its format, writes solid-colour PNGs of the requested size (a colour per
+  seed), and `FAKE_SD_CLI_MODE` makes it run out of memory (always or
+  until `--vae-tiling`), fail, report an error but exit 0, write the wrong
+  size, hang (for cancel tests), list no GPU or report another release.
+  Model files must exist but are not read, so sparse files of the right
+  size stand in for real ones.
 - Environment overrides point every Omarchy and XDG path at temp folders:
   `LIMGEN_OMARCHY_STATE` (instead of `~/.local/state/omarchy/current`),
   `LIMGEN_OMARCHY_BACKGROUNDS` (instead of `~/.config/omarchy/backgrounds`),
   `LIMGEN_OMARCHY_BIN` (a fake `omarchy` that logs its arguments),
-  `LIMGEN_HYPRCTL`, `LIMGEN_SD_CLI` and the XDG variables (the Omarchy
+  `LIMGEN_HYPRCTL`, `LIMGEN_SD_CLI`, `LIMGEN_MODELS`, `LIMGEN_NVIDIA_SMI`
+  (a fake `nvidia-smi`), `LIMGEN_DRM_ROOT` (instead of `/sys/class/drm`)
+  and the XDG variables (the Omarchy
   language file is read from `$XDG_CONFIG_HOME/omarchy/language`). Tests
   never read or write the real theme folders.
 - Window checks: the offscreen QML harness from the Omarchy app conventions,

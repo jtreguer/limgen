@@ -174,7 +174,8 @@ hardest (16 to 21) and was closest on dark green and light (11 to 16).
 FLUX.2 klein was closest overall, by about 2 points over Z-Image Turbo; SDXL
 was furthest. The quantisation level made no difference to it.
 
-Busy card, with `bench/hold-vram.cu` holding 1.5 GiB more, so about 5.1 GB
+Busy card, with `bench/hold-vram.cu` holding 1.5 GiB more, so 5,092 to
+5,202 MiB (about 5.1 GB)
 free (industrial subject, four palettes):
 
 | Model | s / image | Slower by | Peak card memory |

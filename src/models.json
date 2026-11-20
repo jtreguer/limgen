@@ -1,0 +1,141 @@
+{
+  "_comment": "limgen's model catalogue (docs/technical.md section 3, docs/models.md). A model is added only with its licence recorded here and a benchmark row in docs/models.md; gated models stay out. Files live in <models>/<folder>/<name>; a file used by several models (the Qwen3-4B text encoder) is stored once.",
+  "engine": "master-1106-532d2c1",
+  "files": {
+    "z-image-turbo-q4_k": {
+      "folder": "z-image-turbo",
+      "name": "z_image_turbo-Q4_K.gguf",
+      "bytes": 3864250304,
+      "sha256": "14b375ab4f226bc5378f68f37e899ef3c2242b8541e61e2bc1aff40976086fbd",
+      "url": "https://huggingface.co/leejet/Z-Image-Turbo-GGUF/resolve/c61c0e422dc8b541b7548cf33a4ef8302b0f8085/z_image_turbo-Q4_K.gguf",
+      "licence": "Apache-2.0",
+      "source": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo"
+    },
+    "flux1-vae": {
+      "folder": "z-image-turbo",
+      "name": "ae.safetensors",
+      "bytes": 335304388,
+      "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+      "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/6fc90a3b1b653e935a0d175e260736de25b84df5/split_files/vae/ae.safetensors",
+      "licence": "Apache-2.0",
+      "source": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo"
+    },
+    "taef1": {
+      "folder": "z-image-turbo",
+      "name": "taef1.safetensors",
+      "bytes": 9848636,
+      "sha256": "47a6c2bff850da04b267cab70fe3553fef57255eb9a8e76852baa0a87850e54d",
+      "url": "https://huggingface.co/madebyollin/taef1/resolve/b1b2d00e9e440cfbf3dedb34266864da86016ceb/diffusion_pytorch_model.safetensors",
+      "licence": "MIT",
+      "source": "https://huggingface.co/madebyollin/taef1"
+    },
+    "qwen3-4b-q4_k_m": {
+      "folder": "qwen3-4b",
+      "name": "Qwen3-4B-Q4_K_M.gguf",
+      "bytes": 2497281312,
+      "sha256": "f6f851777709861056efcdad3af01da38b31223a3ba26e61a4f8bf3a2195813a",
+      "url": "https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/22c9fc8a8c7700b76a1789366280a6a5a1ad1120/Qwen3-4B-Q4_K_M.gguf",
+      "licence": "Apache-2.0",
+      "source": "https://huggingface.co/Qwen/Qwen3-4B"
+    },
+    "flux2-klein-4b-q4_0": {
+      "folder": "flux2-klein-4b",
+      "name": "flux-2-klein-4b-Q4_0.gguf",
+      "bytes": 2460378560,
+      "sha256": "d1023499ef3f2f82ff7c50e6778495195c1b6cc34835741778868428111f9ff4",
+      "url": "https://huggingface.co/leejet/FLUX.2-klein-4B-GGUF/resolve/3b1f5a9dc3abb32238b053aeb3d823c30afdacbd/flux-2-klein-4b-Q4_0.gguf",
+      "licence": "Apache-2.0",
+      "source": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B"
+    },
+    "flux2-vae": {
+      "folder": "flux2-klein-4b",
+      "name": "flux2-vae.safetensors",
+      "bytes": 336211292,
+      "sha256": "868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3",
+      "url": "https://huggingface.co/Comfy-Org/flux2-klein-4B/resolve/5b3abca5c0dc1ecd4eaf3340868d09063fc1c965/split_files/vae/flux2-vae.safetensors",
+      "licence": "Apache-2.0",
+      "source": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B"
+    },
+    "taef2": {
+      "folder": "flux2-klein-4b",
+      "name": "taef2.safetensors",
+      "bytes": 10723524,
+      "sha256": "701d31c0ecbef3b609fe236e2e3a65ffb17f3a94237acdd771e8ea3194df557a",
+      "url": "https://huggingface.co/madebyollin/taef2/resolve/bd244ebfe4398c84fbf312a2f1c868c676b500e3/taef2.safetensors",
+      "licence": "MIT",
+      "source": "https://huggingface.co/madebyollin/taef2"
+    },
+    "realesrgan-x4plus": {
+      "folder": "realesrgan-x4plus",
+      "name": "RealESRGAN_x4plus.pth",
+      "bytes": 67040989,
+      "sha256": "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1",
+      "url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+      "licence": "BSD-3-Clause",
+      "source": "https://github.com/xinntao/Real-ESRGAN"
+    }
+  },
+  "models": [
+    {
+      "id": "z-image-turbo",
+      "name": "Z-Image Turbo",
+      "publisher": "Tongyi-MAI",
+      "default": true,
+      "licence": {
+        "id": "Apache-2.0",
+        "summary": "Free to use, change and share, including commercially; keep the licence notice.",
+        "url": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo"
+      },
+      "native": [
+        1344,
+        768
+      ],
+      "steps": 8,
+      "cfg": 1.0,
+      "sampler": "euler",
+      "levels": [
+        {
+          "id": "q4_k",
+          "minFreeMiB": 5000,
+          "files": {
+            "diffusion-model": "z-image-turbo-q4_k",
+            "llm": "qwen3-4b-q4_k_m",
+            "vae": "flux1-vae",
+            "tae": "taef1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "flux2-klein-4b",
+      "name": "FLUX.2 klein 4B",
+      "publisher": "Black Forest Labs",
+      "default": false,
+      "licence": {
+        "id": "Apache-2.0",
+        "summary": "Free to use, change and share, including commercially; keep the licence notice.",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B"
+      },
+      "native": [
+        1344,
+        768
+      ],
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler": "euler",
+      "levels": [
+        {
+          "id": "q4_0",
+          "minFreeMiB": 5000,
+          "files": {
+            "diffusion-model": "flux2-klein-4b-q4_0",
+            "llm": "qwen3-4b-q4_k_m",
+            "vae": "flux2-vae",
+            "tae": "taef2"
+          }
+        }
+      ]
+    }
+  ],
+  "upscaler": "realesrgan-x4plus"
+}

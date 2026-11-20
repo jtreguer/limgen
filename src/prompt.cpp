@@ -17,7 +17,7 @@ struct Preset {
 // The cinematic words are the ones the L0 benchmark used, so its results
 // (docs/models.md section 6) describe what the default style produces.
 const Preset presets[] = {
-    {Style::Photo, "photo", "photograph, wide angle", "natural light, sharp focus, highly detailed",
+    {Style::Photo, "photo", "photograph, wide angle", "realistic lighting, sharp focus, highly detailed",
      "painting, illustration, drawing"},
     {Style::Cinematic, "cinematic", "cinematic wide shot", "atmospheric, highly detailed", ""},
     {Style::Painting, "painting", "oil painting, wide landscape format",

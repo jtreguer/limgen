@@ -5,7 +5,7 @@ Omarchy theme with an image model that runs on the user's own machine. This
 document says what it does and why. `technical.md` says how, and
 `models.md` records which models it runs and why they were chosen.
 
-Status: milestones L0 (engine spike) and L1 (skeleton) done, L2 next.
+Status: milestones L0 (engine spike), L1 (skeleton) and L2 (engine) done, L3 next.
 
 ## 1. Purpose
 
@@ -162,8 +162,8 @@ keeping one asks which theme to add it to if the theme changed.
 
 ### 7.5 From scripts and agents
 
-`limgen generate "oil rig at dusk" --count 4 --keep-best none --json` makes
-drafts and prints their paths and metadata. `limgen keep <id>` finishes and
+`limgen generate "oil rig at dusk" --count 4 --json` makes drafts, adds
+them to the library and prints their ids and paths. `limgen keep <id>` finishes and
 installs one. `limgen palette --json` prints the current palette and the
 words it becomes. Section 9 of `technical.md` lists every command.
 

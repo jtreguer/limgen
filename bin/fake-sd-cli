@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""Stands in for sd-cli, for tests and for working on limgen without a GPU
+(docs/technical.md section 11):
+
+    LIMGEN_SD_CLI=bin/fake-sd-cli build/limgen generate "oil rig at dusk"
+
+It answers --version, --help and --list-devices like the pinned release,
+prints progress in sd-cli's format (carriage-return redraws and all), and
+writes solid-colour PNGs of the requested size, a colour per seed. Model
+files must exist, as for the real engine, but their contents are not read.
+
+FAKE_SD_CLI_MODE makes it misbehave the way the real engine can:
+  oom          runs out of video memory (exit 1)
+  oom-once     runs out of memory unless --vae-tiling is given
+  fail         reports an error (exit 1)
+  error-exit0  reports an error but exits 0 (the pinned release does this)
+  wrong-size   writes 64x64 images
+  hang         stops after the first step until it is killed
+  no-gpu       lists only a CPU device
+  old-version  reports another release
+FAKE_SD_CLI_LOG appends each call's arguments, one JSON list per line.
+FAKE_SD_CLI_STEP_SECONDS sets the pause per step (default 0.01).
+"""
+import json
+import os
+import signal
+import struct
+import sys
+import time
+import zlib
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODE = os.environ.get("FAKE_SD_CLI_MODE", "")
+STEP_SECONDS = float(os.environ.get("FAKE_SD_CLI_STEP_SECONDS", "0.01"))
+
+
+def png(path, width, height, rgb):
+    """Writes a solid-colour PNG without any library."""
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+    row = b"\x00" + bytes(rgb) * width
+    data = zlib.compress(row * height, 1)
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    with open(path, "wb") as out:
+        out.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", data) + chunk(b"IEND", b""))
+
+
+def say(text, end="\n"):
+    sys.stdout.write(text + end)
+    sys.stdout.flush()
+
+
+def option(args, *names, default=None):
+    for i, arg in enumerate(args):
+        if arg in names and i + 1 < len(args):
+            return args[i + 1]
+    return default
+
+
+def main(args):
+    log = os.environ.get("FAKE_SD_CLI_LOG")
+    if log:
+        with open(log, "a") as out:
+            out.write(json.dumps(args) + "\n")
+
+    if "--version" in args:
+        release = "master-1000-0000000, commit 0000000" if MODE == "old-version" else "master-1106-532d2c1, commit 532d2c1"
+        say(f"stable-diffusion.cpp version {release}")
+        return 0
+    if "--help" in args or "-h" in args:
+        with open(os.path.join(ROOT, "tests", "data", "sd-cli-help.txt")) as help_text:
+            sys.stdout.write(help_text.read())
+        return 0
+    if "--list-devices" in args:
+        if MODE != "no-gpu":
+            say("Vulkan0\tFake GPU")
+        say("CPU\tFake CPU")
+        return 0
+
+    for role in ("--model", "--diffusion-model", "--llm", "--vae", "--tae"):
+        path = option(args, role)
+        if path is not None and not os.path.isfile(path):
+            say(f"[E] cannot inspect model source '{path}': No such file or directory --- model_loader_files.cpp:25")
+            return 1
+
+    width = int(option(args, "--width", "-W", default="512"))
+    height = int(option(args, "--height", "-H", default="512"))
+    steps = int(option(args, "--steps", default="20"))
+    seed = int(option(args, "--seed", "-s", default="42"))
+    count = int(option(args, "--batch-count", "-b", default="1"))
+    output = option(args, "--output", "-o", default="output.png")
+    preview_path = option(args, "--preview-path") if option(args, "--preview") not in (None, "none") else None
+    interval = int(option(args, "--preview-interval", default="1"))
+    if MODE == "wrong-size":
+        width = height = 64
+
+    if MODE == "oom" or (MODE == "oom-once" and "--vae-tiling" not in args):
+        say("[W] model manager memory on Vulkan0: reported free 2048.00 MB --- model_manager.cpp:1")
+        say("[E] execution engine cannot make enough memory available on Vulkan0 --- execution_engine.cpp:595")
+        return 1
+    if MODE == "fail":
+        say("[E] fake engine failure --- fake.cpp:1")
+        return 1
+
+    say("[I] loading tensors completed, taking 0.01s (read: 0.01s) --- model_loader.cpp:1437")
+    previews = 0
+    for image in range(count):
+        for step in range(1, steps + 1):
+            done = 50 * step // steps
+            bar = "|" + "=" * done + (">" if done < 50 else "") + " " * (49 - done) + "|"
+            say(f"\r  {bar} {step}/{steps} - {STEP_SECONDS:.2f}s/it\x1b[K", end="\n" if step == steps else "")
+            if preview_path and step % interval == 0:
+                path = preview_path.replace("%03d", f"{previews:03d}")
+                png(path, max(1, width // 8), max(1, height // 8), (40 * image % 256, 80, 120))
+                previews += 1
+            if MODE == "hang":
+                while True:
+                    time.sleep(1)
+            time.sleep(STEP_SECONDS)
+        say(f"[I] sampling completed, taking {steps * STEP_SECONDS:.2f}s --- image.cpp:1038")
+    for image in range(count):
+        say(f"[I] latent {image + 1} decoded, taking 0.01s --- image.cpp:755")
+    for image in range(count):
+        path = output.replace("%d", str(image)) if "%d" in output else output
+        value = (seed + image) * 2654435761 % 2**24
+        png(path, width, height, (value >> 16, (value >> 8) & 255, value & 255))
+        say(f"[I] save result image {image} to '{path}' (success) --- main.cpp:501")
+    say(f"[I] {count}/{count} images saved --- main.cpp:534")
+    if MODE == "error-exit0":
+        say("[E] fake error after saving --- fake.cpp:1")
+    return 0
+
+
+if __name__ == "__main__":
+    # Like sd-cli, die at once on Ctrl+C rather than unwind through Python's
+    # KeyboardInterrupt, so tests see the engine end the way the real one does.
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    sys.exit(main(sys.argv[1:]))

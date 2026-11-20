@@ -4,5 +4,6 @@
         <file alias="PaletteBar.qml">PaletteBar.qml</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
         <file alias="i18n/en.json">i18n/en.json</file>
+        <file alias="models.json">models.json</file>
     </qresource>
 </RCC>
