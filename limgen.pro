@@ -6,8 +6,10 @@ TEMPLATE = app
 
 HEADERS += \
     src/backend.h \
+    src/batch.h \
     src/catalogue.h \
     src/cli.h \
+    src/config.h \
     src/engine.h \
     src/hardware.h \
     src/library.h \
@@ -17,14 +19,17 @@ HEADERS += \
     src/progress.h \
     src/prompt.h \
     src/sdcppengine.h \
+    src/timings.h \
     src/theme.h \
     src/translator.h
 
 SOURCES += \
     src/main.cpp \
     src/backend.cpp \
+    src/batch.cpp \
     src/catalogue.cpp \
     src/cli.cpp \
+    src/config.cpp \
     src/hardware.cpp \
     src/library.cpp \
     src/modelstore.cpp \
@@ -33,6 +38,7 @@ SOURCES += \
     src/progress.cpp \
     src/prompt.cpp \
     src/sdcppengine.cpp \
+    src/timings.cpp \
     src/theme.cpp \
     src/translator.cpp
 

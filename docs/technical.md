@@ -3,7 +3,7 @@
 How limgen is built. Read `design.md` first for what it does and why. Model
 choices and benchmarks live in `models.md`.
 
-Status: milestones L0 to L3 done, L4 next. Section 12 lists the
+Status: milestones L0 to L4 done, L5 next. Section 12 lists the
 milestones.
 
 ## 1. Stack
@@ -29,7 +29,10 @@ bin/build-engine        builds sd-cli at the pinned release into build/engine/ (
 bin/fake-sd-cli         test stand-in for sd-cli (section 11)
 src/main.cpp            app setup; `limgen open` starts the window
 src/cli.{h,cpp}         every headless command (section 9)
-src/backend.{h,cpp}     window state for QML: batch, selection, status
+src/backend.{h,cpp}     window state for QML: theme, engine, model and download, prompt, batch, estimate
+src/batch.{h,cpp}       one batch from the checks to the library, shared by the window and `limgen generate`
+src/config.{h,cpp}      config.json: the chosen model and style
+src/timings.{h,cpp}     bench.json: measured timings, for estimates
 src/theme.{h,cpp}       accent and corner rounding, from the Omarchy template
 src/translator.{h,cpp}  Omarchy language, from the Omarchy template
 src/omarchy.{h,cpp}     theme name, colors.toml, background folders, bg set, monitors
@@ -45,7 +48,7 @@ src/progress.{h,cpp}    sd-cli output to progress events (pure)
 src/library.{h,cpp}     stored drafts and finals with metadata
 src/keeper.{h,cpp}      finish a draft and install it into the theme folder
 src/Main.qml            the window
-src/*.qml               a few components (DraftGrid, PaletteBar, ...)
+src/*.qml               PaletteBar, DraftGrid, DraftTile, PromptBar, SetupPanel, ModelPicker, FullView, HelpOverlay
 src/models.json         the model catalogue, compiled in
 src/skill.md            the agent skill installed by `limgen skill install`
 src/i18n/<code>.json    translations
@@ -145,8 +148,27 @@ README.md  LICENSE  .gitignore
 - **Keeper.** Finishes a draft (section 5, steps 4 to 6), writes the result
   beside its target in the theme folder, renames it into place, and records
   the action for undo.
-- **Backend.** The QObject QML talks to: current batch, selection, progress,
-  status text, estimates. Holds no file logic of its own.
+- **Batch.** One batch from the checks to the library, used by the window
+  and by `limgen generate` alike: checks the model is installed, the engine
+  probe is good and free video memory is enough; reads the theme once (a
+  theme switch mid-batch does not change it); builds the request; runs the
+  engine; files the drafts with their sidecars; removes the batch folder;
+  and records its timings, unless the engine retried after running out of
+  memory (the clock then covers both attempts). With previews (the window)
+  it needs the level's tiny decoder too.
+- **Config** and **Timings.** `config.json` (the chosen model and style) and
+  `bench.json` (section 7), both written beside the file and renamed.
+- **Backend.** The QObject QML talks to. It probes the engine and the GPU in
+  a worker thread at start, so the window opens at once; tracks the chosen
+  model and whether it is installed, with its licence, download size, free
+  disk space and the download's progress (pause keeps the `.part` files;
+  the same lock as `limgen models pull`); holds the subject, style and full
+  prompt (built live from the theme until the user edits it, then kept as
+  typed until Reset); runs one batch at a time (four drafts, with previews)
+  and exposes each draft's state, step, preview and result; and turns
+  timings into estimates ("About 50 s for 4 drafts", "About 20 s left").
+  Holds no file logic of its own. The selection, full view and overlays are
+  QML state.
 
 ## 4. Engine
 
@@ -290,11 +312,11 @@ metadata.
 
 | Path | Contents |
 |---|---|
-| `~/.config/limgen/config.json` | chosen model, style, colour pass strength, output format (`png` or `jpeg`), JPEG quality |
+| `~/.config/limgen/config.json` | the model and style chosen in the window (from L4); colour pass strength, output format (`png` or `jpeg`) and JPEG quality from L5. `limgen generate` takes `--model` and `--style` instead |
 | `~/.local/share/limgen/models/<folder>/` | downloaded model files, one folder per file group as the catalogue names it (`LIMGEN_MODELS` overrides the whole path); `<file>.part` while downloading, kept when paused |
 | `~/.local/share/limgen/models/.download.lock` | held while a download runs, so two limgen processes never write the same file |
 | `~/.local/share/limgen/library/<yyyy-mm>/<id>.{png,jpg}` and `.json` | drafts (always PNG) and finals (the output format) with metadata |
-| `~/.local/state/limgen/bench.json` | measured seconds per step per model, level and backend |
+| `~/.local/state/limgen/bench.json` | per model, level and backend: seconds per step, the overhead of a batch (start, loading, prompt encoding, the slow first step) and decoding seconds per draft; each batch is blended in half and half, except a batch retried after running out of memory |
 | `~/.cache/limgen/batch-<random>/` | a batch's drafts and previews while it runs; removed after |
 | `~/.config/omarchy/backgrounds/<slug>/limgen-*.{png,jpg}` | kept backgrounds (the only Omarchy path written) |
 | `/usr/lib/limgen/sd-cli` | the pinned engine build (section 10) |

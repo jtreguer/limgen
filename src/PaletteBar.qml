@@ -3,17 +3,20 @@ import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
 
-// The top bar: the theme's name and its palette as swatches. Hovering a
-// swatch shows the words the colour becomes in prompts.
+// The top bar: the theme's name and its palette as swatches on the left,
+// the model and the GPU in use on the right. Hovering a swatch shows the
+// words the colour becomes in prompts.
 Rectangle {
     id: bar
     implicitHeight: 64
     color: "#16161a"
 
+    signal modelClicked()
+
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: 20
-        anchors.rightMargin: 20
+        anchors.rightMargin: 12
         spacing: 16
 
         Label {
@@ -21,7 +24,7 @@ Rectangle {
             font.pixelSize: 18
             font.bold: true
             elide: Text.ElideRight
-            Layout.maximumWidth: bar.width / 3
+            Layout.maximumWidth: bar.width / 4
         }
 
         Row {
@@ -48,6 +51,25 @@ Rectangle {
         }
 
         Item { Layout.fillWidth: true }
+
+        Button {
+            flat: true
+            text: backend.modelName
+            visible: backend.modelName.length > 0
+            enabled: !backend.busy
+            focusPolicy: Qt.NoFocus
+            onClicked: bar.modelClicked()
+            ToolTip.visible: hovered
+            ToolTip.delay: 500
+            ToolTip.text: qsTr("Choose the model (M)")
+        }
+
+        Label {
+            text: backend.gpuText
+            color: "#9a9aa0"
+            elide: Text.ElideRight
+            Layout.maximumWidth: bar.width / 4
+        }
 
         Label {
             text: qsTr("? for shortcuts")

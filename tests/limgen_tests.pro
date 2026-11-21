@@ -1,6 +1,6 @@
 # Qt Test suite for limgen. The sources under test are compiled straight in,
 # so the tests see the same code as the app without linking the app itself.
-QT += core gui qml testlib network concurrent
+QT += core gui qml quick quickcontrols2 testlib network concurrent
 
 CONFIG += c++17 testcase console
 CONFIG -= app_bundle
@@ -17,6 +17,9 @@ RESOURCES += ../src/resources.qrc
 
 HEADERS += \
     ../src/backend.h \
+    ../src/batch.h \
+    ../src/config.h \
+    ../src/timings.h \
     ../src/catalogue.h \
     ../src/cli.h \
     ../src/engine.h \
@@ -37,6 +40,9 @@ HEADERS += \
 SOURCES += \
     limgen_tests.cpp \
     ../src/backend.cpp \
+    ../src/batch.cpp \
+    ../src/config.cpp \
+    ../src/timings.cpp \
     ../src/catalogue.cpp \
     ../src/cli.cpp \
     ../src/hardware.cpp \

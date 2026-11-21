@@ -5,10 +5,10 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: win
-    width: 1100
-    height: 720
-    minimumWidth: 720
-    minimumHeight: 480
+    width: 1200
+    height: 820
+    minimumWidth: 820
+    minimumHeight: 580
     visible: true
     title: "Limgen"
     color: "#0e0e10"
@@ -18,13 +18,101 @@ ApplicationWindow {
     Material.roundedScale: theme.radius
 
     property bool helpVisible: false
+    property bool fullView: false
+    property bool promptVisible: false
+    property int selected: 0
+    property bool quitting: false
+    // Single-letter shortcuts are off while the user types, or a dialog is
+    // up. Under the help only ? and Q act, so nothing changes out of sight.
+    readonly property bool typing: promptBar.typing
+    readonly property bool dialogOpen: modelPicker.opened || quitDialog.opened
+    readonly property bool keysFree: !typing && !dialogOpen
+    readonly property bool actionKeysFree: keysFree && !helpVisible
+    readonly property var selectedDraft: backend.drafts.length > selected ? backend.drafts[selected] : null
+    readonly property bool setupNeeded: !backend.engineReady || !backend.modelInstalled
 
-    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: win.helpVisible = !win.helpVisible }
-    Shortcut { sequence: "Esc"; context: Qt.ApplicationShortcut; enabled: win.helpVisible; onActivated: win.helpVisible = false }
-    // Nothing can be lost yet, so Q quits at once. Once batches and keeps
-    // exist it asks first, and once the subject field arrives (L4) a bare Q
-    // must not fire while the user is typing in it.
-    Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
+    // The drafts sit in a 2x2 grid: left and right move along a row, up and
+    // down between the rows.
+    function move(dx, dy) {
+        const count = backend.drafts.length
+        if (count === 0)
+            return
+        const column = selected % 2 + dx
+        const row = Math.floor(selected / 2) + dy
+        if (column < 0 || column > 1 || row < 0)
+            return
+        const next = row * 2 + column
+        if (next < count)
+            selected = next
+    }
+
+    function requestQuit() {
+        if (backend.busy) {
+            quitDialog.open()
+            return
+        }
+        quitting = true
+        Qt.quit()
+    }
+
+    function leaveFields() { grid.forceActiveFocus() }
+
+    onClosing: (close) => {
+        if (backend.busy && !quitting) {
+            close.accepted = false
+            quitDialog.open()
+        }
+    }
+
+    // A new batch starts with its first draft selected and the grid shown.
+    // This handler runs only when the value changes, not on every change of
+    // the backend's state, such as a letter typed during the batch.
+    readonly property bool batchRunning: backend.running
+    onBatchRunningChanged: {
+        if (batchRunning) {
+            fullView = false
+            selected = 0
+        }
+    }
+
+    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; enabled: win.keysFree; onActivated: win.helpVisible = !win.helpVisible }
+    Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: win.keysFree; onActivated: win.requestQuit() }
+    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.generate() }
+    Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.rerun() }
+    Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: win.promptVisible = !win.promptVisible }
+    Shortcut { sequence: "M"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !backend.busy; onActivated: modelPicker.open() }
+    Shortcut {
+        sequence: "F"
+        context: Qt.ApplicationShortcut
+        enabled: win.actionKeysFree
+        onActivated: {
+            if (win.fullView)
+                win.fullView = false
+            else if (win.selectedDraft && win.selectedDraft.state === "done")
+                win.fullView = true
+        }
+    }
+    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(-1, 0) }
+    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(1, 0) }
+    Shortcut { sequence: "Up"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(0, -1) }
+    Shortcut { sequence: "Down"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(0, 1) }
+    // Esc closes what is open, leaves a text field, or cancels the batch,
+    // in that order. Dialogs handle their own Esc.
+    Shortcut {
+        sequence: "Esc"
+        context: Qt.ApplicationShortcut
+        enabled: !win.dialogOpen
+        onActivated: {
+            if (win.helpVisible)
+                win.helpVisible = false
+            else if (win.fullView)
+                win.fullView = false
+            else if (win.typing)
+                win.leaveFields()
+            else if (backend.running)
+                backend.cancel()
+        }
+    }
 
     // Right-to-left languages mirror the window; the Translator sets the
     // application's layout direction.
@@ -39,62 +127,118 @@ ApplicationWindow {
 
             PaletteBar {
                 Layout.fillWidth: true
-            }
-
-            // What prompts for this theme will be built from, until the
-            // batch grid takes this space.
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.margins: 32
-                spacing: 12
-                visible: backend.paletteWords.length > 0
-
-                Item { Layout.fillHeight: true }
-                Label {
-                    Layout.fillWidth: true
-                    horizontalAlignment: Text.AlignHCenter
-                    text: qsTr("Prompts for this theme use")
-                    color: "#9a9aa0"
-                    font.pixelSize: 15
-                }
-                Label {
-                    Layout.fillWidth: true
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.Wrap
-                    // Model input, so it stays in English in every language.
-                    text: backend.paletteWords
-                    font.pixelSize: 22
-                }
-                Label {
-                    Layout.fillWidth: true
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.Wrap
-                    text: backend.mood
-                    color: "#9a9aa0"
-                    font.pixelSize: 16
-                }
-                Item { Layout.fillHeight: true }
+                onModelClicked: if (!backend.busy) modelPicker.open()
             }
 
             Item {
+                Layout.fillWidth: true
                 Layout.fillHeight: true
-                visible: backend.paletteWords.length === 0
+
+                SetupPanel {
+                    anchors.fill: parent
+                    visible: win.setupNeeded
+                    onChooseModel: modelPicker.open()
+                }
+
+                DraftGrid {
+                    id: grid
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    visible: !win.setupNeeded
+                    focus: true
+                    selected: win.selected
+                    onSelect: (index) => win.selected = index
+                    onOpen: (index) => {
+                        win.selected = index
+                        if (backend.drafts[index].state === "done")
+                            win.fullView = true
+                    }
+                }
             }
 
-            Label {
+            PromptBar {
+                id: promptBar
                 Layout.fillWidth: true
-                Layout.margins: 12
-                visible: text.length > 0
-                text: backend.status
-                wrapMode: Text.Wrap
-                color: "#ffb4a9"
+                promptVisible: win.promptVisible
+                onSubmitted: {
+                    win.leaveFields()
+                    backend.generate()
+                }
             }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: 16
+                Layout.rightMargin: 16
+                Layout.topMargin: 6
+                Layout.bottomMargin: 8
+                spacing: 16
+
+                Label {
+                    Layout.fillWidth: true
+                    text: backend.status
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 3
+                    elide: Text.ElideRight
+                    color: backend.statusIsError ? "#ffb4a9" : "#9a9aa0"
+                }
+                Label {
+                    text: backend.estimate
+                    color: "#9a9aa0"
+                }
+            }
+        }
+
+        FullView {
+            anchors.fill: parent
+            visible: win.fullView && win.selectedDraft !== null && win.selectedDraft.state === "done"
+            draft: win.selectedDraft
+            onClosed: win.fullView = false
         }
 
         HelpOverlay {
             anchors.fill: parent
             visible: win.helpVisible
+        }
+    }
+
+    ModelPicker {
+        id: modelPicker
+        anchors.centerIn: Overlay.overlay
+    }
+
+    Dialog {
+        id: quitDialog
+        anchors.centerIn: Overlay.overlay
+        modal: true
+        title: qsTr("Quit limgen?")
+        width: Math.min(win.width - 64, 460)
+        Overlay.modal: Rectangle { color: "#a0000000" }
+
+        Label {
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: backend.running
+                  ? qsTr("A batch is running. Quitting stops it, and its drafts are not kept.")
+                  : qsTr("A download is running. Quitting pauses it; it resumes where it stopped next time.")
+        }
+
+        footer: DialogButtonBox {
+            Button {
+                text: qsTr("Keep working")
+                flat: true
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+            Button {
+                text: qsTr("Quit")
+                highlighted: true
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            }
+        }
+        onAccepted: {
+            backend.stopAll()
+            win.quitting = true
+            Qt.quit()
         }
     }
 }

@@ -1,5 +1,6 @@
 #include "cli.h"
 
+#include "batch.h"
 #include "catalogue.h"
 #include "hardware.h"
 #include "library.h"
@@ -305,166 +306,81 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
     const Catalogue catalogue = Catalogue::fromEnvironment(&catalogueError);
     if (!catalogue.isValid())
         return fail(catalogueError);
-    const CatalogueModel *model = command.parser.isSet("model") ? catalogue.model(command.parser.value("model"))
-                                                                : catalogue.defaultModel();
-    if (!model) {
+    if (command.parser.isSet("model") && !catalogue.model(command.parser.value("model"))) {
         QStringList ids;
         for (const auto &m : catalogue.models())
             ids << m.id;
         return fail(tr("--model takes one of: %1.").arg(ids.join(", ")), Usage);
     }
-    const ModelLevel &level = model->levels.first();
-    const QString modelsDirectory = Catalogue::defaultModelsDirectory();
-    // Commands draw no previews, so the preview decoder is not required.
-    const QStringList missing = catalogue.missingFiles(level, modelsDirectory, false, {"tae"});
-    if (!missing.isEmpty()) {
-        QStringList names;
-        for (const QString &key : missing)
-            names << describe(*catalogue.file(key));
-        return fail(tr("%1 is not installed. Missing in %2: %3. Run limgen models pull %4.")
-                        .arg(model->name, modelsDirectory, names.join(", "), model->id),
-                    NotRunnable);
-    }
 
-    SdCppEngine engine;
-    const EngineProbe probe = engine.probe();
-    if (probe.error.kind != EngineError::None)
-        return fail(probe.error.message, NotRunnable);
-    const Gpu gpu = Hardware::matching(Hardware::detect(), probe.gpu().description);
-    if (gpu.freeMiB >= 0 && gpu.freeMiB < level.minFreeMiB)
-        return fail(tr("%1 needs %2 MiB of free video memory; %3. Close programs that use the GPU and try again.")
-                        .arg(model->name).arg(level.minFreeMiB).arg(memoryText(gpu)),
-                    NotRunnable);
+    BatchSettings settings;
+    settings.modelId = command.parser.value("model");
+    settings.subject = subject;
+    settings.style = style;
+    settings.fullPrompt = fullPrompt;
+    settings.count = count;
+    settings.seed = seed;
+    Batch batch(catalogue, paths);
+    QString message;
+    const Batch::Outcome prepared = batch.prepare(settings, SdCppEngine().probe(), &message);
+    if (prepared != Batch::Outcome::Ok)
+        return fail(message, prepared == Batch::Outcome::UnknownModel ? Usage : NotRunnable);
 
-    // The theme is read once: a theme switch during the batch does not
-    // change what the batch was made for.
-    const Omarchy omarchy(paths);
-    const QString themeSlug = omarchy.slug();
-    Palette palette;
-    palette.error = tr("No Omarchy theme");
-    if (!themeSlug.isEmpty()) {
-        QString error;
-        const QString text = omarchy.readColors(&error);
-        if (error.isEmpty())
-            palette = Palette::fromToml(text);
-    }
-    Prompt::Text text = Prompt::build(subject, palette, style);
-    if (!fullPrompt.isEmpty())
-        text.positive = fullPrompt;
-
-    const QString cache = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/limgen";
-    EngineRequest request;
-    for (auto it = level.files.begin(); it != level.files.end(); ++it)
-        if (it.key() != "tae")
-            request.files.insert(it.key(), Catalogue::path(*catalogue.file(it.value()), modelsDirectory));
-    request.prompt = text.positive;
-    request.negative = text.negative;
-    request.width = model->width;
-    request.height = model->height;
-    request.steps = model->steps;
-    request.cfg = model->cfg;
-    request.sampler = model->sampler;
-    request.seed = seed;
-    request.count = count;
-    request.outputDirectory = QString("%1/batch-%2").arg(cache).arg(QRandomGenerator::global()->generate(), 8, 16,
-                                                                    QChar('0'));
-
-    QStringList drafts;
-    EngineError error;
+    QList<LibraryEntry> entries;
+    Batch::Outcome outcome = Batch::Outcome::Ok;
     QEventLoop loop;
-    QObject::connect(&engine, &Engine::sampled, &loop, [&](int image) {
+    QObject::connect(&batch, &Batch::sampled, &loop, [&](int image) {
         if (!command.json())
             print(stderr, tr("Draft %1 of %2 sampled").arg(image + 1).arg(count));
     });
-    QObject::connect(&engine, &Engine::finished, &loop, [&](const QStringList &paths) {
-        drafts = paths;
+    QObject::connect(&batch, &Batch::finished, &loop, [&](const QList<LibraryEntry> &filed) {
+        entries = filed;
         loop.quit();
     });
-    QObject::connect(&engine, &Engine::failed, &loop, [&](const EngineError &e) {
-        error = e;
+    QObject::connect(&batch, &Batch::failed, &loop, [&](Batch::Outcome failure, const QString &text) {
+        outcome = failure;
+        message = text;
         loop.quit();
     });
     QTimer watch;
-    QObject::connect(&watch, &QTimer::timeout, &engine, [&] {
+    QObject::connect(&watch, &QTimer::timeout, &batch, [&] {
         if (interrupted)
-            engine.cancel();
+            batch.cancel();
     });
     // The handlers stay until generate returns, so a Ctrl+C while drafts are
     // copied into the library cannot leave a half-copied file or the cache
     // folder behind.
     const InterruptHandlers handlers;
     watch.start(100);
-    engine.start(request);
+    batch.start();
     loop.exec();
     watch.stop();
 
-    auto cleanUp = [&] { QDir(request.outputDirectory).removeRecursively(); };
     // Ctrl+C in a terminal also reaches the engine, which can die of it
-    // before limgen cancels; however the batch ended, the user asked to stop.
-    if (interrupted || error.kind == EngineError::Cancelled) {
-        cleanUp();
+    // before limgen cancels; however the run ended, the user asked to stop.
+    // Drafts already filed are reported as they are.
+    if (outcome == Batch::Outcome::Cancelled || (outcome != Batch::Outcome::Ok && interrupted))
         return fail(tr("Interrupted; no drafts were kept."), Interrupted);
-    }
-    if (error.kind != EngineError::None) {
-        cleanUp();
-        QString message = error.message;
-        if (error.kind == EngineError::OutOfMemory && !gpu.name.isEmpty())
-            message += " " + tr("(%1, also after retrying with tiled decoding.)").arg(memoryText(gpu));
-        if (!error.detail.isEmpty())
-            message += "\n" + error.detail;
-        return fail(message, error.kind == EngineError::OutOfMemory ? NotRunnable : Error);
-    }
-
-    DraftRecord record;
-    record.themeSlug = palette.isValid() ? themeSlug : QString();
-    record.themeMode = palette.isValid() ? palette.mode : QString();
-    for (const auto &colour : palette.colors)
-        record.palette.insert(colour.role, colour.hex);
-    record.subject = subject;
-    record.prompt = request.prompt;
-    record.negative = request.cfg > 1.0 ? request.negative : QString();
-    record.style = Prompt::styleId(style);
-    record.modelId = model->id;
-    record.level = level.id;
-    for (auto it = level.files.begin(); it != level.files.end(); ++it)
-        if (it.key() != "tae")
-            record.filesSha256 << catalogue.file(it.value())->sha256;
-    record.engineVersion = probe.version;
-    record.engineBackend = probe.gpu().backend();
-    record.steps = request.steps;
-    record.cfg = request.cfg;
-    record.sampler = request.sampler;
-    record.width = request.width;
-    record.height = request.height;
-
-    Library library;
-    QJsonArray list;
-    QStringList lines;
-    for (int i = 0; i < drafts.size(); ++i) {
-        record.seed = seed + quint32(i);
-        QString addError;
-        const LibraryEntry entry = library.addDraft(drafts.at(i), record, QDateTime::currentDateTimeUtc(), &addError);
-        if (!entry.isValid()) {
-            cleanUp();
-            return fail(addError);
-        }
-        list << QJsonObject{{"id", entry.id}, {"path", entry.image}, {"seed", double(record.seed)}};
-        lines << entry.id + "  " + entry.image;
-    }
-    cleanUp();
+    if (outcome != Batch::Outcome::Ok)
+        return fail(message, outcome == Batch::Outcome::NotRunnable ? NotRunnable : Error);
 
     if (command.json()) {
-        print({{"model", model->id},
-               {"level", level.id},
-               {"theme", record.themeSlug.isEmpty() ? QJsonValue() : QJsonValue(record.themeSlug)},
-               {"style", record.style},
-               {"prompt", record.prompt},
+        QJsonArray list;
+        for (int i = 0; i < entries.size(); ++i)
+            list << QJsonObject{{"id", entries.at(i).id},
+                                {"path", entries.at(i).image},
+                                {"seed", double(seed + quint32(i))}};
+        print({{"model", batch.model()->id},
+               {"level", batch.model()->levels.first().id},
+               {"theme", batch.themeSlug().isEmpty() ? QJsonValue() : QJsonValue(batch.themeSlug())},
+               {"style", batch.styleId()},
+               {"prompt", batch.request().prompt},
                {"seed", double(seed)},
                {"drafts", list}});
         return Ok;
     }
-    for (const QString &line : lines)
-        print(stdout, line);
+    for (const LibraryEntry &entry : entries)
+        print(stdout, entry.id + "  " + entry.image);
     return Ok;
 }
 

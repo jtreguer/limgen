@@ -1,1 +1,10 @@
-{}
+{
+  "Made %n drafts in %1": {
+    "one": "Made %n draft in %1",
+    "other": "Made %n drafts in %1"
+  },
+  "About %1 for %n drafts": {
+    "one": "About %1 for %n draft",
+    "other": "About %1 for %n drafts"
+  }
+}

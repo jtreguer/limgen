@@ -58,6 +58,8 @@ public:
     void start(const EngineRequest &request) override;
     void cancel() override;
     bool isRunning() const override { return m_process.state() != QProcess::NotRunning; }
+    // Whether the current or last run was retried after running out of memory.
+    bool retried() const { return m_retried; }
 
 private:
     void launch();

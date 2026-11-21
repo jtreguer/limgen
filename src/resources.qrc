@@ -3,6 +3,12 @@
         <file alias="Main.qml">Main.qml</file>
         <file alias="PaletteBar.qml">PaletteBar.qml</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
+        <file alias="DraftGrid.qml">DraftGrid.qml</file>
+        <file alias="DraftTile.qml">DraftTile.qml</file>
+        <file alias="PromptBar.qml">PromptBar.qml</file>
+        <file alias="SetupPanel.qml">SetupPanel.qml</file>
+        <file alias="ModelPicker.qml">ModelPicker.qml</file>
+        <file alias="FullView.qml">FullView.qml</file>
         <file alias="i18n/en.json">i18n/en.json</file>
         <file alias="models.json">models.json</file>
     </qresource>

@@ -5,7 +5,7 @@ Omarchy theme with an image model that runs on the user's own machine. This
 document says what it does and why. `technical.md` says how, and
 `models.md` records which models it runs and why they were chosen.
 
-Status: milestones L0 (engine spike), L1 (skeleton), L2 (engine) and L3 (downloads) done, L4 next.
+Status: milestones L0 (engine spike), L1 (skeleton), L2 (engine), L3 (downloads) and L4 (the window) done, L5 next.
 
 ## 1. Purpose
 
@@ -123,8 +123,10 @@ background folder, where Omarchy's background cycling picks them up.
    listed below it.
 3. The user confirms. The download shows progress, can be paused, resumes
    after a restart and is verified by checksum.
-4. A one-image test generation measures speed on this machine; limgen stores
-   it to show time estimates from then on.
+4. The first batch measures how fast this machine is; limgen keeps the
+   timings and shows an estimate before every batch from then on. (A
+   separate test generation was planned; the first real batch gives the
+   same numbers without making the user wait for a throwaway image.)
 
 If no usable backend exists, the window says so, explains what is missing
 (driver, Vulkan loader, ROCm) and offers CPU mode only if a test shows it can
