@@ -1,4 +1,4 @@
-QT += core gui qml quick quickcontrols2
+QT += core gui qml quick quickcontrols2 network concurrent
 
 CONFIG += c++17 release
 TARGET = limgen
@@ -11,6 +11,7 @@ HEADERS += \
     src/engine.h \
     src/hardware.h \
     src/library.h \
+    src/modelstore.h \
     src/omarchy.h \
     src/palette.h \
     src/progress.h \
@@ -26,6 +27,7 @@ SOURCES += \
     src/cli.cpp \
     src/hardware.cpp \
     src/library.cpp \
+    src/modelstore.cpp \
     src/omarchy.cpp \
     src/palette.cpp \
     src/progress.cpp \

@@ -50,7 +50,11 @@ public:
     static const QStringList roles;
 
     static Catalogue load(const QByteArray &json, QString *error);
-    static Catalogue builtIn();
+    // An invalid catalogue, with *error saying why, when it cannot be read.
+    static Catalogue builtIn(QString *error = nullptr);
+    // The built-in catalogue, or the file LIMGEN_CATALOGUE names: tests use
+    // it to run downloads end to end with small files of their own.
+    static Catalogue fromEnvironment(QString *error = nullptr);
     // LIMGEN_MODELS, or $XDG_DATA_HOME/limgen/models.
     static QString defaultModelsDirectory();
 

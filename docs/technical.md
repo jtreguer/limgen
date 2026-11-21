@@ -3,7 +3,7 @@
 How limgen is built. Read `design.md` first for what it does and why. Model
 choices and benchmarks live in `models.md`.
 
-Status: milestones L0, L1 and L2 done, L3 next. Section 12 lists the
+Status: milestones L0 to L3 done, L4 next. Section 12 lists the
 milestones.
 
 ## 1. Stack
@@ -106,9 +106,24 @@ README.md  LICENSE  .gitignore
   benchmark row in `models.md`. Installed means present at the right size;
   `limgen doctor --verify` also checks SHA-256.
 - **ModelStore.** Downloads catalogue files with `QNetworkAccessManager` to
-  a `.part` file, resumes with HTTP range requests, checks size and SHA-256,
-  renames into place. Never downloads without a confirmed request. Reports
-  disk space before starting. Gated models are not in the catalogue.
+  a `.part` file beside each target, resumes with HTTP range requests (after
+  a pause, a dropped connection or a restart), checks size and SHA-256 (in a
+  worker thread, since it reads gigabytes), and renames into place. A server
+  that ignores the range or resumes at the wrong offset starts the file over;
+  a `.part` larger than the file is discarded. Network errors are retried
+  three times, two seconds apart, and the count starts again whenever bytes
+  arrive, so a flaky link that keeps making progress finishes; a missing or
+  forbidden file (404, 403, a login request), a redirect to plain http and a
+  redirect loop are not retried. A `.part` that cannot be read for its
+  checksum is kept and reported, not deleted. Redirects are followed
+  (Hugging Face and GitHub both redirect to their storage); requests carry
+  only `User-Agent: limgen/<version>`. `limgen models pull` takes the
+  download lock after the user confirmed, then plans again, so files another
+  limgen installed meanwhile are not fetched twice. It never starts on its own: `limgen models pull` (and
+  the window, from L4) start it after the user confirmed. `plan()` lists the
+  files a level still needs, with the upscaler on the first model, and
+  checks free disk space (the download plus 256 MiB). Gated models are not
+  in the catalogue.
 - **Hardware.** Finds the GPUs and their free video memory:
   `nvidia-smi --query-gpu=name,memory.total,memory.used
   --format=csv,noheader,nounits` on NVIDIA, `mem_info_vram_total` and
@@ -276,7 +291,8 @@ metadata.
 | Path | Contents |
 |---|---|
 | `~/.config/limgen/config.json` | chosen model, style, colour pass strength, output format (`png` or `jpeg`), JPEG quality |
-| `~/.local/share/limgen/models/<folder>/` | downloaded model files, one folder per file group as the catalogue names it (`LIMGEN_MODELS` overrides the whole path) |
+| `~/.local/share/limgen/models/<folder>/` | downloaded model files, one folder per file group as the catalogue names it (`LIMGEN_MODELS` overrides the whole path); `<file>.part` while downloading, kept when paused |
+| `~/.local/share/limgen/models/.download.lock` | held while a download runs, so two limgen processes never write the same file |
 | `~/.local/share/limgen/library/<yyyy-mm>/<id>.{png,jpg}` and `.json` | drafts (always PNG) and finals (the output format) with metadata |
 | `~/.local/state/limgen/bench.json` | measured seconds per step per model, level and backend |
 | `~/.cache/limgen/batch-<random>/` | a batch's drafts and previews while it runs; removed after |
@@ -331,8 +347,8 @@ the codes below. Hype's `src/cli.cpp` is the pattern.
 |---|---|
 | `limgen palette` | current theme palette, palette words, mood; exit 1 when there is no theme or its `colors.toml` is unreadable |
 | `limgen doctor [--verify]` | engine version, backend, GPU, memory, models, problems found; exit 0 when the default model can run, 3 when not; `--verify` checks SHA-256 too |
-| `limgen models [list]` | catalogue with installed state and fit on this machine |
-| `limgen models pull <id> [--level q4_k] [--yes]` | download (asks unless `--yes`) |
+| `limgen models [list]` | catalogue with installed state, the size left to download and whether it runs here (free video memory now) |
+| `limgen models pull <id> [--level q4_k] [--yes]` | prints the licence, each file with its size and licence, the total and the free disk space (on stderr), then asks; without a terminal it needs `--yes` (exit 2 otherwise). Downloads the level's files and the upscaler. Exit 3 when the disk is too full, 1 on a failed download or a declined prompt, 130 on Ctrl+C, which pauses: the same command resumes |
 | `limgen generate <subject> [--count 4] [--style ...] [--model ...] [--seed ...] [--prompt <full>]` | make drafts, add them to the library, print ids and paths; exit 3 when the model is missing, the engine unusable or memory short, 1 when the engine fails, 130 on Ctrl+C (nothing kept). `--from <image> [--strength 0.5]` arrive with variations in L6 |
 | `limgen keep <id> [--set] [--theme <slug>] [--color-pass 0.3]` | finish and install into the theme folder |
 | `limgen set <file-or-id>` | `omarchy theme bg set` on it (keeps it first if it is a draft) |
@@ -374,6 +390,15 @@ not enough memory, model missing), 130 interrupted.
   building, Lab conversion and colour transfer, `sd-cli` argument building,
   progress parsing (on captured real output), file naming, metadata round
   trip.
+- ModelStore tests point downloads at a local HTTP server in the test, by
+  handing the store a `QNetworkAccessManager` that rewrites catalogue URLs.
+  Two overrides do the same for the built app: `LIMGEN_CATALOGUE` (a
+  catalogue JSON file used instead of the built-in one) and
+  `LIMGEN_DOWNLOAD_BASE` (a scheme, host and port that replace those of
+  every download URL, keeping the path; the SHA-256 check still decides what
+  is installed). Every CLI test sets `LIMGEN_DOWNLOAD_BASE` to a local
+  server or to a port where nothing listens, so no test can download from
+  the internet.
 - `bin/fake-sd-cli` stands in for the engine: it answers `--version`,
   `--help` and `--list-devices` like the pinned release, prints progress in
   its format, writes solid-colour PNGs of the requested size (a colour per

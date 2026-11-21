@@ -3,6 +3,7 @@
 #include "catalogue.h"
 #include "hardware.h"
 #include "library.h"
+#include "modelstore.h"
 #include "omarchy.h"
 #include "palette.h"
 #include "prompt.h"
@@ -11,10 +12,13 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
+#include <QLockFile>
 #include <QRandomGenerator>
 #include <QStandardPaths>
 #include <QTimer>
@@ -22,6 +26,7 @@
 #include <cmath>
 #include <csignal>
 #include <cstdio>
+#include <unistd.h>
 
 namespace Cli {
 
@@ -94,6 +99,22 @@ struct Command {
 std::atomic<bool> interrupted{false};
 extern "C" void onInterrupt(int) { interrupted = true; }
 
+// Installed for the length of a long command, so Ctrl+C becomes a clean stop
+// (a cancel, then exit 130) instead of leaving half-written files behind.
+struct InterruptHandlers {
+    InterruptHandlers() {
+        interrupted = false;
+        std::signal(SIGINT, onInterrupt);
+        std::signal(SIGTERM, onInterrupt);
+    }
+    ~InterruptHandlers() {
+        std::signal(SIGINT, SIG_DFL);
+        std::signal(SIGTERM, SIG_DFL);
+    }
+};
+
+QString sizeText(qint64 bytes) { return QLocale().formattedDataSize(bytes, 1, QLocale::DataSizeSIFormat); }
+
 QString describe(const CatalogueFile &file) { return file.folder + "/" + file.name; }
 
 QString memoryText(const Gpu &gpu) {
@@ -165,7 +186,10 @@ int doctor(const QStringList &arguments) {
     const QList<Gpu> gpus = Hardware::detect();
     const Gpu gpu = Hardware::matching(gpus, probe.gpu().description);
 
-    const Catalogue catalogue = Catalogue::builtIn();
+    QString catalogueError;
+    const Catalogue catalogue = Catalogue::fromEnvironment(&catalogueError);
+    if (!catalogue.isValid())
+        return fail(catalogueError);
     const QString modelsDirectory = Catalogue::defaultModelsDirectory();
     QJsonArray models;
     QStringList modelLines;
@@ -180,7 +204,8 @@ int doctor(const QStringList &arguments) {
         if (model.isDefault)
             defaultRunnable = runnable;
         if (model.isDefault && !missing.isEmpty())
-            problems << tr("The default model, %1, is not installed.").arg(model.name);
+            problems << tr("The default model, %1, is not installed. Run limgen models pull %2.")
+                            .arg(model.name, model.id);
         if (model.isDefault && missing.isEmpty() && !memory)
             problems << tr("%1 needs %2 MiB of free video memory; %3.")
                             .arg(model.name).arg(level.minFreeMiB).arg(memoryText(gpu));
@@ -276,9 +301,10 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
                         Usage);
     }
 
-    const Catalogue catalogue = Catalogue::builtIn();
+    QString catalogueError;
+    const Catalogue catalogue = Catalogue::fromEnvironment(&catalogueError);
     if (!catalogue.isValid())
-        return fail(tr("The built-in model catalogue is broken; this is a bug in limgen."));
+        return fail(catalogueError);
     const CatalogueModel *model = command.parser.isSet("model") ? catalogue.model(command.parser.value("model"))
                                                                 : catalogue.defaultModel();
     if (!model) {
@@ -295,7 +321,8 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
         QStringList names;
         for (const QString &key : missing)
             names << describe(*catalogue.file(key));
-        return fail(tr("%1 is not installed. Missing in %2: %3").arg(model->name, modelsDirectory, names.join(", ")),
+        return fail(tr("%1 is not installed. Missing in %2: %3. Run limgen models pull %4.")
+                        .arg(model->name, modelsDirectory, names.join(", "), model->id),
                     NotRunnable);
     }
 
@@ -365,17 +392,7 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
     // The handlers stay until generate returns, so a Ctrl+C while drafts are
     // copied into the library cannot leave a half-copied file or the cache
     // folder behind.
-    struct Handlers {
-        Handlers() {
-            interrupted = false;
-            std::signal(SIGINT, onInterrupt);
-            std::signal(SIGTERM, onInterrupt);
-        }
-        ~Handlers() {
-            std::signal(SIGINT, SIG_DFL);
-            std::signal(SIGTERM, SIG_DFL);
-        }
-    } handlers;
+    const InterruptHandlers handlers;
     watch.start(100);
     engine.start(request);
     loop.exec();
@@ -451,6 +468,223 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
     return Ok;
 }
 
+int modelsList(bool json) {
+    QString catalogueError;
+    const Catalogue catalogue = Catalogue::fromEnvironment(&catalogueError);
+    if (!catalogue.isValid())
+        return fail(catalogueError);
+    const QString modelsDirectory = Catalogue::defaultModelsDirectory();
+    const ModelStore store(modelsDirectory);
+    const Gpu gpu = Hardware::matching(Hardware::detect(), SdCppEngine().probe().gpu().description);
+
+    QJsonArray list;
+    QStringList lines{tr("Models in %1:").arg(modelsDirectory)};
+    for (const CatalogueModel &model : catalogue.models()) {
+        QJsonArray levels;
+        for (const ModelLevel &level : model.levels) {
+            const ModelStore::Plan plan = store.plan(catalogue, level, false);
+            const bool installed = plan.files.isEmpty();
+            // Free memory now, as generate checks it; unknown on Intel.
+            const QJsonValue runsHere =
+                gpu.freeMiB < 0 ? QJsonValue() : QJsonValue(gpu.freeMiB >= level.minFreeMiB);
+            levels << QJsonObject{{"id", level.id},
+                                  {"installed", installed},
+                                  {"downloadBytes", double(plan.downloadBytes())},
+                                  {"minFreeMiB", level.minFreeMiB},
+                                  {"runsHere", runsHere}};
+            const QString state = installed ? tr("installed") : tr("not installed (%1)").arg(sizeText(plan.downloadBytes()));
+            const QString fit = runsHere.isNull() ? tr("memory unknown")
+                                : runsHere.toBool() ? tr("runs here")
+                                                    : tr("needs %1 MiB of free video memory").arg(level.minFreeMiB);
+            lines << QString("  %1 %2").arg(model.id + (model.isDefault ? tr(" (default)") : QString()), -26)
+                         .arg(QString("%1, %2, %3").arg(model.name, model.publisher, model.licenceId));
+            lines << QString("  %1 %2").arg(QString(), -26).arg(QString("%1 %2; %3").arg(level.id, state, fit));
+        }
+        list << QJsonObject{{"id", model.id},
+                            {"name", model.name},
+                            {"publisher", model.publisher},
+                            {"default", model.isDefault},
+                            {"licence", QJsonObject{{"id", model.licenceId},
+                                                    {"summary", model.licenceSummary},
+                                                    {"url", model.licenceUrl}}},
+                            {"levels", levels}};
+    }
+    if (json) {
+        print({{"modelsDirectory", modelsDirectory}, {"models", list}});
+        return Ok;
+    }
+    for (const QString &line : lines)
+        print(stdout, line);
+    return Ok;
+}
+
+int modelsPull(const QString &id, const QString &levelId, bool yes, bool json) {
+    QString catalogueError;
+    const Catalogue catalogue = Catalogue::fromEnvironment(&catalogueError);
+    if (!catalogue.isValid())
+        return fail(catalogueError);
+    const CatalogueModel *model = catalogue.model(id);
+    if (!model) {
+        QStringList ids;
+        for (const auto &m : catalogue.models())
+            ids << m.id;
+        return fail(tr("Unknown model %1. Models: %2.").arg(id, ids.join(", ")), Usage);
+    }
+    const ModelLevel *level = &model->levels.first();
+    if (!levelId.isEmpty()) {
+        level = nullptr;
+        QStringList levels;
+        for (const auto &l : model->levels) {
+            levels << l.id;
+            if (l.id == levelId)
+                level = &l;
+        }
+        if (!level)
+            return fail(tr("%1 has no level %2. Levels: %3.").arg(model->id, levelId, levels.join(", ")), Usage);
+    }
+
+    const QString modelsDirectory = Catalogue::defaultModelsDirectory();
+    ModelStore store(modelsDirectory);
+    const ModelStore::Plan plan = store.plan(catalogue, *level);
+    auto report = [&](const QStringList &installed) {
+        if (json)
+            print({{"model", model->id}, {"level", level->id}, {"installed", QJsonArray::fromStringList(installed)}});
+        else
+            for (const QString &path : installed)
+                print(stdout, path);
+    };
+    if (plan.files.isEmpty()) {
+        if (!json)
+            print(stderr, tr("%1 is already installed.").arg(model->name));
+        report({});
+        return Ok;
+    }
+
+    // What the user agrees to: the licence, every file and its size, and the
+    // disk space it takes (docs/design.md section 5). It goes to stderr, so
+    // stdout stays clean for scripts.
+    print(stderr, tr("%1 by %2").arg(model->name, model->publisher));
+    print(stderr, tr("Licence: %1. %2").arg(model->licenceId, model->licenceSummary));
+    print(stderr, model->licenceUrl);
+    print(stderr, tr("Files for %1 (%2), into %3:").arg(model->id, level->id, modelsDirectory));
+    for (const CatalogueFile &file : plan.files)
+        print(stderr, QString("  %1 %2  %3").arg(file.folder + "/" + file.name, -44).arg(sizeText(file.bytes), 9)
+                          .arg(file.licence));
+    QString total = tr("Download %1").arg(sizeText(plan.downloadBytes()));
+    if (plan.partBytes > 0)
+        total += tr(" (%1 already downloaded)").arg(sizeText(plan.partBytes));
+    if (plan.availableBytes >= 0)
+        total += tr("; %1 free.").arg(sizeText(plan.availableBytes));
+    print(stderr, total);
+    if (!plan.fitsOnDisk())
+        return fail(tr("Not enough disk space: %1 needs %2 plus %3 to spare.")
+                        .arg(modelsDirectory, sizeText(plan.downloadBytes()), sizeText(ModelStore::headroomBytes)),
+                    NotRunnable);
+
+    if (!yes) {
+        if (!isatty(STDIN_FILENO))
+            return fail(tr("Nothing downloaded. Add --yes to download without a prompt."), Usage);
+        fprintf(stderr, "%s", qPrintable(tr("Download? [y/N] ")));
+        fflush(stderr);
+        char answer[16] = {};
+        const QString reply = fgets(answer, sizeof answer, stdin) ? QString::fromLocal8Bit(answer).trimmed().toLower()
+                                                                  : QString();
+        if (reply != "y" && reply != "yes")
+            return fail(tr("Nothing downloaded."));
+    }
+
+    // Two downloads into the same .part file would corrupt it.
+    QDir().mkpath(modelsDirectory);
+    QLockFile lock(modelsDirectory + "/.download.lock");
+    if (!lock.tryLock(0))
+        return fail(tr("Another limgen is downloading into %1; try again when it is done.").arg(modelsDirectory));
+    // Another limgen may have installed files while this one waited at the
+    // prompt; only what is still missing is fetched.
+    const ModelStore::Plan current = store.plan(catalogue, *level);
+    if (current.files.isEmpty()) {
+        if (!json)
+            print(stderr, tr("%1 is already installed.").arg(model->name));
+        report({});
+        return Ok;
+    }
+
+    QStringList installed;
+    QString error;
+    bool cancelled = false;
+    const bool live = isatty(STDERR_FILENO);
+    QElapsedTimer shown;
+    QEventLoop loop;
+    QObject::connect(&store, &ModelStore::progress, &loop, [&](qint64 done, qint64 total, const QString &file) {
+        if (json || !live || (shown.isValid() && shown.elapsed() < 500))
+            return;
+        shown.start();
+        fprintf(stderr, "\r%s\033[K", qPrintable(tr("%1: %2 of %3").arg(file, sizeText(done), sizeText(total))));
+        fflush(stderr);
+    });
+    QObject::connect(&store, &ModelStore::fileInstalled, &loop, [&](const QString &key) {
+        const QString path = Catalogue::path(*catalogue.file(key), modelsDirectory);
+        installed << path;
+        if (!json)
+            fprintf(stderr, "%s%s\n", live ? "\r\033[K" : "", qPrintable(tr("Checked and installed %1").arg(path)));
+    });
+    QObject::connect(&store, &ModelStore::finished, &loop, &QEventLoop::quit);
+    QObject::connect(&store, &ModelStore::failed, &loop, [&](const QString &message) {
+        error = message;
+        loop.quit();
+    });
+    QObject::connect(&store, &ModelStore::cancelled, &loop, [&] {
+        cancelled = true;
+        loop.quit();
+    });
+    const InterruptHandlers handlers;
+    QTimer watch;
+    QObject::connect(&watch, &QTimer::timeout, &store, [&] {
+        if (interrupted)
+            store.cancel();
+    });
+    watch.start(100);
+    store.start(current.files);
+    loop.exec();
+    watch.stop();
+    if (live && !json)
+        fprintf(stderr, "\r\033[K");
+
+    // A failure or a finished download is reported as it is, even when a
+    // Ctrl+C arrived too late to stop it.
+    if (!error.isEmpty())
+        return fail(error);
+    if (cancelled)
+        return fail(tr("Paused. Run the same command to resume the download."), Interrupted);
+    report(installed);
+    return Ok;
+}
+
+int models(const QStringList &arguments) {
+    Command command("models", tr("List the models limgen can run, or download one with limgen models pull <id>."));
+    command.parser.addPositionalArgument("action", tr("list (the default) or pull"), "[list|pull]");
+    command.parser.addPositionalArgument("id", tr("For pull: the model to download"), "[id]");
+    command.parser.addOption({"level", tr("For pull: the quantisation level (default: the model's first)"), "id"});
+    command.parser.addOption({"yes", tr("For pull: download without asking; the licence is still printed")});
+    if (!command.parse(arguments, 0, 2))
+        return command.status;
+    const QString action = command.argument(0).isEmpty() ? QString("list") : command.argument(0);
+    if (action == "list") {
+        if (!command.argument(1).isEmpty() || command.parser.isSet("level") || command.parser.isSet("yes"))
+            return fail(tr("limgen models list takes no model and no --level or --yes.") + "\n" +
+                            command.parser.helpText().trimmed(),
+                        Usage);
+        return modelsList(command.json());
+    }
+    if (action == "pull") {
+        if (command.argument(1).isEmpty())
+            return fail(tr("Name the model to download: limgen models pull <id>."), Usage);
+        return modelsPull(command.argument(1), command.parser.value("level"), command.parser.isSet("yes"),
+                          command.json());
+    }
+    return fail(tr("Unknown action %1: use list or pull.").arg(action) + "\n" + command.parser.helpText().trimmed(),
+                Usage);
+}
+
 int help(const QStringList &arguments, const OmarchyPaths &paths) {
     const QString topic = arguments.value(2);
     if (isCommand(topic) && topic != "help")
@@ -470,12 +704,16 @@ QString summary() {
               "  palette           The current theme's palette and the words it becomes\n"
               "  doctor            The engine, the GPU, the installed models, and what is missing\n"
               "  generate          Make drafts for the current theme\n"
+              "  models [list]     The models limgen can run, installed or not\n"
+              "  models pull <id>  Download a model, after showing its licence and size\n"
               "  help [command]    This summary, or one command's options\n"
               "  --version         The version");
 }
 
 bool isCommand(const QString &word) {
-    return QStringList{"open", "palette", "doctor", "generate", "help", "--help", "-h", "--version"}.contains(word);
+    return QStringList{"open",  "palette", "doctor", "generate", "models",
+                       "help",  "--help",  "-h",     "--version"}
+        .contains(word);
 }
 
 int run(const QStringList &arguments, const OmarchyPaths &paths) {
@@ -488,6 +726,8 @@ int run(const QStringList &arguments, const OmarchyPaths &paths) {
         return doctor(arguments);
     if (command == "generate")
         return generate(arguments, paths);
+    if (command == "models")
+        return models(arguments);
     if (command == "help" || command == "--help" || command == "-h")
         return help(command == "help" ? arguments : QStringList{arguments.value(0), "help"}, paths);
     if (command == "--version") {

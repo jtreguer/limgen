@@ -5,7 +5,7 @@ Omarchy theme with an image model that runs on the user's own machine. This
 document says what it does and why. `technical.md` says how, and
 `models.md` records which models it runs and why they were chosen.
 
-Status: milestones L0 (engine spike), L1 (skeleton) and L2 (engine) done, L3 next.
+Status: milestones L0 (engine spike), L1 (skeleton), L2 (engine) and L3 (downloads) done, L4 next.
 
 ## 1. Purpose
 

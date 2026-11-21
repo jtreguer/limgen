@@ -15,10 +15,19 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QProcess>
+#include <QLockFile>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QTimer>
+#include <QStorageInfo>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSet>
 #include <QTimeZone>
@@ -35,6 +44,7 @@
 #include "engine.h"
 #include "hardware.h"
 #include "library.h"
+#include "modelstore.h"
 #include "progress.h"
 #include "sdcppengine.h"
 #include "omarchy.h"
@@ -403,6 +413,70 @@ private slots:
     void cli_generateInterruptedByTerminalExits130();
     void cli_helpListsDoctorAndGenerate();
 
+    // ---- L3: ModelStore --------------------------------------------------
+    void store_freshDownloadInstalls();
+    void store_severalFilesInstallInOrder();
+    void store_resumeSendsRangeAndEndsCorrect();
+    void store_serverIgnoringRangeStartsOver();
+    void store_wrongContentRangeStartsOver();
+    void store_completePartIsVerifiedWithoutRequest();
+    void store_corruptCompletePartIsRemoved();
+    void store_status416OnShortPartDoesNotInstall();
+    void store_oversizedPartStartsAgain();
+    void store_droppedConnectionIsRetriedAndResumed();
+    void store_retriesExhaustedFailsAndKeepsPart();
+    void store_finalErrorsFailAtOnce_data();
+    void store_finalErrorsFailAtOnce();
+    void store_checksumMismatchRemovesPart();
+    void store_oversizeBodyIsRemoved();
+    void store_redirectIsFollowed();
+    void store_redirectKeepsRange();
+    void store_wrongSizedTargetIsReplaced();
+    void store_cancelKeepsPartAndNextStartResumes();
+    void store_cancelBeforeStartDoesNothing();
+    void store_startWhileRunningIsIgnored();
+    void store_neverReachesBeyondLocalhost();
+
+    // ---- L3: ModelStore::plan --------------------------------------------
+    void plan_freshListsLevelFilesThenUpscaler();
+    void plan_upscalerOptional();
+    void plan_installedFilesAreSkipped();
+    void plan_sharedFileOfInstalledModelIsSkipped();
+    void plan_sameFileTwiceInLevelIsPlannedOnce();
+    void plan_partBytes();
+    void plan_availableBytes();
+    void plan_fitsOnDisk();
+
+    // ---- L3: CLI models --------------------------------------------------
+    void cli_modelsListText();
+    void cli_modelsListJson();
+    void cli_modelsRunsHereFollowsFreeMemory();
+    void cli_modelsUsageErrors_data();
+    void cli_modelsUsageErrors();
+    void cli_modelsPullAlreadyInstalled();
+    void cli_modelsPullWithoutYesAsksNothingAndWritesNothing();
+    void cli_modelsPullHeldLock();
+    void cli_notInstalledMessagesNameThePullCommand();
+    void cli_helpModels();
+
+    // ---- L3 review: behaviour changes and end-to-end pulls ----------------
+    void store_dropEveryRequestStillFinishes();
+    void store_redirectLoopFailsWithoutRetries();
+    void store_unreadableCompletePartFailsAndIsKept();
+    void store_cancelBetweenHashAndVerifiedEmitsOnce();
+    void store_cancelFromProgressDuringVerifyEmitsOnce();
+    void cli_pullEndToEnd();
+    void cli_pullEndToEndJson();
+    void cli_pullSecondTimeDownloadsNothing();
+    void cli_pullInterruptedResumes();
+    void cli_pullNotFoundFails();
+    void cli_pullChecksumMismatchFails();
+    void cli_modelsListWithCustomCatalogue();
+    void cli_pullPromptYes();
+    void cli_pullPromptDecline();
+    void cli_pullReplansAfterTheLock();
+    void cli_brokenCatalogueFileIsReported();
+
 private:
     struct CliResult {
         int exitCode = -1;
@@ -411,6 +485,7 @@ private:
     };
     CliResult runCli(const Fixture &fixture, const QStringList &arguments,
                      const QHash<QString, QString> &extraEnvironment = {}) const;
+    QProcessEnvironment cliEnvironment(const Fixture &fixture, const QHash<QString, QString> &extraEnvironment) const;
     static void writeStockTheme(Fixture &fixture, const QByteArray &colors = stockToml) {
         QVERIFY(fixture.addTheme("night-city", colors));
         QVERIFY(fixture.switchTo("night-city"));
@@ -1272,19 +1347,23 @@ void LimgenTests::backend_paletteChangedAfterThemeSwitch() {
 
 // ============================== CLI ======================================
 
-LimgenTests::CliResult LimgenTests::runCli(const Fixture &fixture, const QStringList &arguments,
-                                           const QHash<QString, QString> &extraEnvironment) const {
-    CliResult result;
+QProcessEnvironment LimgenTests::cliEnvironment(const Fixture &fixture,
+                                                const QHash<QString, QString> &extraEnvironment) const {
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     // The headless commands must not need a display, or a Hyprland session.
     for (const char *name : {"WAYLAND_DISPLAY", "DISPLAY", "QT_QPA_PLATFORM", "HYPRLAND_INSTANCE_SIGNATURE",
                              "LIMGEN_HYPRCTL", "LIMGEN_OMARCHY_BIN", "LIMGEN_SD_CLI",
                              "QT_QPA_PLATFORMTHEME", "LIMGEN_MODELS", "LIMGEN_NVIDIA_SMI", "LIMGEN_DRM_ROOT",
-                             "FAKE_SD_CLI_MODE", "FAKE_SD_CLI_LOG", "FAKE_SD_CLI_STEP_SECONDS"})
+                             "FAKE_SD_CLI_MODE", "FAKE_SD_CLI_LOG", "FAKE_SD_CLI_STEP_SECONDS",
+                             "LIMGEN_CATALOGUE", "LIMGEN_DOWNLOAD_BASE"})
         environment.remove(name);
     // Omarchy sessions export QT_QPA_PLATFORMTHEME=gtk3. It is removed by
     // default so the other tests do not depend on the session they run in;
     // cli_runsWithoutDisplayUnderGtkPlatformTheme puts it back.
+    // Every download goes to a port where nothing listens unless a test points
+    // LIMGEN_DOWNLOAD_BASE at its own server, so no CLI test can reach the
+    // internet, whatever the code under test does.
+    environment.insert("LIMGEN_DOWNLOAD_BASE", "http://127.0.0.1:1");
     for (auto it = extraEnvironment.begin(); it != extraEnvironment.end(); ++it)
         environment.insert(it.key(), it.value());
     const QString base = fixture.root.path();
@@ -1295,6 +1374,13 @@ LimgenTests::CliResult LimgenTests::runCli(const Fixture &fixture, const QString
     environment.insert("XDG_STATE_HOME", base + "/state");
     environment.insert("XDG_DATA_HOME", fixture.data);
     environment.insert("XDG_CACHE_HOME", fixture.cache);
+    return environment;
+}
+
+LimgenTests::CliResult LimgenTests::runCli(const Fixture &fixture, const QStringList &arguments,
+                                           const QHash<QString, QString> &extraEnvironment) const {
+    CliResult result;
+    const QProcessEnvironment environment = cliEnvironment(fixture, extraEnvironment);
     QProcess process;
     process.setProcessEnvironment(environment);
     process.start(qEnvironmentVariable("LIMGEN_BINARY"), arguments);
@@ -3412,7 +3498,8 @@ QHash<QString, QString> engineEnvironment(const Fixture &fixture, int usedMiB = 
             {"LIMGEN_MODELS", fixture.models},
             {"LIMGEN_NVIDIA_SMI", fakeNvidiaSmi(fixture, totalMiB, usedMiB)},
             {"LIMGEN_DRM_ROOT", fixture.drm},
-            {"FAKE_SD_CLI_LOG", fixture.root.path() + "/fake.log"}};
+            {"FAKE_SD_CLI_LOG", fixture.root.path() + "/fake.log"},
+            {"LIMGEN_DOWNLOAD_BASE", "http://127.0.0.1:1"}}; // nothing listens there
 }
 
 QStringList filesUnder(const QString &directory) {
@@ -4076,6 +4163,1425 @@ void LimgenTests::cli_helpListsDoctorAndGenerate() {
     const CliResult doctor = runCli(fixture, {"help", "doctor"});
     QCOMPARE(doctor.exitCode, 0);
     QVERIFY(doctor.out.contains("--json"));
+}
+
+// ============================== L3 helpers ================================
+
+namespace {
+
+// A small HTTP server that serves files from memory, with a switch for each
+// way a real download goes wrong. It lives in the test's own event loop.
+class HttpServer : public QObject {
+public:
+    struct Route {
+        QByteArray body;
+        bool honourRange = true;
+        int rangeStartOverride = -1;  // answer a range request from this offset instead
+        int status = 0;               // answer with this status and an error page
+        QString redirectTo;           // answer 302 with this absolute URL
+        int dropAfterBytes = -1;      // close after this many body bytes, on the first request only
+        int shortBytes = -1;          // declare the full length, send this many body bytes, every request
+        int chunk = 0, chunkDelayMs = 0; // a slow body
+        bool dropped = false;
+    };
+    struct Request {
+        QString path;
+        QByteArray range;
+    };
+
+    HttpServer() {
+        connect(&m_server, &QTcpServer::newConnection, this, [this] { accept(); });
+        listening = m_server.listen(QHostAddress::LocalHost, 0);
+    }
+    quint16 port() const { return m_server.serverPort(); }
+    Route &serve(const QString &path, const QByteArray &body) {
+        Route &route = routes[path];
+        route = Route();
+        route.body = body;
+        return route;
+    }
+    QStringList paths() const {
+        QStringList list;
+        for (const Request &request : requests)
+            list << request.path;
+        return list;
+    }
+    QList<QByteArray> rangesOf(const QString &path) const {
+        QList<QByteArray> list;
+        for (const Request &request : requests)
+            if (request.path == path)
+                list << request.range;
+        return list;
+    }
+    int count(const QString &path) const { return paths().count(path); }
+
+    bool listening = false;
+    QMap<QString, Route> routes;
+    QList<Request> requests;
+
+private:
+    void accept() {
+        while (QTcpSocket *socket = m_server.nextPendingConnection()) {
+            auto buffer = std::make_shared<QByteArray>();
+            connect(socket, &QTcpSocket::readyRead, socket, [this, socket, buffer] {
+                *buffer += socket->readAll();
+                if (buffer->contains("\r\n\r\n")) {
+                    const QByteArray request = *buffer;
+                    buffer->clear();
+                    handle(socket, request);
+                }
+            });
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        }
+    }
+
+    static void send(QTcpSocket *socket, int status, const QByteArray &reason, const QByteArray &headers,
+                     const QByteArray &body, qint64 declared = -1) {
+        QByteArray head = "HTTP/1.1 " + QByteArray::number(status) + " " + reason + "\r\n" + headers +
+                          "Connection: close\r\nContent-Length: " +
+                          QByteArray::number(declared < 0 ? body.size() : declared) + "\r\n\r\n";
+        socket->write(head + body);
+    }
+
+    void handle(QTcpSocket *socket, const QByteArray &request) {
+        const QList<QByteArray> lines = request.split('\n');
+        const QList<QByteArray> first = lines.value(0).trimmed().split(' ');
+        const QString path = QString::fromLatin1(first.value(1));
+        QByteArray range;
+        for (const QByteArray &line : lines)
+            if (line.toLower().startsWith("range:"))
+                range = line.mid(6).trimmed();
+        requests.append({path, range});
+
+        auto it = routes.find(path);
+        if (it == routes.end() || it->status != 0) {
+            const int status = it == routes.end() ? 404 : it->status;
+            send(socket, status, "Error", status == 416 ? "Content-Range: bytes */1\r\n" : "",
+                 "<html>error page</html>");
+            socket->disconnectFromHost();
+            return;
+        }
+        Route &route = *it;
+        if (!route.redirectTo.isEmpty()) {
+            send(socket, 302, "Found", "Location: " + route.redirectTo.toLatin1() + "\r\n", "");
+            socket->disconnectFromHost();
+            return;
+        }
+        qint64 start = 0;
+        bool partial = false;
+        if (route.honourRange && range.startsWith("bytes=")) {
+            start = range.mid(6).split('-').value(0).toLongLong();
+            if (start >= route.body.size()) {
+                send(socket, 416, "Range Not Satisfiable",
+                     "Content-Range: bytes */" + QByteArray::number(route.body.size()) + "\r\n", "");
+                socket->disconnectFromHost();
+                return;
+            }
+            partial = true;
+        }
+        const qint64 from = partial && route.rangeStartOverride >= 0 ? route.rangeStartOverride : start;
+        const QByteArray payload = route.body.mid(from);
+        QByteArray headers;
+        int status = 200;
+        QByteArray reason = "OK";
+        if (partial) {
+            status = 206;
+            reason = "Partial Content";
+            headers = "Content-Range: bytes " + QByteArray::number(from) + "-" +
+                      QByteArray::number(route.body.size() - 1) + "/" + QByteArray::number(route.body.size()) + "\r\n";
+        }
+        qint64 limit = payload.size();
+        if (route.dropAfterBytes >= 0 && !route.dropped) {
+            route.dropped = true;
+            limit = qMin<qint64>(limit, route.dropAfterBytes);
+        } else if (route.shortBytes >= 0) {
+            limit = qMin<qint64>(limit, route.shortBytes);
+        }
+        if (route.chunk > 0) {
+            send(socket, status, reason, headers, "", payload.size());
+            auto sent = std::make_shared<qint64>(0);
+            auto *timer = new QTimer(socket);
+            const int chunk = route.chunk;
+            connect(timer, &QTimer::timeout, socket, [socket, timer, sent, payload, chunk] {
+                socket->write(payload.mid(*sent, chunk));
+                *sent += chunk;
+                if (*sent >= payload.size()) {
+                    timer->stop();
+                    socket->disconnectFromHost();
+                }
+            });
+            timer->start(route.chunkDelayMs);
+            return;
+        }
+        send(socket, status, reason, headers, payload.left(limit), payload.size());
+        socket->disconnectFromHost();
+    }
+
+    QTcpServer m_server;
+};
+
+// Sends every https request to the local server and refuses to send anything
+// anywhere else, so no test can reach the internet.
+class RewritingNetwork : public QNetworkAccessManager {
+public:
+    explicit RewritingNetwork(quint16 port) : m_port(port) {}
+    QStringList seen;
+
+protected:
+    QNetworkReply *createRequest(Operation operation, const QNetworkRequest &request,
+                                 QIODevice *outgoing = nullptr) override {
+        QNetworkRequest local(request);
+        const QUrl url = request.url();
+        seen << url.toString();
+        QUrl target;
+        target.setScheme("http");
+        target.setHost("127.0.0.1");
+        if (url.scheme() == "https" && url.host() == "models.example.test") {
+            target.setPort(m_port);
+            target.setPath(url.path());
+        } else if (url.scheme() == "http" && url.host() == "127.0.0.1") {
+            target = url;
+        } else {
+            target.setPort(1); // nothing listens here: any stray request fails
+            target.setPath("/refused");
+        }
+        local.setUrl(target);
+        return QNetworkAccessManager::createRequest(operation, local, outgoing);
+    }
+
+private:
+    quint16 m_port;
+};
+
+struct Blob {
+    QString key, folder, name;
+    QByteArray data;
+    QString path() const { return "/files/" + name; }
+    QByteArray sha256() const { return QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex(); }
+};
+
+QByteArray pseudoRandom(int size, quint32 seed) {
+    QRandomGenerator rng(seed);
+    QByteArray data;
+    data.reserve(size);
+    while (data.size() < size) {
+        const quint32 value = rng.generate();
+        data.append(reinterpret_cast<const char *>(&value), 4);
+    }
+    data.truncate(size);
+    return data;
+}
+
+// A catalogue of small files with real checksums. Model m is the default
+// (files a, c, b); m2 shares the encoder c with it (d, c, e); m3 lists one
+// file in two roles; u is the upscaler.
+struct World {
+    QMap<QString, Blob> blobs;
+    Catalogue catalogue;
+    QByteArray json; // the catalogue as a file, for LIMGEN_CATALOGUE
+    const Blob &blob(const QString &key) const { return blobs.constFind(key).value(); }
+    CatalogueFile file(const QString &key) const { return *catalogue.file(key); }
+    QList<CatalogueFile> files(const QStringList &keys) const {
+        QList<CatalogueFile> list;
+        for (const QString &key : keys)
+            list << file(key);
+        return list;
+    }
+    const ModelLevel &level(const QString &model) const { return catalogue.model(model)->levels.first(); }
+};
+
+World makeWorld() {
+    World world;
+    const struct {
+        const char *key, *folder, *name;
+        int size;
+    } specs[] = {{"a", "fa", "a.bin", 150000}, {"b", "fa", "b.bin", 70000},     {"c", "shared", "c.bin", 100000},
+                 {"d", "fd", "d.bin", 60000},  {"e", "fd", "e.bin", 30000},     {"u", "up", "u.bin", 40000}};
+    QJsonObject files;
+    quint32 seed = 1;
+    for (const auto &spec : specs) {
+        Blob blob{spec.key, spec.folder, spec.name, pseudoRandom(spec.size, seed++)};
+        files[spec.key] = QJsonObject{{"folder", spec.folder},
+                                      {"name", spec.name},
+                                      {"bytes", spec.size},
+                                      {"sha256", QString::fromLatin1(blob.sha256())},
+                                      {"url", QString("https://models.example.test/files/%1").arg(spec.name)},
+                                      {"licence", "MIT"}};
+        world.blobs.insert(spec.key, blob);
+    }
+    auto model = [](const char *id, bool isDefault, const QJsonObject &levelFiles) {
+        return QJsonObject{{"id", id},
+                           {"name", id},
+                           {"publisher", "Test"},
+                           {"default", isDefault},
+                           {"licence", QJsonObject{{"id", "MIT"}, {"summary", "s"}, {"url", "https://x.test/l"}}},
+                           {"native", QJsonArray{64, 64}},
+                           {"steps", 1},
+                           {"levels", QJsonArray{QJsonObject{{"id", "q"}, {"minFreeMiB", 1}, {"files", levelFiles}}}}};
+    };
+    QJsonObject root{{"engine", "x"},
+                     {"upscaler", "u"},
+                     {"files", files},
+                     {"models", QJsonArray{model("m", true, {{"diffusion-model", "a"}, {"llm", "c"}, {"vae", "b"}}),
+                                           model("m2", false, {{"diffusion-model", "d"}, {"llm", "c"}, {"vae", "e"}}),
+                                           model("m3", false, {{"diffusion-model", "a"}, {"vae", "a"}})}}};
+    QString error;
+    world.json = QJsonDocument(root).toJson();
+    world.catalogue = Catalogue::load(world.json, &error);
+    if (!world.catalogue.isValid())
+        qFatal("test catalogue: %s", qPrintable(error));
+    return world;
+}
+
+// What a ModelStore reported.
+struct StoreRun {
+    bool finished = false, failed = false, cancelled = false;
+    QString message;
+    QStringList installed;
+    QList<qint64> done;
+    qint64 total = -1;
+    bool over() const { return finished || failed || cancelled; }
+};
+
+void watchStore(ModelStore &store, StoreRun &run) {
+    QObject::connect(&store, &ModelStore::progress, &store, [&run](qint64 done, qint64 total, const QString &) {
+        run.done << done;
+        run.total = total;
+    });
+    QObject::connect(&store, &ModelStore::fileInstalled, &store, [&run](const QString &key) { run.installed << key; });
+    QObject::connect(&store, &ModelStore::finished, &store, [&run] { run.finished = true; });
+    QObject::connect(&store, &ModelStore::failed, &store, [&run](const QString &message) {
+        run.failed = true;
+        run.message = message;
+    });
+    QObject::connect(&store, &ModelStore::cancelled, &store, [&run] { run.cancelled = true; });
+}
+
+// Everything one download test needs: a temp models folder, the local server
+// serving every file of the world, and a store pointed at it.
+struct Rig {
+    Fixture fixture;
+    HttpServer server;
+    RewritingNetwork network;
+    World world;
+    ModelStore store;
+    StoreRun run;
+
+    Rig() : network(server.port()), world(makeWorld()), store(fixture.models, &network) {
+        for (const Blob &blob : world.blobs)
+            server.serve(blob.path(), blob.data);
+        watchStore(store, run);
+    }
+    QString target(const QString &key) const { return Catalogue::path(world.file(key), fixture.models); }
+    QString part(const QString &key) const { return target(key) + ".part"; }
+    HttpServer::Route &route(const QString &key) { return server.routes[world.blob(key).path()]; }
+    QString route_path(const QString &key) const { return world.blob(key).path(); }
+};
+
+#define WAIT_FOR_STORE(rig) QTRY_VERIFY_WITH_TIMEOUT((rig).run.over(), 25000)
+
+} // namespace
+
+// ============================== ModelStore ================================
+
+void LimgenTests::store_freshDownloadInstalls() {
+    Rig rig;
+    QVERIFY(rig.server.listening);
+    rig.store.start(rig.world.files({"a"}));
+    QVERIFY(rig.store.isRunning());
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QVERIFY(!rig.store.isRunning());
+    QCOMPARE(readFile(rig.target("a")), rig.world.blob("a").data);
+    // Only the installed file is left: no .part, nothing else.
+    QCOMPARE(filesUnder(rig.fixture.models), QStringList{rig.target("a")});
+    QCOMPARE(rig.run.installed, QStringList{"a"});
+    QCOMPARE(rig.server.count("/files/a.bin"), 1);
+    QCOMPARE(rig.server.rangesOf("/files/a.bin"), QList<QByteArray>{QByteArray()});
+    QVERIFY(!rig.run.done.isEmpty());
+    QCOMPARE(rig.run.total, qint64(150000));
+    QCOMPARE(rig.run.done.last(), qint64(150000));
+    for (int i = 1; i < rig.run.done.size(); ++i)
+        QVERIFY2(rig.run.done[i] >= rig.run.done[i - 1], "progress never goes backwards");
+}
+
+void LimgenTests::store_severalFilesInstallInOrder() {
+    Rig rig;
+    const ModelStore::Plan plan = rig.store.plan(rig.world.catalogue, rig.world.level("m"));
+    QStringList keys;
+    for (const CatalogueFile &file : plan.files)
+        keys << file.key;
+    QCOMPARE(keys, (QStringList{"a", "c", "b", "u"}));
+    rig.store.start(plan.files);
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.run.installed, keys);
+    QCOMPARE(rig.server.paths(), (QStringList{"/files/a.bin", "/files/c.bin", "/files/b.bin", "/files/u.bin"}));
+    for (const QString &key : keys) {
+        QCOMPARE(readFile(rig.target(key)), rig.world.blob(key).data);
+        QVERIFY(!QFileInfo::exists(rig.part(key)));
+    }
+    QCOMPARE(rig.run.total, plan.totalBytes);
+    QCOMPARE(rig.run.done.last(), plan.totalBytes);
+    QCOMPARE(filesUnder(rig.fixture.models).size(), 4);
+    // After the install there is nothing left to plan.
+    QVERIFY(rig.store.plan(rig.world.catalogue, rig.world.level("m")).files.isEmpty());
+}
+
+void LimgenTests::store_resumeSendsRangeAndEndsCorrect() {
+    Rig rig;
+    const QByteArray &data = rig.world.blob("a").data;
+    QVERIFY(writeFile(rig.part("a"), data.left(50000)));
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.server.rangesOf("/files/a.bin"), QList<QByteArray>{"bytes=50000-"});
+    QCOMPARE(readFile(rig.target("a")), data);
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+    QCOMPARE(rig.run.done.first(), qint64(50000)); // progress starts from what is on disk
+}
+
+void LimgenTests::store_serverIgnoringRangeStartsOver() {
+    Rig rig;
+    const QByteArray &data = rig.world.blob("a").data;
+    rig.route("a").honourRange = false; // answers 200 with the whole file
+    QVERIFY(writeFile(rig.part("a"), data.left(50000)));
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.server.rangesOf("/files/a.bin"), QList<QByteArray>{"bytes=50000-"});
+    // No duplicated bytes: the file is exactly the served one.
+    QCOMPARE(QFileInfo(rig.target("a")).size(), qint64(data.size()));
+    QCOMPARE(readFile(rig.target("a")), data);
+}
+
+void LimgenTests::store_wrongContentRangeStartsOver() {
+    Rig rig;
+    const QByteArray &data = rig.world.blob("a").data;
+    // The server answers 206, but from offset 0 and says so in Content-Range.
+    rig.route("a").rangeStartOverride = 0;
+    QVERIFY(writeFile(rig.part("a"), data.left(50000)));
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(readFile(rig.target("a")), data);
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+}
+
+void LimgenTests::store_completePartIsVerifiedWithoutRequest() {
+    Rig rig;
+    const QByteArray &data = rig.world.blob("a").data;
+    QVERIFY(writeFile(rig.part("a"), data));
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.server.requests.size(), 0); // nothing left to ask for
+    QCOMPARE(readFile(rig.target("a")), data);
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+}
+
+void LimgenTests::store_corruptCompletePartIsRemoved() {
+    Rig rig;
+    QByteArray bad = rig.world.blob("a").data;
+    bad[100] = char(bad[100] ^ 0xff);
+    QVERIFY(writeFile(rig.part("a"), bad));
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY(rig.run.failed);
+    QVERIFY(!rig.run.finished);
+    QVERIFY(rig.run.installed.isEmpty());
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    QCOMPARE(rig.server.requests.size(), 0);
+}
+
+void LimgenTests::store_status416OnShortPartDoesNotInstall() {
+    Rig rig;
+    rig.route("a").status = 416; // "the range starts at the end"
+    QVERIFY(writeFile(rig.part("a"), rig.world.blob("a").data.left(50000)));
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    // 416 is taken as "complete" and verified; a short file fails the checksum.
+    QCOMPARE(rig.server.count("/files/a.bin"), 1);
+    QVERIFY(rig.run.failed);
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+    QVERIFY(rig.run.installed.isEmpty());
+}
+
+void LimgenTests::store_oversizedPartStartsAgain() {
+    Rig rig;
+    const QByteArray &data = rig.world.blob("a").data;
+    QVERIFY(writeFile(rig.part("a"), pseudoRandom(data.size() + 100, 99)));
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.server.rangesOf("/files/a.bin"), QList<QByteArray>{QByteArray()}); // from zero
+    QCOMPARE(readFile(rig.target("a")), data);
+}
+
+void LimgenTests::store_droppedConnectionIsRetriedAndResumed() {
+    Rig rig;
+    rig.route("a").dropAfterBytes = 40000; // the first request only
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.server.count("/files/a.bin"), 2);
+    const QList<QByteArray> ranges = rig.server.rangesOf("/files/a.bin");
+    QCOMPARE(ranges[0], QByteArray());
+    QVERIFY2(ranges[1].startsWith("bytes=") && ranges[1].endsWith("-"), ranges[1].constData());
+    const qint64 resumedAt = ranges[1].mid(6, ranges[1].size() - 7).toLongLong();
+    QVERIFY2(resumedAt > 0 && resumedAt <= 40000, qPrintable(QString::number(resumedAt)));
+    QCOMPARE(readFile(rig.target("a")), rig.world.blob("a").data);
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+}
+
+void LimgenTests::store_retriesExhaustedFailsAndKeepsPart() {
+    Rig rig;
+    // Every request fails without delivering a byte, so the retries are not
+    // reset: the first try and three retries, then the end.
+    rig.route("a").status = 500;
+    const QByteArray &data = rig.world.blob("a").data;
+    QVERIFY(writeFile(rig.part("a"), data.left(20000)));
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY(rig.run.failed);
+    QVERIFY(!rig.run.message.isEmpty());
+    QVERIFY(!rig.store.isRunning());
+    QCOMPARE(rig.server.count("/files/a.bin"), 1 + ModelStore::retries);
+    // Each retry resumes from the same place; the .part is exactly as it was.
+    QCOMPARE(rig.server.rangesOf("/files/a.bin"),
+             (QList<QByteArray>{"bytes=20000-", "bytes=20000-", "bytes=20000-", "bytes=20000-"}));
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    QCOMPARE(readFile(rig.part("a")), data.left(20000));
+}
+
+void LimgenTests::store_finalErrorsFailAtOnce_data() {
+    QTest::addColumn<int>("status");
+    QTest::newRow("not found") << 404;
+    QTest::newRow("forbidden") << 403;
+    QTest::newRow("unauthorised") << 401;
+    QTest::newRow("gone") << 410;
+}
+
+void LimgenTests::store_finalErrorsFailAtOnce() {
+    QFETCH(int, status);
+    Rig rig;
+    rig.route("a").status = status;
+    QElapsedTimer timer;
+    timer.start();
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY(rig.run.failed);
+    QVERIFY(!rig.run.message.isEmpty());
+    QCOMPARE(rig.server.count("/files/a.bin"), 1); // no retries
+    QVERIFY2(timer.elapsed() < 1900, qPrintable(QString::number(timer.elapsed()))); // and no 2 s wait
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    // The error page was never written anywhere.
+    QVERIFY(!QFileInfo::exists(rig.part("a")) || QFileInfo(rig.part("a")).size() == 0);
+    for (const QString &path : filesUnder(rig.fixture.models))
+        QVERIFY2(!readFile(path).contains("error page"), qPrintable(path));
+}
+
+void LimgenTests::store_checksumMismatchRemovesPart() {
+    Rig rig;
+    QByteArray bad = rig.world.blob("a").data;
+    bad[1000] = char(bad[1000] ^ 1); // same size, one flipped bit
+    rig.route("a").body = bad;
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY(rig.run.failed);
+    QVERIFY(rig.run.message.contains("a.bin"));
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    QVERIFY(rig.run.installed.isEmpty());
+    QCOMPARE(rig.server.count("/files/a.bin"), 1); // not retried
+}
+
+void LimgenTests::store_oversizeBodyIsRemoved() {
+    Rig rig;
+    rig.route("a").body = rig.world.blob("a").data + QByteArray(5000, 'x');
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY(rig.run.failed);
+    QVERIFY(!rig.store.isRunning());
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    QCOMPARE(rig.server.count("/files/a.bin"), 1);
+}
+
+void LimgenTests::store_redirectIsFollowed() {
+    Rig rig;
+    rig.server.serve("/real/a.bin", rig.world.blob("a").data);
+    rig.route("a").redirectTo = QString("http://127.0.0.1:%1/real/a.bin").arg(rig.server.port());
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.server.paths(), (QStringList{"/files/a.bin", "/real/a.bin"}));
+    QCOMPARE(readFile(rig.target("a")), rig.world.blob("a").data);
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+}
+
+void LimgenTests::store_redirectKeepsRange() {
+    Rig rig;
+    const QByteArray &data = rig.world.blob("a").data;
+    rig.server.serve("/real/a.bin", data);
+    rig.route("a").redirectTo = QString("http://127.0.0.1:%1/real/a.bin").arg(rig.server.port());
+    QVERIFY(writeFile(rig.part("a"), data.left(50000)));
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    // The resume survives the redirect: the final server was asked for the rest only.
+    QCOMPARE(rig.server.rangesOf("/real/a.bin"), QList<QByteArray>{"bytes=50000-"});
+    QCOMPARE(readFile(rig.target("a")), data);
+}
+
+void LimgenTests::store_wrongSizedTargetIsReplaced() {
+    Rig rig;
+    QVERIFY(writeFile(rig.target("a"), "short and wrong"));
+    const ModelStore::Plan plan = rig.store.plan(rig.world.catalogue, rig.world.level("m3"), false);
+    QCOMPARE(plan.files.size(), 1); // a wrong-sized file counts as not installed
+    rig.store.start(plan.files);
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(readFile(rig.target("a")), rig.world.blob("a").data);
+    QCOMPARE(filesUnder(rig.fixture.models), QStringList{rig.target("a")});
+}
+
+void LimgenTests::store_cancelKeepsPartAndNextStartResumes() {
+    Rig rig;
+    const QByteArray &data = rig.world.blob("a").data;
+    HttpServer::Route &route = rig.route("a");
+    route.chunk = 10000; // 1.5 s for the whole file
+    route.chunkDelayMs = 100;
+    rig.store.start(rig.world.files({"a"}));
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(rig.part("a")).size() > 0, 10000);
+    rig.store.cancel();
+    QTRY_VERIFY_WITH_TIMEOUT(rig.run.over(), 10000);
+    QVERIFY(rig.run.cancelled);
+    QVERIFY(!rig.run.failed);
+    QVERIFY(!rig.run.finished);
+    QVERIFY(!rig.store.isRunning());
+    const qint64 kept = QFileInfo(rig.part("a")).size();
+    QVERIFY2(kept > 0 && kept < data.size(), qPrintable(QString::number(kept)));
+    QCOMPARE(readFile(rig.part("a")), data.left(kept));
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    QTest::qWait(300); // nothing more is written after the cancel
+    QCOMPARE(QFileInfo(rig.part("a")).size(), kept);
+
+    // The next start resumes from there, at full speed this time.
+    route.chunk = 0;
+    rig.run = StoreRun();
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.server.rangesOf("/files/a.bin"),
+             (QList<QByteArray>{"", "bytes=" + QByteArray::number(kept) + "-"}));
+    QCOMPARE(readFile(rig.target("a")), data);
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+}
+
+void LimgenTests::store_cancelBeforeStartDoesNothing() {
+    Rig rig;
+    rig.store.cancel();
+    QTest::qWait(100);
+    QVERIFY(!rig.run.over());
+    QVERIFY(!rig.store.isRunning());
+    // And it does not leave a cancel pending for the next start.
+    rig.store.start(rig.world.files({"b"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QVERIFY(!rig.run.cancelled);
+    QCOMPARE(readFile(rig.target("b")), rig.world.blob("b").data);
+}
+
+void LimgenTests::store_startWhileRunningIsIgnored() {
+    Rig rig;
+    rig.store.start(rig.world.files({"a"}));
+    rig.store.start(rig.world.files({"b"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.run.installed, QStringList{"a"});
+    QCOMPARE(rig.server.count("/files/b.bin"), 0);
+    QVERIFY(!QFileInfo::exists(rig.target("b")));
+}
+
+void LimgenTests::store_neverReachesBeyondLocalhost() {
+    Rig rig;
+    rig.store.start(rig.world.files({"a", "b"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY(rig.run.finished);
+    // Every request the store made was for the catalogue's host, which the
+    // test network turned into the local server.
+    QVERIFY(!rig.network.seen.isEmpty());
+    for (const QString &url : rig.network.seen)
+        QVERIFY2(url.startsWith("https://models.example.test/files/"), qPrintable(url));
+}
+
+// ============================== ModelStore::plan ==========================
+
+void LimgenTests::plan_freshListsLevelFilesThenUpscaler() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const World world = makeWorld();
+    const ModelStore store(fixture.models);
+    const ModelStore::Plan plan = store.plan(world.catalogue, world.level("m"));
+    QStringList keys;
+    for (const CatalogueFile &file : plan.files)
+        keys << file.key;
+    QCOMPARE(keys, (QStringList{"a", "c", "b", "u"})); // level files in role order, the upscaler last
+    QCOMPARE(plan.totalBytes, qint64(150000 + 100000 + 70000 + 40000));
+    QCOMPARE(plan.partBytes, qint64(0));
+    QCOMPARE(plan.downloadBytes(), plan.totalBytes);
+    QVERIFY(plan.availableBytes > 0);
+    QVERIFY(!QFileInfo::exists(fixture.models)); // planning creates nothing
+}
+
+void LimgenTests::plan_upscalerOptional() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const World world = makeWorld();
+    const ModelStore store(fixture.models);
+    ModelStore::Plan plan = store.plan(world.catalogue, world.level("m"), false);
+    QCOMPARE(plan.files.size(), 3);
+    for (const CatalogueFile &file : plan.files)
+        QVERIFY(file.key != "u");
+    QCOMPARE(plan.totalBytes, qint64(320000));
+    // An installed upscaler is not planned either.
+    QVERIFY(makeSparse(Catalogue::path(world.file("u"), fixture.models), 40000));
+    plan = store.plan(world.catalogue, world.level("m"), true);
+    QCOMPARE(plan.files.size(), 3);
+}
+
+void LimgenTests::plan_installedFilesAreSkipped() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const World world = makeWorld();
+    const ModelStore store(fixture.models);
+    QVERIFY(makeSparse(Catalogue::path(world.file("a"), fixture.models), 150000));
+    QVERIFY(makeSparse(Catalogue::path(world.file("b"), fixture.models), 70000 - 1)); // wrong size: still planned
+    const ModelStore::Plan plan = store.plan(world.catalogue, world.level("m"), false);
+    QStringList keys;
+    for (const CatalogueFile &file : plan.files)
+        keys << file.key;
+    QCOMPARE(keys, (QStringList{"c", "b"}));
+    QCOMPARE(plan.totalBytes, qint64(170000));
+}
+
+void LimgenTests::plan_sharedFileOfInstalledModelIsSkipped() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const World world = makeWorld();
+    const ModelStore store(fixture.models);
+    for (const QString &key : world.level("m").files)
+        QVERIFY(makeSparse(Catalogue::path(world.file(key), fixture.models), world.file(key).bytes));
+    const ModelStore::Plan plan = store.plan(world.catalogue, world.level("m2"), false);
+    QStringList keys;
+    for (const CatalogueFile &file : plan.files)
+        keys << file.key;
+    QCOMPARE(keys, (QStringList{"d", "e"})); // the encoder c is already there
+    QCOMPARE(plan.totalBytes, qint64(90000));
+}
+
+void LimgenTests::plan_sameFileTwiceInLevelIsPlannedOnce() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const World world = makeWorld();
+    const ModelStore store(fixture.models);
+    const ModelStore::Plan plan = store.plan(world.catalogue, world.level("m3"), false);
+    QCOMPARE(plan.files.size(), 1);
+    QCOMPARE(plan.totalBytes, qint64(150000));
+}
+
+void LimgenTests::plan_partBytes() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const World world = makeWorld();
+    const ModelStore store(fixture.models);
+    const QString partA = Catalogue::path(world.file("a"), fixture.models) + ".part";
+    const QString partC = Catalogue::path(world.file("c"), fixture.models) + ".part";
+    const QString partB = Catalogue::path(world.file("b"), fixture.models) + ".part";
+    QVERIFY(writeFile(partA, QByteArray(50000, 'x')));
+    QVERIFY(writeFile(partC, QByteArray(100000, 'x'))); // complete: counts in full
+    QVERIFY(writeFile(partB, QByteArray(70001, 'x')));  // larger than the file: wrong, so not counted
+    ModelStore::Plan plan = store.plan(world.catalogue, world.level("m"), false);
+    QCOMPARE(plan.partBytes, qint64(150000));
+    QCOMPARE(plan.totalBytes, qint64(320000));
+    QCOMPARE(plan.downloadBytes(), qint64(170000));
+    // A .part beside an installed file is not counted.
+    QVERIFY(makeSparse(Catalogue::path(world.file("a"), fixture.models), 150000));
+    plan = store.plan(world.catalogue, world.level("m"), false);
+    QCOMPARE(plan.partBytes, qint64(100000));
+}
+
+void LimgenTests::plan_availableBytes() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const qint64 here = ModelStore::availableBytes(fixture.root.path());
+    QVERIFY(here > 0);
+    // A folder that does not exist yet is measured at its nearest existing parent.
+    const qint64 below = ModelStore::availableBytes(fixture.root.path() + "/not/yet/there");
+    QVERIFY(below > 0);
+    QVERIFY(qAbs(below - here) < qint64(64) * 1024 * 1024);
+    QVERIFY(!QFileInfo::exists(fixture.root.path() + "/not"));
+}
+
+void LimgenTests::plan_fitsOnDisk() {
+    QCOMPARE(ModelStore::headroomBytes, qint64(256) * 1024 * 1024);
+    ModelStore::Plan plan;
+    plan.totalBytes = 1000;
+    plan.partBytes = 200; // 800 left to download
+    plan.availableBytes = -1;
+    QVERIFY(plan.fitsOnDisk()); // unknown: do not refuse
+    plan.availableBytes = 0;
+    QVERIFY(!plan.fitsOnDisk());
+    plan.availableBytes = 800; // enough for the file, but no headroom
+    QVERIFY(!plan.fitsOnDisk());
+    plan.availableBytes = 800 + ModelStore::headroomBytes - 1;
+    QVERIFY(!plan.fitsOnDisk());
+    plan.availableBytes = 800 + ModelStore::headroomBytes;
+    QVERIFY(plan.fitsOnDisk());
+    plan.partBytes = 1000; // nothing left: the headroom alone is still asked for
+    plan.availableBytes = ModelStore::headroomBytes - 1;
+    QVERIFY(!plan.fitsOnDisk());
+    plan.availableBytes = ModelStore::headroomBytes;
+    QVERIFY(plan.fitsOnDisk());
+}
+
+// ============================== CLI: models ===============================
+
+namespace {
+
+qint64 sizeOfMissing(const Catalogue &catalogue, const QString &model, const QString &installedModel) {
+    qint64 bytes = 0;
+    const ModelLevel &installed = catalogue.model(installedModel)->levels.first();
+    for (const QString &key : catalogue.model(model)->levels.first().files)
+        if (!installed.files.values().contains(key))
+            bytes += catalogue.file(key)->bytes;
+    return bytes;
+}
+
+} // namespace
+
+void LimgenTests::cli_modelsListText() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const Catalogue catalogue = Catalogue::builtIn();
+    for (const QStringList &arguments : {QStringList{"models"}, QStringList{"models", "list"}}) {
+        const CliResult result = runCli(fixture, arguments, engineEnvironment(fixture));
+        QCOMPARE(result.exitCode, 0);
+        QCOMPARE(result.err, QString());
+        QVERIFY2(result.out.contains(fixture.models), qPrintable(result.out));
+        for (const CatalogueModel &model : catalogue.models()) {
+            QVERIFY2(result.out.contains(model.id), qPrintable(model.id));
+            QVERIFY(result.out.contains(model.licenceId));
+        }
+    }
+    QCOMPARE(filesUnder(fixture.models), QStringList()); // listing writes nothing
+}
+
+void LimgenTests::cli_modelsListJson() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const Catalogue catalogue = Catalogue::builtIn();
+    QVERIFY(installModel(catalogue, "z-image-turbo", fixture.models)); // without the upscaler
+    const CliResult result = runCli(fixture, {"models", "--json"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(result.err, QString());
+    const QJsonObject json = jsonObject(result.out);
+    QCOMPARE(json["modelsDirectory"].toString(), fixture.models);
+    const QJsonArray models = json["models"].toArray();
+    QCOMPARE(models.size(), catalogue.models().size());
+    QJsonObject zImage, klein;
+    for (const QJsonValue &value : models) {
+        const QJsonObject model = value.toObject();
+        if (model["id"].toString() == "z-image-turbo")
+            zImage = model;
+        if (model["id"].toString() == "flux2-klein-4b")
+            klein = model;
+    }
+    QCOMPARE(zImage["default"].toBool(), true);
+    QCOMPARE(klein["default"].toBool(), false);
+    QCOMPARE(zImage["licence"].toObject()["id"].toString(), catalogue.model("z-image-turbo")->licenceId);
+    QVERIFY(!zImage["name"].toString().isEmpty());
+    QVERIFY(!zImage["publisher"].toString().isEmpty());
+    const QJsonObject zLevel = zImage["levels"].toArray()[0].toObject();
+    const QJsonObject kLevel = klein["levels"].toArray()[0].toObject();
+    QCOMPARE(zLevel["id"].toString(), catalogue.model("z-image-turbo")->levels.first().id);
+    QCOMPARE(zLevel["installed"].toBool(), true);
+    QCOMPARE(zLevel["downloadBytes"].toDouble(), 0.0);
+    QCOMPARE(kLevel["installed"].toBool(), false);
+    // The shared text encoder is installed, so only klein's own files are left.
+    QCOMPARE(qint64(kLevel["downloadBytes"].toDouble()), sizeOfMissing(catalogue, "flux2-klein-4b", "z-image-turbo"));
+    QCOMPARE(kLevel["minFreeMiB"].toInt(), catalogue.model("flux2-klein-4b")->levels.first().minFreeMiB);
+    QCOMPARE(kLevel["runsHere"].toBool(), true); // 10000 MiB free in the fake GPU
+    // The same in a run with nothing installed: everything is to download.
+    Fixture empty;
+    QVERIFY(empty.ok());
+    const QJsonObject all = jsonObject(runCli(empty, {"models", "--json"}, engineEnvironment(empty)).out);
+    qint64 zTotal = 0;
+    for (const QString &key : catalogue.model("z-image-turbo")->levels.first().files.values())
+        zTotal += catalogue.file(key)->bytes;
+    for (const QJsonValue &value : all["models"].toArray())
+        if (value.toObject()["id"].toString() == "z-image-turbo") {
+            const QJsonObject level = value.toObject()["levels"].toArray()[0].toObject();
+            QCOMPARE(level["installed"].toBool(), false);
+            QCOMPARE(qint64(level["downloadBytes"].toDouble()), zTotal);
+        }
+}
+
+void LimgenTests::cli_modelsRunsHereFollowsFreeMemory() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    auto runsHere = [&](const QHash<QString, QString> &environment) -> QJsonValue {
+        const CliResult result = runCli(fixture, {"models", "--json"}, environment);
+        return jsonObject(result.out)["models"].toArray()[0].toObject()["levels"].toArray()[0].toObject()["runsHere"];
+    };
+    QVERIFY(runsHere(engineEnvironment(fixture, 2000, 12000)).isBool());
+    QCOMPARE(runsHere(engineEnvironment(fixture, 2000, 12000)).toBool(), true);
+    // 3000 MiB free is below the 5000 the model needs.
+    const QJsonValue low = runsHere(engineEnvironment(fixture, 9000, 12000));
+    QVERIFY(low.isBool());
+    QCOMPARE(low.toBool(), false);
+    // No GPU reading at all: unknown, not false.
+    QHash<QString, QString> none = engineEnvironment(fixture);
+    none["LIMGEN_NVIDIA_SMI"] = fixture.root.path() + "/no-nvidia-smi";
+    QVERIFY(runsHere(none).isNull());
+}
+
+void LimgenTests::cli_modelsUsageErrors_data() {
+    QTest::addColumn<QStringList>("arguments");
+    QTest::newRow("list with a model") << QStringList{"models", "list", "extra"};
+    QTest::newRow("list with --yes") << QStringList{"models", "list", "--yes"};
+    QTest::newRow("list with --level") << QStringList{"models", "list", "--level", "q4_k"};
+    QTest::newRow("unknown action") << QStringList{"models", "bogus"};
+    QTest::newRow("too many arguments") << QStringList{"models", "pull", "z-image-turbo", "extra"};
+    QTest::newRow("pull without id") << QStringList{"models", "pull"};
+    QTest::newRow("pull unknown model") << QStringList{"models", "pull", "nope", "--yes"};
+    QTest::newRow("pull unknown level") << QStringList{"models", "pull", "z-image-turbo", "--level", "nope", "--yes"};
+    QTest::newRow("unknown option") << QStringList{"models", "--bogus"};
+}
+
+void LimgenTests::cli_modelsUsageErrors() {
+    REQUIRE_BINARY();
+    QFETCH(QStringList, arguments);
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const CliResult result = runCli(fixture, arguments, engineEnvironment(fixture));
+    QVERIFY(result.started);
+    QCOMPARE(result.exitCode, 2);
+    QCOMPARE(result.out, QString());
+    QVERIFY(!result.err.isEmpty());
+    QVERIFY(!QFileInfo::exists(fixture.models + "/.download.lock"));
+    QCOMPARE(filesUnder(fixture.models), QStringList());
+}
+
+void LimgenTests::cli_modelsPullAlreadyInstalled() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const Catalogue catalogue = Catalogue::builtIn();
+    QVERIFY(installModel(catalogue, "z-image-turbo", fixture.models));
+    QVERIFY(makeSparse(Catalogue::path(*catalogue.upscaler(), fixture.models), catalogue.upscaler()->bytes));
+    const QStringList before = filesUnder(fixture.models);
+    // Without --yes too: nothing to download means nothing to ask.
+    CliResult result = runCli(fixture, {"models", "pull", "z-image-turbo"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(result.out, QString());
+    result = runCli(fixture, {"models", "pull", "z-image-turbo", "--yes", "--json"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 0);
+    const QJsonObject json = jsonObject(result.out);
+    QCOMPARE(json["model"].toString(), QString("z-image-turbo"));
+    QCOMPARE(json["level"].toString(), catalogue.model("z-image-turbo")->levels.first().id);
+    QVERIFY(json["installed"].isArray());
+    QCOMPARE(json["installed"].toArray().size(), 0);
+    QCOMPARE(filesUnder(fixture.models), before);
+    QVERIFY(!QFileInfo::exists(fixture.models + "/.download.lock"));
+}
+
+void LimgenTests::cli_modelsPullWithoutYesAsksNothingAndWritesNothing() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const Catalogue catalogue = Catalogue::builtIn();
+    const CatalogueModel &model = *catalogue.model("z-image-turbo");
+    // The shared text encoder is already installed.
+    const CatalogueFile &encoder = *catalogue.file(model.levels.first().files.value("llm"));
+    QVERIFY(makeSparse(Catalogue::path(encoder, fixture.models), encoder.bytes));
+    const QStringList before = filesUnder(fixture.models);
+    const CliResult result = runCli(fixture, {"models", "pull", "z-image-turbo"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 2); // stdin is not a terminal and there is no --yes
+    QCOMPARE(result.out, QString());
+    // What the user would have agreed to is shown: the licence and each file still needed.
+    QVERIFY2(result.err.contains(model.licenceId), qPrintable(result.err));
+    for (const QString &key : model.levels.first().files)
+        if (key != encoder.key)
+            QVERIFY2(result.err.contains(describeFile(*catalogue.file(key))), qPrintable(key));
+    QVERIFY2(result.err.contains(describeFile(*catalogue.upscaler())), "the upscaler is part of the pull");
+    QVERIFY2(!result.err.contains(describeFile(encoder)), "an installed file is not listed");
+    // Nothing was written, no lock either.
+    QCOMPARE(filesUnder(fixture.models), before);
+    QVERIFY(!QFileInfo::exists(fixture.models + "/.download.lock"));
+    // The same with --json.
+    const CliResult json = runCli(fixture, {"models", "pull", "z-image-turbo", "--json"}, engineEnvironment(fixture));
+    QCOMPARE(json.exitCode, 2);
+    QCOMPARE(json.out, QString());
+    QCOMPARE(filesUnder(fixture.models), before);
+}
+
+void LimgenTests::cli_modelsPullHeldLock() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    QVERIFY(QDir().mkpath(fixture.models));
+    QLockFile lock(fixture.models + "/.download.lock");
+    QVERIFY(lock.tryLock(0));
+    const CliResult result = runCli(fixture, {"models", "pull", "z-image-turbo", "--yes"}, engineEnvironment(fixture));
+    QVERIFY(result.started);
+    QCOMPARE(result.exitCode, 1);
+    QCOMPARE(result.out, QString());
+    QVERIFY2(result.err.contains(fixture.models), qPrintable(result.err));
+    // The lock stayed ours, and no download was started: no .part, no folder.
+    // Were the lock check gone, the pull would try to download from the port
+    // LIMGEN_DOWNLOAD_BASE names, where nothing listens, so even then it could
+    // not reach the internet; it would still leave a .part file behind.
+    QVERIFY(QFileInfo::exists(fixture.models + "/.download.lock"));
+    QCOMPARE(filesUnder(fixture.models), QStringList());
+    QCOMPARE(QDir(fixture.models).entryList(QDir::Dirs | QDir::NoDotAndDotDot), QStringList());
+    QVERIFY(lock.isLocked());
+}
+
+void LimgenTests::cli_notInstalledMessagesNameThePullCommand() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const CliResult doctor = runCli(fixture, {"doctor", "--json"}, engineEnvironment(fixture));
+    QCOMPARE(doctor.exitCode, 3);
+    const QJsonArray problems = jsonObject(doctor.out)["problems"].toArray();
+    QCOMPARE(problems.size(), 1);
+    QVERIFY2(problems[0].toString().contains("limgen models pull z-image-turbo"), qPrintable(problems[0].toString()));
+    const CliResult generate = runCli(fixture, {"generate", "a fox"}, engineEnvironment(fixture));
+    QCOMPARE(generate.exitCode, 3);
+    QVERIFY2(generate.err.contains("limgen models pull z-image-turbo"), qPrintable(generate.err));
+    const CliResult klein = runCli(fixture, {"generate", "a fox", "--model", "flux2-klein-4b"}, engineEnvironment(fixture));
+    QCOMPARE(klein.exitCode, 3);
+    QVERIFY2(klein.err.contains("limgen models pull flux2-klein-4b"), qPrintable(klein.err));
+}
+
+void LimgenTests::cli_helpModels() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const CliResult summary = runCli(fixture, {"help"});
+    QCOMPARE(summary.exitCode, 0);
+    QVERIFY(summary.out.contains("models"));
+    const CliResult models = runCli(fixture, {"help", "models"});
+    QCOMPARE(models.exitCode, 0);
+    for (const QString &option : QStringList{"--level", "--yes", "--json"})
+        QVERIFY2(models.out.contains(option), qPrintable(option));
+}
+
+// ===================== L3 review: behaviour changes, end to end ==========
+
+namespace {
+
+// Runs the built limgen without blocking the test's event loop, which also
+// serves the local HTTP server the child downloads from.
+std::unique_ptr<QProcess> startProcess(const QProcessEnvironment &environment, const QString &program,
+                                       const QStringList &arguments) {
+    auto process = std::make_unique<QProcess>();
+    process->setProcessEnvironment(environment);
+    process->start(program, arguments);
+    return process;
+}
+
+QString shellQuote(const QString &text) { return "'" + QString(text).replace("'", "'\\''") + "'"; }
+
+// A temp models folder, a local server holding the test catalogue's files,
+// and the environment that points a limgen process at both.
+struct PullRig {
+    Fixture fixture;
+    HttpServer server;
+    World world;
+    QString cataloguePath;
+
+    PullRig() : world(makeWorld()) {
+        for (const Blob &blob : world.blobs)
+            server.serve(blob.path(), blob.data);
+        cataloguePath = fixture.root.path() + "/catalogue.json";
+        writeFile(cataloguePath, world.json);
+    }
+    QHash<QString, QString> environment() const {
+        QHash<QString, QString> env = engineEnvironment(fixture);
+        env["LIMGEN_CATALOGUE"] = cataloguePath;
+        env["LIMGEN_DOWNLOAD_BASE"] = QString("http://127.0.0.1:%1").arg(server.port());
+        return env;
+    }
+    QString target(const QString &key) const { return Catalogue::path(world.file(key), fixture.models); }
+    QString part(const QString &key) const { return target(key) + ".part"; }
+    HttpServer::Route &route(const QString &key) { return server.routes[world.blob(key).path()]; }
+    QStringList planned() const { return {target("a"), target("c"), target("b"), target("u")}; }
+};
+
+#define WAIT_FOR_PROCESS(process) QTRY_VERIFY_WITH_TIMEOUT((process)->state() == QProcess::NotRunning, 40000)
+
+// A text pull driven through a pseudo-terminal made by script(1), so the
+// y/N prompt is real: isatty(stdin) is true. Everything the child prints
+// arrives on one stream.
+struct PtyPull {
+    std::unique_ptr<QProcess> process;
+    QByteArray output;
+    void start(const QProcessEnvironment &environment, const QString &model) {
+        const QString command = shellQuote(qEnvironmentVariable("LIMGEN_BINARY")) + " models pull " + model;
+        process = startProcess(environment, "script", {"-qec", command, "/dev/null"});
+        QObject::connect(process.get(), &QProcess::readyReadStandardOutput, process.get(),
+                         [this] { output += process->readAllStandardOutput(); });
+    }
+    bool waitForPrompt() {
+        for (int i = 0; i < 400 && !output.contains("[y/N]"); ++i)
+            QTest::qWait(50);
+        return output.contains("[y/N]");
+    }
+};
+
+} // namespace
+
+void LimgenTests::store_dropEveryRequestStillFinishes() {
+    Rig rig;
+    // Every request ends after 30000 bytes, so the file takes 5 requests and 4 drops: one
+    // more than the retries. Bytes arrived each time, so the retries start afresh.
+    rig.route("a").shortBytes = 30000;
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.server.rangesOf("/files/a.bin"),
+             (QList<QByteArray>{"", "bytes=30000-", "bytes=60000-", "bytes=90000-", "bytes=120000-"}));
+    QCOMPARE(readFile(rig.target("a")), rig.world.blob("a").data);
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+}
+
+void LimgenTests::store_redirectLoopFailsWithoutRetries() {
+    Rig rig;
+    rig.route("a").redirectTo = QString("http://127.0.0.1:%1/files/a.bin").arg(rig.server.port());
+    QElapsedTimer timer;
+    timer.start();
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QVERIFY(rig.run.failed);
+    QVERIFY(!rig.run.message.isEmpty());
+    // One round of redirects, then stop; a retry would wait two seconds first.
+    QVERIFY2(timer.elapsed() < 1900, qPrintable(QString::number(timer.elapsed())));
+    QVERIFY2(rig.server.requests.size() <= 60, qPrintable(QString::number(rig.server.requests.size())));
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    QVERIFY(!QFileInfo::exists(rig.part("a")) || QFileInfo(rig.part("a")).size() == 0);
+}
+
+void LimgenTests::store_unreadableCompletePartFailsAndIsKept() {
+    if (geteuid() == 0)
+        QSKIP("root can read any file, so there is nothing to refuse");
+    Rig rig;
+    const QByteArray &data = rig.world.blob("a").data;
+    QVERIFY(writeFile(rig.part("a"), data));
+    QVERIFY(QFile::setPermissions(rig.part("a"), QFileDevice::Permissions()));
+    rig.store.start(rig.world.files({"a"}));
+    WAIT_FOR_STORE(rig);
+    QFile::setPermissions(rig.part("a"), QFile::ReadOwner | QFile::WriteOwner);
+    QVERIFY(rig.run.failed);
+    QVERIFY2(rig.run.message.contains("Cannot read"), qPrintable(rig.run.message));
+    // A file that cannot be read is not known to be bad, so it stays.
+    QVERIFY(QFileInfo::exists(rig.part("a")));
+    QCOMPARE(readFile(rig.part("a")), data);
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    QVERIFY(rig.run.installed.isEmpty());
+    QCOMPARE(rig.server.requests.size(), 0);
+}
+
+void LimgenTests::store_cancelBetweenHashAndVerifiedEmitsOnce() {
+    Rig rig;
+    const QByteArray &data = rig.world.blob("a").data;
+    QVERIFY(writeFile(rig.part("a"), data)); // complete: start() goes straight to hashing
+    QSignalSpy cancelled(&rig.store, &ModelStore::cancelled);
+    rig.store.start(rig.world.files({"a"}));
+    // The hash of 150 KB is done long before this returns, but the event loop
+    // has not run, so verified() has not: the window the cancel lands in.
+    QThread::msleep(300);
+    rig.store.cancel();
+    QTRY_VERIFY_WITH_TIMEOUT(cancelled.count() >= 1, 5000);
+    QTest::qWait(300); // a second emission would arrive by now
+    QCOMPARE(cancelled.count(), 1);
+    QVERIFY(!rig.store.isRunning());
+    // A complete, checked file is installed even though a cancel came in.
+    QCOMPARE(rig.run.installed, QStringList{"a"});
+    QCOMPARE(readFile(rig.target("a")), data);
+    QVERIFY(!rig.run.finished);
+    QVERIFY(!rig.run.failed);
+}
+
+void LimgenTests::store_cancelFromProgressDuringVerifyEmitsOnce() {
+    Rig rig;
+    QVERIFY(writeFile(rig.part("a"), rig.world.blob("a").data));
+    QSignalSpy cancelled(&rig.store, &ModelStore::cancelled);
+    // The progress signal of verify() runs inside start(), before hashing.
+    QObject::connect(&rig.store, &ModelStore::progress, &rig.store, [&rig](qint64, qint64, const QString &) {
+        if (rig.run.done.size() == 1) // the first report, seen by the recorder before this slot
+            rig.store.cancel();
+    });
+    rig.store.start(rig.world.files({"a"}));
+    QTRY_VERIFY_WITH_TIMEOUT(cancelled.count() >= 1, 5000);
+    QTest::qWait(300);
+    QCOMPARE(cancelled.count(), 1);
+    QVERIFY(!rig.store.isRunning());
+}
+
+void LimgenTests::cli_pullEndToEnd() {
+    REQUIRE_BINARY();
+    PullRig rig;
+    QVERIFY(rig.server.listening);
+    const QProcessEnvironment environment = cliEnvironment(rig.fixture, rig.environment());
+    auto process = startProcess(environment, qEnvironmentVariable("LIMGEN_BINARY"), {"models", "pull", "m", "--yes"});
+    WAIT_FOR_PROCESS(process);
+    const QString out = QString::fromUtf8(process->readAllStandardOutput());
+    const QString err = QString::fromUtf8(process->readAllStandardError());
+    QCOMPARE(process->exitCode(), 0);
+    // stdout lists what was installed, in plan order, including the upscaler.
+    QCOMPARE(out.split('\n', Qt::SkipEmptyParts), rig.planned());
+    QVERIFY2(err.contains("MIT"), qPrintable(err)); // the licence was shown
+    for (const QString &key : QStringList{"a", "c", "b", "u"}) {
+        QCOMPARE(readFile(rig.target(key)), rig.world.blob(key).data);
+        QVERIFY(!QFileInfo::exists(rig.part(key)));
+    }
+    QVERIFY(!QFileInfo::exists(rig.fixture.models + "/.download.lock"));
+    QCOMPARE(rig.server.paths(), (QStringList{"/files/a.bin", "/files/c.bin", "/files/b.bin", "/files/u.bin"}));
+    QCOMPARE(filesUnder(rig.fixture.models).size(), 4);
+}
+
+void LimgenTests::cli_pullEndToEndJson() {
+    REQUIRE_BINARY();
+    PullRig rig;
+    const QProcessEnvironment environment = cliEnvironment(rig.fixture, rig.environment());
+    auto process = startProcess(environment, qEnvironmentVariable("LIMGEN_BINARY"),
+                                {"models", "pull", "m2", "--yes", "--json"});
+    WAIT_FOR_PROCESS(process);
+    QCOMPARE(process->exitCode(), 0);
+    const QJsonObject json = jsonObject(QString::fromUtf8(process->readAllStandardOutput()));
+    QCOMPARE(json["model"].toString(), QString("m2"));
+    QCOMPARE(json["level"].toString(), QString("q"));
+    QStringList installed;
+    for (const QJsonValue &value : json["installed"].toArray())
+        installed << value.toString();
+    // m2 is d, c, e plus the upscaler, in the level's role order.
+    QCOMPARE(installed, (QStringList{rig.target("d"), rig.target("c"), rig.target("e"), rig.target("u")}));
+    for (const QString &key : QStringList{"d", "c", "e", "u"})
+        QCOMPARE(readFile(rig.target(key)), rig.world.blob(key).data);
+    QVERIFY(!QFileInfo::exists(rig.fixture.models + "/.download.lock"));
+}
+
+void LimgenTests::cli_pullSecondTimeDownloadsNothing() {
+    REQUIRE_BINARY();
+    PullRig rig;
+    const QProcessEnvironment environment = cliEnvironment(rig.fixture, rig.environment());
+    const QString binary = qEnvironmentVariable("LIMGEN_BINARY");
+    auto first = startProcess(environment, binary, {"models", "pull", "m", "--yes"});
+    WAIT_FOR_PROCESS(first);
+    QCOMPARE(first->exitCode(), 0);
+    const int requests = rig.server.requests.size();
+    QCOMPARE(requests, 4);
+    // Again: nothing to download, nothing to ask, nothing requested.
+    auto second = startProcess(environment, binary, {"models", "pull", "m"});
+    WAIT_FOR_PROCESS(second);
+    QCOMPARE(second->exitCode(), 0);
+    QCOMPARE(QString::fromUtf8(second->readAllStandardOutput()), QString());
+    QVERIFY(!QString::fromUtf8(second->readAllStandardError()).isEmpty()); // says it is installed
+    auto third = startProcess(environment, binary, {"models", "pull", "m", "--json"});
+    WAIT_FOR_PROCESS(third);
+    QCOMPARE(third->exitCode(), 0);
+    QCOMPARE(jsonObject(QString::fromUtf8(third->readAllStandardOutput()))["installed"].toArray().size(), 0);
+    QCOMPARE(rig.server.requests.size(), requests);
+}
+
+void LimgenTests::cli_pullInterruptedResumes() {
+    REQUIRE_BINARY();
+    PullRig rig;
+    const QByteArray &data = rig.world.blob("a").data;
+    HttpServer::Route &route = rig.route("a");
+    route.chunk = 10000; // 1.5 s for the file
+    route.chunkDelayMs = 100;
+    const QProcessEnvironment environment = cliEnvironment(rig.fixture, rig.environment());
+    const QString binary = qEnvironmentVariable("LIMGEN_BINARY");
+    auto first = startProcess(environment, binary, {"models", "pull", "m", "--yes"});
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(rig.part("a")).size() > 0, 20000);
+    QVERIFY(::kill(pid_t(first->processId()), SIGINT) == 0);
+    WAIT_FOR_PROCESS(first);
+    QCOMPARE(first->exitStatus(), QProcess::NormalExit);
+    QCOMPARE(first->exitCode(), 130);
+    QCOMPARE(QString::fromUtf8(first->readAllStandardOutput()), QString());
+    QVERIFY2(QString::fromUtf8(first->readAllStandardError()).contains("Paused"), "paused is said on stderr");
+    const qint64 kept = QFileInfo(rig.part("a")).size();
+    QVERIFY2(kept > 0 && kept < data.size(), qPrintable(QString::number(kept)));
+    QCOMPARE(readFile(rig.part("a")), data.left(kept));
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    QVERIFY(!QFileInfo::exists(rig.fixture.models + "/.download.lock")); // released on the way out
+
+    // The rerun, at full speed, asks for the rest and finishes.
+    route.chunk = 0;
+    auto second = startProcess(environment, binary, {"models", "pull", "m", "--yes"});
+    WAIT_FOR_PROCESS(second);
+    QCOMPARE(second->exitCode(), 0);
+    QCOMPARE(rig.server.rangesOf("/files/a.bin"), (QList<QByteArray>{"", "bytes=" + QByteArray::number(kept) + "-"}));
+    for (const QString &key : QStringList{"a", "c", "b", "u"}) {
+        QCOMPARE(readFile(rig.target(key)), rig.world.blob(key).data);
+        QVERIFY(!QFileInfo::exists(rig.part(key)));
+    }
+}
+
+void LimgenTests::cli_pullNotFoundFails() {
+    REQUIRE_BINARY();
+    PullRig rig;
+    rig.route("a").status = 404;
+    const QProcessEnvironment environment = cliEnvironment(rig.fixture, rig.environment());
+    auto process = startProcess(environment, qEnvironmentVariable("LIMGEN_BINARY"), {"models", "pull", "m", "--yes"});
+    WAIT_FOR_PROCESS(process);
+    QCOMPARE(process->exitCode(), 1);
+    QCOMPARE(QString::fromUtf8(process->readAllStandardOutput()), QString());
+    QVERIFY2(QString::fromUtf8(process->readAllStandardError()).contains("a.bin"), "the message names the file");
+    QCOMPARE(rig.server.paths(), QStringList{"/files/a.bin"}); // stopped at once, nothing else asked for
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    QVERIFY(!QFileInfo::exists(rig.fixture.models + "/.download.lock"));
+    for (const QString &path : filesUnder(rig.fixture.models))
+        QVERIFY2(!readFile(path).contains("error page"), qPrintable(path));
+}
+
+void LimgenTests::cli_pullChecksumMismatchFails() {
+    REQUIRE_BINARY();
+    PullRig rig;
+    QByteArray bad = rig.world.blob("a").data;
+    bad[500] = char(bad[500] ^ 1);
+    rig.route("a").body = bad;
+    const QProcessEnvironment environment = cliEnvironment(rig.fixture, rig.environment());
+    auto process = startProcess(environment, qEnvironmentVariable("LIMGEN_BINARY"), {"models", "pull", "m", "--yes"});
+    WAIT_FOR_PROCESS(process);
+    QCOMPARE(process->exitCode(), 1);
+    QCOMPARE(QString::fromUtf8(process->readAllStandardOutput()), QString());
+    QVERIFY(QString::fromUtf8(process->readAllStandardError()).contains("a.bin"));
+    QVERIFY(!QFileInfo::exists(rig.part("a")));
+    QVERIFY(!QFileInfo::exists(rig.target("a")));
+    QCOMPARE(filesUnder(rig.fixture.models), QStringList());
+}
+
+void LimgenTests::cli_modelsListWithCustomCatalogue() {
+    REQUIRE_BINARY();
+    PullRig rig;
+    auto levelOf = [](const QJsonObject &json, const QString &id) {
+        for (const QJsonValue &value : json["models"].toArray())
+            if (value.toObject()["id"].toString() == id)
+                return value.toObject()["levels"].toArray()[0].toObject();
+        return QJsonObject();
+    };
+    CliResult result = runCli(rig.fixture, {"models", "--json"}, rig.environment());
+    QCOMPARE(result.exitCode, 0);
+    QJsonObject json = jsonObject(result.out);
+    QCOMPARE(json["models"].toArray().size(), 3); // the test catalogue, not the built-in one
+    QCOMPARE(json["models"].toArray()[0].toObject()["id"].toString(), QString("m"));
+    QCOMPARE(json["models"].toArray()[0].toObject()["default"].toBool(), true);
+    QCOMPARE(levelOf(json, "m")["installed"].toBool(), false);
+    QCOMPARE(qint64(levelOf(json, "m")["downloadBytes"].toDouble()), qint64(150000 + 100000 + 70000));
+    QCOMPARE(qint64(levelOf(json, "m2")["downloadBytes"].toDouble()), qint64(60000 + 100000 + 30000));
+    QCOMPARE(qint64(levelOf(json, "m3")["downloadBytes"].toDouble()), qint64(150000));
+    // Install m's files: m is installed, and m2 needs only what it does not share.
+    for (const QString &key : QStringList{"a", "b", "c"})
+        QVERIFY(makeSparse(rig.target(key), rig.world.file(key).bytes));
+    result = runCli(rig.fixture, {"models", "--json"}, rig.environment());
+    json = jsonObject(result.out);
+    QCOMPARE(levelOf(json, "m")["installed"].toBool(), true);
+    QCOMPARE(qint64(levelOf(json, "m2")["downloadBytes"].toDouble()), qint64(90000));
+    // The text list names the custom models too, and nothing from the built-in catalogue.
+    result = runCli(rig.fixture, {"models"}, rig.environment());
+    QCOMPARE(result.exitCode, 0);
+    QVERIFY(result.out.contains("m2") && result.out.contains("m3"));
+    QVERIFY(!result.out.contains("z-image-turbo"));
+    QCOMPARE(rig.server.requests.size(), 0); // listing never touches the network
+}
+
+void LimgenTests::cli_pullPromptYes() {
+    REQUIRE_BINARY();
+    if (QStandardPaths::findExecutable("script").isEmpty())
+        QSKIP("script(1) is not installed, so there is no pseudo-terminal to drive the prompt with");
+    PullRig rig;
+    PtyPull pull;
+    pull.start(cliEnvironment(rig.fixture, rig.environment()), "m");
+    QVERIFY2(pull.waitForPrompt(), pull.output.constData());
+    QCOMPARE(rig.server.requests.size(), 0); // nothing is downloaded before the answer
+    pull.process->write("y\n");
+    WAIT_FOR_PROCESS(pull.process);
+    pull.output += pull.process->readAllStandardOutput();
+    QCOMPARE(pull.process->exitCode(), 0);
+    for (const QString &key : QStringList{"a", "c", "b", "u"})
+        QCOMPARE(readFile(rig.target(key)), rig.world.blob(key).data);
+    QVERIFY(pull.output.contains(rig.target("a").toUtf8()));
+    QVERIFY(!QFileInfo::exists(rig.fixture.models + "/.download.lock"));
+}
+
+void LimgenTests::cli_pullPromptDecline() {
+    REQUIRE_BINARY();
+    if (QStandardPaths::findExecutable("script").isEmpty())
+        QSKIP("script(1) is not installed, so there is no pseudo-terminal to drive the prompt with");
+    PullRig rig;
+    PtyPull pull;
+    pull.start(cliEnvironment(rig.fixture, rig.environment()), "m");
+    QVERIFY2(pull.waitForPrompt(), pull.output.constData());
+    pull.process->write("n\n");
+    WAIT_FOR_PROCESS(pull.process);
+    QCOMPARE(pull.process->exitCode(), 1);
+    QCOMPARE(rig.server.requests.size(), 0);
+    QCOMPARE(filesUnder(rig.fixture.models), QStringList());
+    QVERIFY(!QFileInfo::exists(rig.fixture.models + "/.download.lock"));
+}
+
+void LimgenTests::cli_pullReplansAfterTheLock() {
+    REQUIRE_BINARY();
+    if (QStandardPaths::findExecutable("script").isEmpty())
+        QSKIP("script(1) is not installed, so there is no pseudo-terminal to drive the prompt with");
+    PullRig rig;
+    PtyPull pull;
+    pull.start(cliEnvironment(rig.fixture, rig.environment()), "m");
+    QVERIFY2(pull.waitForPrompt(), pull.output.constData());
+    // Another limgen installs a file while this one waits at the prompt. Its
+    // contents are zeros of the right size: only a download would replace them.
+    QVERIFY(makeSparse(rig.target("a"), rig.world.file("a").bytes));
+    pull.process->write("y\n");
+    WAIT_FOR_PROCESS(pull.process);
+    QCOMPARE(pull.process->exitCode(), 0);
+    QCOMPARE(rig.server.count("/files/a.bin"), 0);
+    QCOMPARE(QFileInfo(rig.target("a")).size(), qint64(150000));
+    QVERIFY(readFile(rig.target("a")) != rig.world.blob("a").data);
+    for (const QString &key : QStringList{"c", "b", "u"})
+        QCOMPARE(readFile(rig.target(key)), rig.world.blob(key).data);
+}
+
+void LimgenTests::cli_brokenCatalogueFileIsReported() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    QVERIFY(writeFile(fixture.root.path() + "/bad.json", "{ not a catalogue"));
+    for (const QString &path : {fixture.root.path() + "/bad.json", fixture.root.path() + "/missing.json"}) {
+        QHash<QString, QString> environment = engineEnvironment(fixture);
+        environment["LIMGEN_CATALOGUE"] = path;
+        // Every command that reads the catalogue stops and says why, naming
+        // the override, instead of blaming the built-in catalogue or listing
+        // nothing.
+        for (const QStringList &arguments : {QStringList{"generate", "a fox"}, QStringList{"models"},
+                                             QStringList{"models", "pull", "m", "--yes"}, QStringList{"doctor"}}) {
+            const CliResult result = runCli(fixture, arguments, environment);
+            QVERIFY(result.started);
+            QVERIFY2(result.exitCode == 1, qPrintable(arguments.join(' ') + ": " + result.err));
+            QCOMPARE(result.out, QString());
+            QVERIFY2(result.err.contains("LIMGEN_CATALOGUE"), qPrintable(result.err));
+        }
+        QCOMPARE(imageCalls(fixture.root.path() + "/fake.log").size(), 0);
+    }
 }
 
 QTEST_MAIN(LimgenTests)

@@ -109,16 +109,26 @@ Catalogue Catalogue::load(const QByteArray &json, QString *error) {
     return catalogue;
 }
 
-Catalogue Catalogue::builtIn() {
+Catalogue Catalogue::builtIn(QString *error) {
     QFile file(":/models.json");
-    if (!file.open(QIODevice::ReadOnly))
-        return {};
-    QString error;
-    Catalogue catalogue = load(file.readAll(), &error);
+    QString reason = tr("it is missing from the program");
+    Catalogue catalogue = file.open(QIODevice::ReadOnly) ? load(file.readAll(), &reason) : Catalogue{};
     // The catalogue is compiled in and covered by tests, so a broken one is a
-    // build mistake; say so loudly rather than run without models.
-    if (!catalogue.isValid())
-        qWarning("limgen: %s", qPrintable(error));
+    // build mistake, and the message says so.
+    if (!catalogue.isValid() && error)
+        *error = tr("The built-in model catalogue is broken, which is a bug in limgen: %1").arg(reason);
+    return catalogue;
+}
+
+Catalogue Catalogue::fromEnvironment(QString *error) {
+    const QString path = qEnvironmentVariable("LIMGEN_CATALOGUE");
+    if (path.isEmpty())
+        return builtIn(error);
+    QFile file(path);
+    QString reason = file.errorString();
+    Catalogue catalogue = file.open(QIODevice::ReadOnly) ? load(file.readAll(), &reason) : Catalogue{};
+    if (!catalogue.isValid() && error)
+        *error = tr("LIMGEN_CATALOGUE names %1, which cannot be used: %2").arg(path, file.isOpen() ? reason : file.errorString());
     return catalogue;
 }
 
