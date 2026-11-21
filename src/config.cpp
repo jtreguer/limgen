@@ -16,6 +16,23 @@ Config::Config(const QString &file) : m_file(file) {
         m_values = QJsonDocument::fromJson(input.readAll()).object();
 }
 
+double Config::colorPass() const {
+    const QJsonValue value = m_values.value("colorPass");
+    const double strength = value.toDouble(-1);
+    return value.isDouble() && strength >= 0 && strength <= 1 ? strength : defaultColorPass;
+}
+
+void Config::setColorPass(double strength) { m_values.insert("colorPass", qBound(0.0, strength, 1.0)); }
+
+QString Config::format() const { return m_values.value("format").toString() == "jpeg" ? "jpeg" : "png"; }
+
+void Config::setFormat(const QString &format) { m_values.insert("format", format == "jpeg" ? "jpeg" : "png"); }
+
+int Config::jpegQuality() const {
+    const int quality = m_values.value("jpegQuality").toInt(-1);
+    return quality >= 1 && quality <= 100 ? quality : defaultJpegQuality;
+}
+
 QString Config::defaultFile() {
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/limgen/config.json";
 }

@@ -118,6 +118,14 @@ EngineProbe SdCppEngine::probe() const {
 
 QStringList SdCppEngine::arguments(const EngineRequest &request) {
     QStringList arguments;
+    if (request.mode == EngineRequest::Mode::Upscale) {
+        // ESRGAN at tile size 256 was 1 s faster than the default 128 in L0;
+        // 512 ran out of memory on an 8 GB card.
+        arguments << "-M" << "upscale" << "--upscale-model" << request.files.value("upscale-model") << "-i"
+                  << request.input << "-o" << draftPaths(request).first() << "--upscale-tile-size"
+                  << QString::number(request.upscaleTileSize);
+        return arguments;
+    }
     // Roles are named after the sd-cli options that take them.
     for (const char *role : {"model", "diffusion-model", "llm", "vae"})
         if (request.files.contains(role))
@@ -144,6 +152,8 @@ QStringList SdCppEngine::arguments(const EngineRequest &request) {
 }
 
 QStringList SdCppEngine::draftPaths(const EngineRequest &request) {
+    if (request.mode == EngineRequest::Mode::Upscale)
+        return {request.outputDirectory + "/upscaled.png"};
     QStringList paths;
     for (int i = 0; i < request.count; ++i)
         paths << QString("%1/draft-%2.png").arg(request.outputDirectory).arg(i);
@@ -194,14 +204,18 @@ void SdCppEngine::launch() {
     QDir(m_request.outputDirectory + "/preview").removeRecursively();
     if (m_request.previews)
         QDir().mkpath(m_request.outputDirectory + "/preview");
-    m_parser = std::make_unique<ProgressParser>(m_request.count, m_request.steps);
+    m_parser = m_request.mode == EngineRequest::Mode::Upscale ? std::make_unique<ProgressParser>(1, 0)
+                                                                : std::make_unique<ProgressParser>(m_request.count, m_request.steps);
     m_output.clear();
     m_previewsReported = 0;
     m_process.start(m_program, arguments(m_request));
 }
 
 void SdCppEngine::cancel() {
-    if (!isRunning())
+    // Once only: a caller may ask again and again (a command polls for
+    // Ctrl+C), and restarting the timer would put off the kill for ever
+    // when the engine ignores SIGTERM.
+    if (!isRunning() || m_cancelled)
         return;
     m_cancelled = true;
     m_process.terminate();
@@ -260,14 +274,24 @@ void SdCppEngine::ended(int exitCode, QProcess::ExitStatus status) {
 
     const EngineError error = classify(exitCode, status, m_output);
     // Decoding all drafts at once is the peak of a batch, so the one retry
-    // decodes in tiles, which needs much less video memory.
-    if (error.kind == EngineError::OutOfMemory && !m_retried && !m_request.vaeTiling) {
-        m_retried = true;
-        m_request.vaeTiling = true;
-        for (const QString &draft : drafts)
-            QFile::remove(draft);
-        launch();
-        return;
+    // decodes in tiles, which needs much less video memory. An upscale
+    // retries with smaller tiles, for the same reason.
+    if (error.kind == EngineError::OutOfMemory && !m_retried) {
+        bool again = false;
+        if (m_request.mode == EngineRequest::Mode::Upscale && m_request.upscaleTileSize > 128) {
+            m_request.upscaleTileSize = 128;
+            again = true;
+        } else if (m_request.mode == EngineRequest::Mode::Generate && !m_request.vaeTiling) {
+            m_request.vaeTiling = true;
+            again = true;
+        }
+        if (again) {
+            m_retried = true;
+            for (const QString &draft : drafts)
+                QFile::remove(draft);
+            launch();
+            return;
+        }
     }
     if (error.kind != EngineError::None) {
         fail(error);
@@ -275,9 +299,10 @@ void SdCppEngine::ended(int exitCode, QProcess::ExitStatus status) {
     }
     for (int i = 0; i < drafts.size(); ++i) {
         if (QImageReader(drafts.at(i)).size() != QSize(m_request.width, m_request.height)) {
-            fail({EngineError::Failed,
-                  tr("The engine reported success, but draft %1 is missing or the wrong size.").arg(i + 1),
-                  m_output.right(2000).trimmed()});
+            const QString message = m_request.mode == EngineRequest::Mode::Upscale
+                                        ? tr("The engine reported success, but the upscaled image is missing or the wrong size.")
+                                        : tr("The engine reported success, but draft %1 is missing or the wrong size.").arg(i + 1);
+            fail({EngineError::Failed, message, m_output.right(2000).trimmed()});
             return;
         }
     }

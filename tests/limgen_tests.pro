@@ -21,15 +21,18 @@ HEADERS += \
     ../src/config.h \
     ../src/timings.h \
     ../src/catalogue.h \
+    ../src/colorpass.h \
     ../src/cli.h \
     ../src/engine.h \
     ../src/hardware.h \
+    ../src/keeper.h \
     ../src/library.h \
     ../src/modelstore.h \
     ../src/omarchy.h \
     ../src/palette.h \
     ../src/progress.h \
     ../src/prompt.h \
+    ../src/resample.h \
     ../src/sdcppengine.h \
     ../src/theme.h \
     ../src/translator.h
@@ -44,14 +47,17 @@ SOURCES += \
     ../src/config.cpp \
     ../src/timings.cpp \
     ../src/catalogue.cpp \
+    ../src/colorpass.cpp \
     ../src/cli.cpp \
     ../src/hardware.cpp \
+    ../src/keeper.cpp \
     ../src/library.cpp \
     ../src/modelstore.cpp \
     ../src/omarchy.cpp \
     ../src/palette.cpp \
     ../src/progress.cpp \
     ../src/prompt.cpp \
+    ../src/resample.cpp \
     ../src/sdcppengine.cpp \
     ../src/theme.cpp \
     ../src/translator.cpp

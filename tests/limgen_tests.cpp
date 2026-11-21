@@ -45,6 +45,9 @@
 #include <unistd.h>
 
 #include "backend.h"
+#include "colorpass.h"
+#include "keeper.h"
+#include "resample.h"
 #include "batch.h"
 #include "config.h"
 #include "timings.h"
@@ -158,6 +161,31 @@ struct Fixture {
         themes = base + "/themes";
         QDir().mkpath(state);
         QDir().mkpath(backgrounds);
+        // A stand-in for `omarchy`: it logs its arguments, `theme bg set <file>`
+        // moves the `background` link in the state folder as Omarchy does, and
+        // FAKE_OMARCHY_FAIL makes it fail.
+        writeScript(omarchyBin(), "echo \"$@\" >> '" + omarchyLog().toUtf8() + "'\n"
+                                  "if [ -n \"$FAKE_OMARCHY_FAIL\" ]; then echo boom >&2; exit 1; fi\n"
+                                  "if [ \"$1 $2 $3\" = \"theme bg set\" ]; then ln -sfn \"$4\" '" + state.toUtf8() +
+                                  "/background'; fi\n");
+    }
+    QString omarchyBin() const { return root.path() + "/omarchy"; }
+    QString omarchyLog() const { return root.path() + "/omarchy.log"; }
+    QString pictures() const { return root.path() + "/pictures"; }
+    // A hyprctl that reports one small monitor, so kept images are made small.
+    QString hyprctl(int width = 320, int height = 180) const {
+        const QString path = root.path() + "/hyprctl";
+        writeScript(path, "echo '[{\"name\":\"T-1\",\"width\":" + QByteArray::number(width) + ",\"height\":" +
+                              QByteArray::number(height) + ",\"transform\":0}]'\n");
+        return path;
+    }
+    // Every call the fake omarchy got, one argument line each.
+    QStringList omarchyCalls() const {
+        QStringList calls;
+        for (const QByteArray &line : readFile(omarchyLog()).split('\n'))
+            if (!line.isEmpty())
+                calls << QString::fromUtf8(line);
+        return calls;
     }
     bool ok() const { return root.isValid(); }
 
@@ -166,6 +194,9 @@ struct Fixture {
         paths.state = state;
         paths.backgrounds = backgrounds;
         paths.language = root.path() + "/config/omarchy/language";
+        paths.themes = QStringList{themes};
+        paths.pictures = pictures();
+        paths.omarchy = omarchyBin();
         return paths;
     }
     bool addTheme(const QString &name, const QByteArray &colors) {
@@ -209,7 +240,8 @@ struct Sandbox {
         : guard({"LIMGEN_SD_CLI", "LIMGEN_MODELS", "LIMGEN_NVIDIA_SMI", "LIMGEN_DRM_ROOT", "LIMGEN_CATALOGUE",
                  "LIMGEN_DOWNLOAD_BASE", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "HOME",
                  "FAKE_SD_CLI_MODE", "FAKE_SD_CLI_LOG", "FAKE_SD_CLI_STEP_SECONDS", "LIMGEN_OMARCHY_STATE",
-                 "LIMGEN_OMARCHY_BACKGROUNDS", "LIMGEN_HYPRCTL", "HYPRLAND_INSTANCE_SIGNATURE"}) {
+                 "LIMGEN_OMARCHY_BACKGROUNDS", "LIMGEN_HYPRCTL", "HYPRLAND_INSTANCE_SIGNATURE", "LIMGEN_OMARCHY_THEMES",
+                 "LIMGEN_PICTURES", "LIMGEN_OMARCHY_BIN", "FAKE_OMARCHY_FAIL"}) {
         const QString base = fixture.root.path();
         qputenv("HOME", (base + "/home").toUtf8());
         qputenv("XDG_CONFIG_HOME", (base + "/config").toUtf8());
@@ -224,6 +256,18 @@ struct Sandbox {
         qputenv("LIMGEN_OMARCHY_STATE", fixture.state.toUtf8());
         qputenv("LIMGEN_OMARCHY_BACKGROUNDS", fixture.backgrounds.toUtf8());
         qputenv("FAKE_SD_CLI_LOG", (base + "/fake.log").toUtf8());
+        // Where kept images go, and the tools that put them in place.
+        qputenv("LIMGEN_OMARCHY_THEMES", fixture.themes.toUtf8());
+        qputenv("LIMGEN_PICTURES", fixture.pictures().toUtf8());
+        qputenv("LIMGEN_OMARCHY_BIN", fixture.omarchyBin().toUtf8());
+        qputenv("LIMGEN_HYPRCTL", fixture.hyprctl().toUtf8());
+    }
+    // The Omarchy paths a Backend or a Keeper should use: the fixture's, with
+    // a small fake monitor, so a keep makes a small image.
+    OmarchyPaths paths() const {
+        OmarchyPaths paths = fixture.paths();
+        paths.hyprctl = fixture.hyprctl();
+        return paths;
     }
     QString configFile() const { return fixture.root.path() + "/config/limgen/config.json"; }
     QString benchFile() const { return fixture.root.path() + "/state/limgen/bench.json"; }
@@ -437,6 +481,7 @@ private slots:
     void engine_errorExit0Fails();
     void engine_wrongSizeFails();
     void engine_failModeFails();
+    void engine_repeatedCancelStillKills();
     void engine_cancelDuringHangLeavesNoFiles();
     void engine_missingProgramFails();
 
@@ -614,6 +659,123 @@ private slots:
     void qml_setupPanelLetsKeysWorkAfterTheField();
     void qml_modelPickerOpensAndCloses();
     void qml_quitWithARunningBatchAsksFirst();
+
+    // ---- L5: upscale parser and engine -------------------------------------
+    void progress_upscaleLogCountsTiles();
+    void progress_upscaleLogChunkSizeDoesNotMatter();
+    void progress_anyTotalOnlyWhenStepsIsZero();
+    void engine_argumentsUpscale();
+    void engine_upscaleRunMakesFourTimes();
+    void engine_upscaleOutOfMemoryRetriesWithSmallerTiles();
+    void engine_upscaleOutOfMemoryFailsAfterOneRetry();
+    void engine_upscaleSmallTilesAreNotRetried();
+    void engine_upscaleSizeCheckAndFailures_data();
+    void engine_upscaleSizeCheckAndFailures();
+    void engine_upscaleCancelRemovesTheOutput();
+
+    // ---- L5: ColorPass and Resample ---------------------------------------
+    void colorpass_toLabKnownValues_data();
+    void colorpass_toLabKnownValues();
+    void colorpass_roundTrip();
+    void colorpass_fromLabClipsOutOfGamut();
+    void colorpass_statisticsOfImages();
+    void colorpass_statisticsOfPalette();
+    void colorpass_strengthZeroIsIdentity();
+    void colorpass_strengthOneReachesTheTargetMeans();
+    void colorpass_spreadFollowsTheTargetWithinTheClamp();
+    void colorpass_paletteTargetMovesOnlyTheCast();
+    void colorpass_halfStrengthIsHalfway();
+    void colorpass_alphaIsKept();
+    void resample_lanczosGivesExactSizes();
+    void resample_flatImageStaysFlat();
+    void resample_lanczosKeepsAnEdge();
+    void resample_coverCropsTheCentre();
+    void resample_coverUpAndDown();
+    void resample_nullAndEmpty();
+
+    // ---- L5: Library finals and discards, Config, Omarchy -----------------
+    void library_addFinalPngAndJpeg();
+    void library_addFinalFailsCleanly();
+    void library_discardMovesTheDraftAside();
+    void library_restoreBringsItBackExactly();
+    void library_aFinalCannotBeDiscarded();
+    void library_purgeAndPurgeDiscarded();
+    void config_finishKeysDefaultsAndBounds();
+    void omarchy_themeDirectoryLookupOrder();
+    void omarchy_themeBackgroundsOfATheme();
+    void omarchy_keepDirectory();
+    void omarchy_currentBackground();
+    void omarchy_setBackgroundThroughTheFakeOmarchy();
+    void omarchy_pathsThemesAndPictures();
+
+    // ---- L5: Keeper --------------------------------------------------------
+    void keeper_fileNames_data();
+    void keeper_fileNames();
+    void keeper_parametersText();
+    void keeper_prepareOutcomesInOrder();
+    void keeper_prepareFillsTheResult();
+    void keeper_alreadyKeptIsFoundInEitherFormat();
+    void keeper_fullKeepWritesEverythingTheDocsSay();
+    void keeper_colorTargets_data();
+    void keeper_colorTargets();
+    void keeper_colorPassMovesTheColourTowardTheBackgrounds();
+    void keeper_jpegQualityAndComment();
+    void keeper_alreadyKeptIsReportedAsynchronously();
+    void keeper_cancelDuringTheUpscale();
+    void keeper_destroyingARunningKeeperIsSilent();
+    void keeper_failuresRemoveTheWorkFolder_data();
+    void keeper_failuresRemoveTheWorkFolder();
+    void keeper_aFileThatAppearedMeanwhileIsNeverOverwritten();
+    void keeper_noThemeGoesToThePicturesFolder();
+    void keeper_withoutAMonitorTheFinalIs2560x1440();
+    void keeper_keepFolderHoldsOnlyLimgenFiles();
+
+    // ---- L5: CLI keep and set ---------------------------------------------
+    void cli_keepGoesToTheThemeTheDraftWasMadeFor();
+    void cli_keepThemeOptionOverridesAndChecksTheTheme();
+    void cli_keepDraftWithoutAThemeUsesTheCurrentThenPictures();
+    void cli_keepJson();
+    void cli_keepSetShowsItAndFailsWhenOmarchyFails();
+    void cli_keepAlreadyKeptMakesNothingNew();
+    void cli_keepArgumentErrors_data();
+    void cli_keepArgumentErrors();
+    void cli_keepNotRunnableOrFailing_data();
+    void cli_keepNotRunnableOrFailing();
+    void cli_keepTakesColourPassAndFormatFromTheConfigAndTheOptions();
+    void cli_keepInterruptedExits130AndKeepsNothing();
+    void cli_setAFile();
+    void cli_setADraftKeepsItIntoTheCurrentTheme();
+    void cli_setAFinalGoesThroughItsDraft();
+    void cli_setAFinalWhoseDraftIsGone();
+    void cli_setErrors();
+    void cli_helpListsKeepAndSet();
+
+    // ---- L5: Backend, keeping ----------------------------------------------
+    void backend_keepShowsTileStatesAndInstallsTheImage();
+    void backend_keepAndSetSetsTheBackgroundOnce();
+    void backend_keepOnlyAppliesToDoneDrafts();
+    void backend_themeChoiceWhenTheThemeChangedThenKeepInto();
+    void backend_discardUndoAndRedo();
+    void backend_undoAndRedoOfAKeep();
+    void backend_undoWhileKeepingCancelsIt();
+    void backend_undoThenRedoAtOnceKeepsTheTileKeeping();
+    void backend_undoOfTheOnlyBackgroundIsRefused();
+    void backend_generateWhileKeepingWaitsThenStarts();
+    void backend_cancelOfAWaitingBatchAndStopAll();
+    void backend_aNewBatchClearsUndoAndPurgesDiscards();
+    void backend_destroyingPurgesDiscardsAndStopsKeeps();
+    void backend_purgeDiscardedAtStartLeavesRecentOnes();
+    void backend_finishSettingsAreSaved();
+    void backend_keepMessageSurvivesTheThemeReloadItCauses();
+    void backend_keepFailuresAreShown();
+    void backend_keepWithoutAThemeGoesToPictures();
+
+    // ---- L5: the window, keeping -------------------------------------------
+    void qml_keysKeepSetDiscardUndoRedo();
+    void qml_actionKeysDoNothingWhileTypingOrUnderHelpOrADialog();
+    void qml_themeDialogKeepsIntoTheChosenTheme();
+    void qml_quitWhileKeepingAsksFirst();
+    void qml_finishSettingsUnderTheFullPrompt();
 
 private:
     std::unique_ptr<Sandbox> m_global;
@@ -1494,8 +1656,15 @@ QProcessEnvironment LimgenTests::cliEnvironment(const Fixture &fixture,
                              "LIMGEN_HYPRCTL", "LIMGEN_OMARCHY_BIN", "LIMGEN_SD_CLI",
                              "QT_QPA_PLATFORMTHEME", "LIMGEN_MODELS", "LIMGEN_NVIDIA_SMI", "LIMGEN_DRM_ROOT",
                              "FAKE_SD_CLI_MODE", "FAKE_SD_CLI_LOG", "FAKE_SD_CLI_STEP_SECONDS",
-                             "LIMGEN_CATALOGUE", "LIMGEN_DOWNLOAD_BASE"})
+                             "LIMGEN_CATALOGUE", "LIMGEN_DOWNLOAD_BASE", "LIMGEN_OMARCHY_THEMES", "LIMGEN_PICTURES",
+                             "FAKE_OMARCHY_FAIL"})
         environment.remove(name);
+    // Kept images and the background go to the fixture's folders and fake
+    // omarchy, never to the real Omarchy or ~/Pictures.
+    environment.insert("LIMGEN_OMARCHY_THEMES", fixture.themes);
+    environment.insert("LIMGEN_PICTURES", fixture.pictures());
+    environment.insert("LIMGEN_OMARCHY_BIN", fixture.omarchyBin());
+    environment.insert("LIMGEN_HYPRCTL", fixture.hyprctl());
     // Omarchy sessions export QT_QPA_PLATFORMTHEME=gtk3. It is removed by
     // default so the other tests do not depend on the session they run in;
     // cli_runsWithoutDisplayUnderGtkPlatformTheme puts it back.
@@ -3301,6 +3470,31 @@ void LimgenTests::engine_failModeFails() {
     QVERIFY(!run.finished);
     QCOMPARE(int(run.error.kind), int(EngineError::Failed));
     QVERIFY(run.error.detail.contains("fake engine failure"));
+}
+
+void LimgenTests::engine_repeatedCancelStillKills() {
+    EnvGuard guard({"FAKE_SD_CLI_MODE", "FAKE_SD_CLI_LOG", "FAKE_SD_CLI_STEP_SECONDS"});
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    // An engine stuck where it cannot act on SIGTERM; a command that cancels
+    // every 100 ms until it is gone must still end it with SIGKILL.
+    qputenv("FAKE_SD_CLI_MODE", "hang-ignore-term");
+    EngineRequest request = runnableRequest(fixture.root.path(), 1, 4);
+    request.previews = true;
+    request.previewInterval = 1;
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    watch(engine, run);
+    engine.start(request);
+    // The fake writes the first preview once SIGTERM is ignored, then hangs.
+    QTRY_VERIFY_WITH_TIMEOUT(!QDir(request.outputDirectory + "/preview").entryList({"*.png"}).isEmpty(), 10000);
+    QTimer again;
+    QObject::connect(&again, &QTimer::timeout, &engine, [&] { engine.cancel(); });
+    again.start(100);
+    QTRY_VERIFY_WITH_TIMEOUT(run.done(), 8000);
+    again.stop();
+    QCOMPARE(int(run.error.kind), int(EngineError::Cancelled));
+    QVERIFY(!engine.isRunning());
 }
 
 void LimgenTests::engine_cancelDuringHangLeavesNoFiles() {
@@ -6440,7 +6634,7 @@ struct BackendRig {
     void create(const QString &engine = fakeEngine) {
         settleBackend(backend.get());
         backend.reset();
-        omarchy = std::make_unique<Omarchy>(sb.fixture.paths());
+        omarchy = std::make_unique<Omarchy>(sb.paths());
         backend = std::make_unique<Backend>(omarchy.get(), engine);
     }
     ~BackendRig() {
@@ -7171,9 +7365,21 @@ struct QmlRig {
     std::unique_ptr<QQmlApplicationEngine> engine;
     QQuickWindow *window = nullptr;
 
-    explicit QmlRig(bool installed = true, const QString &engineProgram = fakeEngine) : rig(true, installed) {
+    // With `small`, the model and the upscaler come from the small test
+    // catalogue (64x64 drafts), so batches and keeps are quick.
+    explicit QmlRig(bool installed = true, const QString &engineProgram = fakeEngine, bool small = false)
+        : rig(true, installed && !small) {
         qmlWarnings = &warnings;
         previousHandler = qInstallMessageHandler(collectQmlWarnings);
+        if (small) {
+            const World world = makeWorld();
+            const QString catalogueFile = rig.sb.fixture.root.path() + "/catalogue.json";
+            writeFile(catalogueFile, world.json);
+            qputenv("LIMGEN_CATALOGUE", catalogueFile.toUtf8());
+            for (const QString &key : QStringList{"a", "c", "b", "u"})
+                makeSparse(Catalogue::path(world.file(key), rig.sb.fixture.models), world.file(key).bytes);
+            rig.sb.fixture.addTheme("other", tomlWith("#fafafa", "#111111", "#ff0000"));
+        }
         rig.create(engineProgram);
         translator = std::make_unique<Translator>(rig.sb.fixture.paths().language);
         QCoreApplication::installTranslator(translator.get());
@@ -7642,6 +7848,2788 @@ void LimgenTests::qml_quitWithARunningBatchAsksFirst() {
     q.backend().cancel();
     QTRY_VERIFY_WITH_TIMEOUT(!q.backend().running(), 15000);
     NO_QML_WARNINGS(q);
+}
+
+// ============================== L5: upscale parser and engine =============
+
+namespace {
+
+QImage solidImage(const QSize &size, const QColor &colour, QImage::Format format = QImage::Format_RGB32) {
+    QImage image(size, format);
+    image.fill(colour);
+    return image;
+}
+
+bool savePng(const QImage &image, const QString &path) {
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    return image.save(path, "PNG");
+}
+
+QRgb labRgb(double l, double a, double b) {
+    const double lab[3] = {l, a, b};
+    return ColorPass::fromLab(lab);
+}
+
+// An image of two flat halves, top and bottom, for statistics with known spread.
+QImage twoTone(const QRgb top, const QRgb bottom, const QSize &size = QSize(40, 40)) {
+    QImage image(size, QImage::Format_RGB32);
+    for (int y = 0; y < size.height(); ++y)
+        for (int x = 0; x < size.width(); ++x)
+            image.setPixel(x, y, y < size.height() / 2 ? top : bottom);
+    return image;
+}
+
+LabStats statsOf(const QImage &image) { return ColorPass::statistics({image}); }
+
+// An upscale request on a PNG of the given size, with the model file in place.
+EngineRequest upscaleRequest(const QString &directory, const QSize &input = QSize(300, 200)) {
+    EngineRequest request;
+    request.mode = EngineRequest::Mode::Upscale;
+    savePng(solidImage(input, QColor(10, 20, 30)), directory + "/in.png");
+    writeFile(directory + "/models/esrgan.pth", "x");
+    request.files.insert("upscale-model", directory + "/models/esrgan.pth");
+    request.input = directory + "/in.png";
+    request.width = input.width() * 4;
+    request.height = input.height() * 4;
+    request.upscaleTileSize = 256;
+    request.outputDirectory = directory + "/out";
+    return request;
+}
+
+} // namespace
+
+void LimgenTests::progress_upscaleLogCountsTiles() {
+    const QByteArray log = dataFile("sd-cli-esrgan-upscale.log");
+    QVERIFY(!log.isEmpty());
+    const QList<ProgressEvent> events = parseInChunks(log, 1, 0, log.size());
+    const auto steps = ofKind(events, ProgressEvent::Step);
+    // 112 tiles, counted like sampling steps, all of the one image.
+    QCOMPARE(steps.size(), 112);
+    for (int k = 0; k < steps.size(); ++k) {
+        QCOMPARE(steps[k].image, 0);
+        QCOMPARE(steps[k].step, k + 1);
+        QCOMPARE(steps[k].steps, 112);
+        QVERIFY(steps[k].secondsPerStep > 0);
+    }
+    // The first line is in s/it, the later ones in it/s, both given as seconds.
+    QCOMPARE(steps[0].secondsPerStep, 2.08);
+    QVERIFY2(qAbs(steps[1].secondsPerStep - 1.0 / 4.57) < 1e-9, qPrintable(QString::number(steps[1].secondsPerStep)));
+    QCOMPARE(ofKind(events, ProgressEvent::Sampled).size(), 0);
+    QCOMPARE(ofKind(events, ProgressEvent::Saved).size(), 1);
+    QVERIFY(ofKind(events, ProgressEvent::Saved).first().text.endsWith("x4.png"));
+    QVERIFY(ofKind(events, ProgressEvent::Error).isEmpty());
+}
+
+void LimgenTests::progress_upscaleLogChunkSizeDoesNotMatter() {
+    const QByteArray log = dataFile("sd-cli-esrgan-upscale.log");
+    QStringList whole;
+    for (const ProgressEvent &e : parseInChunks(log, 1, 0, log.size()))
+        whole << eventText(e);
+    for (const qsizetype chunk : {qsizetype(1), qsizetype(13), qsizetype(500)}) {
+        QStringList parts;
+        for (const ProgressEvent &e : parseInChunks(log, 1, 0, chunk))
+            parts << eventText(e);
+        QVERIFY2(parts == whole, qPrintable(QString("chunk size %1").arg(chunk)));
+    }
+}
+
+void LimgenTests::progress_anyTotalOnlyWhenStepsIsZero() {
+    ProgressParser tiles(1, 0);
+    QCOMPARE(tiles.feed("  |==| 3/12 - 1.00s/it\n  |==| 7/40 - 2.00s/it\n").size(), 2);
+    // With a step count, a line with another total is still not a step.
+    ProgressParser steps(1, 8);
+    QVERIFY(steps.feed("  |==| 3/12 - 1.00s/it\n").isEmpty());
+    QCOMPARE(steps.feed("  |==| 3/8 - 1.00s/it\n").size(), 1);
+    // Out of range counts are rejected either way.
+    QVERIFY(tiles.feed("  |==| 13/12 - 1.00s/it\n  |==| 0/12 - 1.00s/it\n").isEmpty());
+}
+
+void LimgenTests::engine_argumentsUpscale() {
+    EngineRequest request;
+    request.mode = EngineRequest::Mode::Upscale;
+    request.files.insert("upscale-model", "/m/esrgan.pth");
+    request.input = "/d/draft.png";
+    request.outputDirectory = "/cache/keep-1";
+    request.upscaleTileSize = 256;
+    request.prompt = "ignored"; // a batch's fields play no part
+    request.count = 4;
+    request.previews = true;
+    const QStringList arguments = SdCppEngine::arguments(request);
+    QCOMPARE(arguments, (QStringList{"-M", "upscale", "--upscale-model", "/m/esrgan.pth", "-i", "/d/draft.png", "-o",
+                                     "/cache/keep-1/upscaled.png", "--upscale-tile-size", "256"}));
+    QCOMPARE(SdCppEngine::draftPaths(request), QStringList{"/cache/keep-1/upscaled.png"});
+    // Every option it uses is in the pinned engine's --help.
+    const QString help = QString::fromUtf8(dataFile("sd-cli-help.txt"));
+    for (const QString &option : QStringList{"-M", "--upscale-model", "-i", "-o", "--upscale-tile-size"}) {
+        const QRegularExpression word("(^|[\\s,])" + QRegularExpression::escape(option) + "([\\s,]|$)",
+                                      QRegularExpression::MultilineOption);
+        QVERIFY2(word.match(help).hasMatch(), qPrintable(option + " is not an option of the pinned sd-cli"));
+    }
+    QVERIFY(help.contains("upscale")); // the mode itself is listed
+    request.upscaleTileSize = 128;
+    QCOMPARE(valueAfter(SdCppEngine::arguments(request), "--upscale-tile-size"), QString("128"));
+}
+
+void LimgenTests::engine_upscaleRunMakesFourTimes() {
+    Sandbox sb;
+    const EngineRequest request = upscaleRequest(sb.fixture.root.path());
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    QVERIFY2(run.finished, qPrintable(run.error.message + run.error.detail));
+    QCOMPARE(run.drafts, QStringList{request.outputDirectory + "/upscaled.png"});
+    QCOMPARE(QImageReader(run.drafts[0]).size(), QSize(1200, 800));
+    QVERIFY(!engine.retried());
+    // 300x200 at tile 256 is 6 tiles in the fake; they arrive as steps of image 0.
+    QCOMPARE(run.progress.size(), 6);
+    for (int k = 0; k < 6; ++k) {
+        QCOMPARE(run.progress[k].image, 0);
+        QCOMPARE(run.progress[k].step, k + 1);
+        QCOMPARE(run.progress[k].steps, 6);
+    }
+    QCOMPARE(imageCalls(sb.fakeLog()).size(), 0); // not a batch call
+    QCOMPARE(fakeCalls(sb.fakeLog()).size(), 1);
+    QCOMPARE(fakeCalls(sb.fakeLog())[0], SdCppEngine::arguments(request));
+}
+
+void LimgenTests::engine_upscaleOutOfMemoryRetriesWithSmallerTiles() {
+    Sandbox sb;
+    qputenv("FAKE_SD_CLI_MODE", "oom-once"); // fails, with exit 0, above tile size 128
+    const EngineRequest request = upscaleRequest(sb.fixture.root.path());
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    QVERIFY2(run.finished, qPrintable(run.error.message + run.error.detail));
+    QVERIFY(engine.retried());
+    const QList<QStringList> calls = fakeCalls(sb.fakeLog());
+    QCOMPARE(calls.size(), 2);
+    QCOMPARE(valueAfter(calls[0], "--upscale-tile-size"), QString("256"));
+    QCOMPARE(valueAfter(calls[1], "--upscale-tile-size"), QString("128"));
+    QCOMPARE(QImageReader(run.drafts[0]).size(), QSize(1200, 800));
+}
+
+void LimgenTests::engine_upscaleOutOfMemoryFailsAfterOneRetry() {
+    Sandbox sb;
+    qputenv("FAKE_SD_CLI_MODE", "oom"); // fails at every tile size, saving the input unscaled
+    const EngineRequest request = upscaleRequest(sb.fixture.root.path());
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    // The engine exits 0 and writes a file, but it is a failure, not an upscale.
+    QVERIFY(run.failed);
+    QVERIFY(!run.finished);
+    QCOMPARE(int(run.error.kind), int(EngineError::OutOfMemory));
+    QVERIFY(engine.retried());
+    QCOMPARE(fakeCalls(sb.fakeLog()).size(), 2); // one retry, not more
+}
+
+void LimgenTests::engine_upscaleSmallTilesAreNotRetried() {
+    Sandbox sb;
+    qputenv("FAKE_SD_CLI_MODE", "oom");
+    EngineRequest request = upscaleRequest(sb.fixture.root.path());
+    request.upscaleTileSize = 128;
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    QCOMPARE(int(run.error.kind), int(EngineError::OutOfMemory));
+    QVERIFY(!engine.retried());
+    QCOMPARE(fakeCalls(sb.fakeLog()).size(), 1);
+}
+
+void LimgenTests::engine_upscaleSizeCheckAndFailures_data() {
+    QTest::addColumn<QString>("mode");
+    QTest::addColumn<QString>("fragment");
+    QTest::newRow("wrong size") << "wrong-size" << "upscaled image";
+    QTest::newRow("engine fails") << "fail" << "fake engine failure";
+}
+
+void LimgenTests::engine_upscaleSizeCheckAndFailures() {
+    QFETCH(QString, mode);
+    QFETCH(QString, fragment);
+    Sandbox sb;
+    qputenv("FAKE_SD_CLI_MODE", mode.toUtf8());
+    const EngineRequest request = upscaleRequest(sb.fixture.root.path());
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    QVERIFY(run.failed);
+    QVERIFY(!run.finished);
+    QCOMPARE(int(run.error.kind), int(EngineError::Failed));
+    QVERIFY2((run.error.message + run.error.detail).contains(fragment), qPrintable(run.error.message + run.error.detail));
+}
+
+void LimgenTests::engine_upscaleCancelRemovesTheOutput() {
+    Sandbox sb;
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    const EngineRequest request = upscaleRequest(sb.fixture.root.path());
+    QVERIFY(writeFile(request.outputDirectory + "/upscaled.png", "partial"));
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    watch(engine, run);
+    engine.start(request);
+    QTRY_VERIFY_WITH_TIMEOUT(!fakeCalls(sb.fakeLog()).isEmpty(), 10000);
+    QTest::qWait(300);
+    engine.cancel();
+    QTRY_VERIFY_WITH_TIMEOUT(run.done(), 10000);
+    QCOMPARE(int(run.error.kind), int(EngineError::Cancelled));
+    QVERIFY(!QFileInfo::exists(request.outputDirectory + "/upscaled.png"));
+}
+
+// ============================== L5: ColorPass =============================
+
+void LimgenTests::colorpass_toLabKnownValues_data() {
+    QTest::addColumn<QRgb>("rgb");
+    QTest::addColumn<double>("l");
+    QTest::addColumn<double>("a");
+    QTest::addColumn<double>("b");
+    QTest::newRow("white") << qRgb(255, 255, 255) << 100.0 << 0.0 << 0.0;
+    QTest::newRow("black") << qRgb(0, 0, 0) << 0.0 << 0.0 << 0.0;
+    QTest::newRow("red") << qRgb(255, 0, 0) << 53.24 << 80.09 << 67.20;
+    QTest::newRow("green") << qRgb(0, 255, 0) << 87.73 << -86.18 << 83.18;
+    QTest::newRow("blue") << qRgb(0, 0, 255) << 32.30 << 79.19 << -107.86;
+    QTest::newRow("mid grey") << qRgb(119, 119, 119) << 50.0 << 0.0 << 0.0;
+}
+
+void LimgenTests::colorpass_toLabKnownValues() {
+    QFETCH(QRgb, rgb);
+    QFETCH(double, l);
+    QFETCH(double, a);
+    QFETCH(double, b);
+    double lab[3];
+    ColorPass::toLab(rgb, lab);
+    const QString got = QString("%1 %2 %3").arg(lab[0]).arg(lab[1]).arg(lab[2]);
+    QVERIFY2(qAbs(lab[0] - l) < 0.2 && qAbs(lab[1] - a) < 0.2 && qAbs(lab[2] - b) < 0.2, qPrintable(got));
+}
+
+void LimgenTests::colorpass_roundTrip() {
+    for (int r = 0; r < 256; r += 51)
+        for (int g = 0; g < 256; g += 51)
+            for (int b = 0; b < 256; b += 51) {
+                double lab[3];
+                ColorPass::toLab(qRgb(r, g, b), lab);
+                const QRgb back = ColorPass::fromLab(lab);
+                QVERIFY2(qAbs(qRed(back) - r) <= 1 && qAbs(qGreen(back) - g) <= 1 && qAbs(qBlue(back) - b) <= 1,
+                         qPrintable(QString("%1 %2 %3 -> %4 %5 %6").arg(r).arg(g).arg(b).arg(qRed(back)).arg(qGreen(back)).arg(qBlue(back))));
+            }
+}
+
+void LimgenTests::colorpass_fromLabClipsOutOfGamut() {
+    // Colours no screen can show are clipped to the nearest channel values, not wrapped.
+    const QRgb vivid = labRgb(100, 100, 100);
+    QVERIFY(qRed(vivid) >= 0 && qRed(vivid) <= 255 && qGreen(vivid) >= 0 && qBlue(vivid) <= 255);
+    QCOMPARE(qRed(vivid), 255);
+    QCOMPARE(labRgb(-20, 0, 0), qRgb(0, 0, 0));
+    QCOMPARE(qRed(labRgb(0, 120, -120)) >= 0, true);
+    QCOMPARE(qAlpha(labRgb(50, 10, 10)), 255);
+}
+
+void LimgenTests::colorpass_statisticsOfImages() {
+    const LabStats flat = statsOf(solidImage(QSize(8, 8), QColor(200, 100, 50)));
+    QVERIFY(flat.valid);
+    double lab[3];
+    ColorPass::toLab(qRgb(200, 100, 50), lab);
+    for (int c = 0; c < 3; ++c) {
+        QVERIFY(qAbs(flat.mean[c] - lab[c]) < 1e-6);
+        QVERIFY(flat.deviation[c] < 1e-3);
+    }
+    QVERIFY(flat.lightness && flat.spread);
+    // Half white, half black: mean L 50, deviation L 50.
+    const LabStats two = statsOf(twoTone(qRgb(255, 255, 255), qRgb(0, 0, 0)));
+    QVERIFY(qAbs(two.mean[0] - 50) < 0.1);
+    QVERIFY(qAbs(two.deviation[0] - 50) < 0.1);
+    QVERIFY(two.deviation[1] < 0.01);
+    // Several images count together.
+    const LabStats both = ColorPass::statistics({solidImage(QSize(4, 4), Qt::white), solidImage(QSize(4, 4), Qt::black)});
+    QVERIFY(qAbs(both.mean[0] - 50) < 0.1);
+    // A large image is sampled, and a flat one gives the same figures.
+    const LabStats large = statsOf(solidImage(QSize(1500, 900), QColor(200, 100, 50)));
+    QVERIFY(qAbs(large.mean[0] - lab[0]) < 1e-6);
+    // Nothing to measure.
+    QVERIFY(!ColorPass::statistics(QList<QImage>{}).valid);
+    QVERIFY(!ColorPass::statistics(QList<QImage>{QImage()}).valid);
+}
+
+void LimgenTests::colorpass_statisticsOfPalette() {
+    const QList<QColor> palette{QColor("#ff0000"), QColor("#00ff00"), QColor(), QColor("#0000ff")};
+    const LabStats stats = ColorPass::statistics(palette);
+    QVERIFY(stats.valid);
+    // The palette moves the colour cast only.
+    QVERIFY(!stats.lightness);
+    QVERIFY(!stats.spread);
+    double red[3], green[3], blue[3];
+    ColorPass::toLab(qRgb(255, 0, 0), red);
+    ColorPass::toLab(qRgb(0, 255, 0), green);
+    ColorPass::toLab(qRgb(0, 0, 255), blue);
+    for (int c = 0; c < 3; ++c)
+        QVERIFY2(qAbs(stats.mean[c] - (red[c] + green[c] + blue[c]) / 3) < 1e-6, "the invalid colour is skipped"); 
+    QVERIFY(!ColorPass::statistics(QList<QColor>{}).valid);
+    QVERIFY(!ColorPass::statistics(QList<QColor>{QColor()}).valid);
+}
+
+void LimgenTests::colorpass_strengthZeroIsIdentity() {
+    const QImage image = twoTone(qRgb(30, 80, 160), qRgb(200, 150, 90));
+    const LabStats target = statsOf(solidImage(QSize(8, 8), QColor(230, 120, 40)));
+    for (const double strength : {0.0, -1.0}) {
+        const QImage result = ColorPass::apply(image, target, strength);
+        QCOMPARE(result, image);
+    }
+    // No target, no image: nothing to do either.
+    QCOMPARE(ColorPass::apply(image, LabStats(), 1.0), image);
+    QVERIFY(ColorPass::apply(QImage(), target, 1.0).isNull());
+}
+
+void LimgenTests::colorpass_strengthOneReachesTheTargetMeans() {
+    // A bluish picture with some spread, moved toward an orange one.
+    QImage source(60, 40, QImage::Format_RGB32);
+    QImage target(60, 40, QImage::Format_RGB32);
+    for (int y = 0; y < 40; ++y)
+        for (int x = 0; x < 60; ++x) {
+            source.setPixel(x, y, labRgb(45 + y * 0.5, -5 + x * 0.1, -25 + y * 0.2));
+            target.setPixel(x, y, labRgb(60 + x * 0.3, 20 + y * 0.2, 35 + x * 0.1));
+        }
+    const LabStats want = statsOf(target);
+    const LabStats before = statsOf(source);
+    const QImage result = ColorPass::apply(source, want, 1.0);
+    QCOMPARE(result.size(), source.size());
+    const LabStats got = statsOf(result);
+    for (int c = 0; c < 3; ++c) {
+        QVERIFY2(qAbs(got.mean[c] - want.mean[c]) < 1.5,
+                 qPrintable(QString("channel %1: %2 vs %3 (was %4)").arg(c).arg(got.mean[c]).arg(want.mean[c]).arg(before.mean[c])));
+        // The means really moved: the source was far from the target.
+        QVERIFY(qAbs(before.mean[c] - want.mean[c]) > 5);
+    }
+}
+
+void LimgenTests::colorpass_spreadFollowsTheTargetWithinTheClamp() {
+    const QRgb grey40 = labRgb(40, 0, 0), grey60 = labRgb(60, 0, 0);
+    const QImage source = twoTone(grey40, grey60); // spread 10 in L
+    // A target 1.5 times as spread out: the result follows.
+    LabStats target;
+    target.mean[0] = 50;
+    target.deviation[0] = 15;
+    target.valid = true;
+    LabStats got = statsOf(ColorPass::apply(source, target, 1.0));
+    QVERIFY2(qAbs(got.deviation[0] - 15) < 1.5, qPrintable(QString::number(got.deviation[0])));
+    // A target 5 times as spread out: at most twice.
+    target.deviation[0] = 50;
+    got = statsOf(ColorPass::apply(source, target, 1.0));
+    QVERIFY2(qAbs(got.deviation[0] - 20) < 2.0, qPrintable(QString::number(got.deviation[0])));
+    // A nearly flat target: at least half.
+    target.deviation[0] = 0.5;
+    got = statsOf(ColorPass::apply(source, target, 1.0));
+    QVERIFY2(qAbs(got.deviation[0] - 5) < 1.0, qPrintable(QString::number(got.deviation[0])));
+    // A flat image is not blown up, whatever the target says.
+    target.deviation[0] = 50;
+    got = statsOf(ColorPass::apply(solidImage(QSize(20, 20), QColor(120, 120, 120)), target, 1.0));
+    QVERIFY2(got.deviation[0] < 1.0, qPrintable(QString::number(got.deviation[0])));
+}
+
+void LimgenTests::colorpass_paletteTargetMovesOnlyTheCast() {
+    const QImage source = twoTone(labRgb(35, -3, -12), labRgb(65, -3, -12));
+    const QList<QColor> warm{QColor("#e07a30"), QColor("#c05020"), QColor("#f0c070")};
+    const LabStats target = ColorPass::statistics(warm);
+    const LabStats before = statsOf(source);
+    const LabStats after = statsOf(ColorPass::apply(source, target, 1.0));
+    // Lightness and its spread stay; the colour cast takes the palette's.
+    QVERIFY2(qAbs(after.mean[0] - before.mean[0]) < 1.0, qPrintable(QString::number(after.mean[0])));
+    QVERIFY2(qAbs(after.deviation[0] - before.deviation[0]) < 1.0, "the spread of L is untouched");
+    QVERIFY2(qAbs(after.mean[1] - target.mean[1]) < 2.5, qPrintable(QString("a %1 vs %2").arg(after.mean[1]).arg(target.mean[1])));
+    QVERIFY2(qAbs(after.mean[2] - target.mean[2]) < 2.5, qPrintable(QString("b %1 vs %2").arg(after.mean[2]).arg(target.mean[2])));
+}
+
+void LimgenTests::colorpass_halfStrengthIsHalfway() {
+    const QImage source = solidImage(QSize(20, 20), QColor(80, 110, 160));
+    const LabStats target = statsOf(solidImage(QSize(8, 8), QColor(220, 140, 60)));
+    const LabStats from = statsOf(source), full = statsOf(ColorPass::apply(source, target, 1.0)),
+                   half = statsOf(ColorPass::apply(source, target, 0.5));
+    for (int c = 0; c < 3; ++c)
+        QVERIFY2(qAbs(half.mean[c] - (from.mean[c] + full.mean[c]) / 2) < 1.0, qPrintable(QString::number(c)));
+    // A strength above 1 is 1.
+    const LabStats over = statsOf(ColorPass::apply(source, target, 7.0));
+    for (int c = 0; c < 3; ++c)
+        QVERIFY(qAbs(over.mean[c] - full.mean[c]) < 0.5);
+}
+
+void LimgenTests::colorpass_alphaIsKept() {
+    QImage image(10, 10, QImage::Format_ARGB32);
+    for (int y = 0; y < 10; ++y)
+        for (int x = 0; x < 10; ++x)
+            image.setPixel(x, y, qRgba(80, 110, 160, x == 0 ? 0 : (y < 5 ? 255 : 128)));
+    const LabStats target = statsOf(solidImage(QSize(8, 8), QColor(220, 140, 60)));
+    const QImage result = ColorPass::apply(image, target, 1.0);
+    QVERIFY(result.hasAlphaChannel());
+    for (int y = 0; y < 10; ++y)
+        for (int x = 0; x < 10; ++x)
+            QCOMPARE(qAlpha(result.pixel(x, y)), qAlpha(image.pixel(x, y)));
+    QVERIFY(result.pixel(5, 2) != image.pixel(5, 2)); // the colours did move
+    // An opaque image comes back without an alpha channel.
+    const QImage opaque = ColorPass::apply(solidImage(QSize(4, 4), QColor(80, 110, 160)), target, 1.0);
+    QVERIFY(!opaque.hasAlphaChannel());
+}
+
+// ============================== L5: Resample ==============================
+
+void LimgenTests::resample_lanczosGivesExactSizes() {
+    const QImage image = twoTone(qRgb(255, 0, 0), qRgb(0, 0, 255), QSize(40, 30));
+    for (const QSize size : {QSize(80, 60), QSize(20, 15), QSize(7, 11), QSize(100, 20), QSize(40, 30), QSize(1, 1)}) {
+        const QImage result = Resample::lanczos(image, size);
+        QCOMPARE(result.size(), size);
+        QVERIFY(!result.hasAlphaChannel());
+    }
+    QVERIFY(Resample::lanczos(QImage(10, 10, QImage::Format_ARGB32), QSize(20, 20)).hasAlphaChannel());
+}
+
+void LimgenTests::resample_flatImageStaysFlat() {
+    for (const QSize size : {QSize(100, 50), QSize(7, 3)}) {
+        const QImage result = Resample::lanczos(solidImage(QSize(20, 10), QColor(40, 120, 200)), size);
+        for (int y = 0; y < result.height(); ++y)
+            for (int x = 0; x < result.width(); ++x) {
+                const QRgb pixel = result.pixel(x, y);
+                QVERIFY2(qAbs(qRed(pixel) - 40) <= 1 && qAbs(qGreen(pixel) - 120) <= 1 && qAbs(qBlue(pixel) - 200) <= 1,
+                         qPrintable(QString("%1,%2").arg(x).arg(y)));
+            }
+    }
+    // With alpha too.
+    QImage translucent(20, 10, QImage::Format_ARGB32);
+    translucent.fill(QColor(40, 120, 200, 128));
+    const QImage up = Resample::lanczos(translucent, QSize(60, 30));
+    QVERIFY(qAbs(qAlpha(up.pixel(30, 15)) - 128) <= 1);
+    QVERIFY(qAbs(qRed(up.pixel(30, 15)) - 40) <= 2);
+}
+
+void LimgenTests::resample_lanczosKeepsAnEdge() {
+    QImage image(20, 10, QImage::Format_RGB32);
+    for (int y = 0; y < 10; ++y)
+        for (int x = 0; x < 20; ++x)
+            image.setPixel(x, y, x < 10 ? qRgb(0, 0, 0) : qRgb(255, 255, 255));
+    const QImage up = Resample::lanczos(image, QSize(80, 40));
+    QVERIFY(qRed(up.pixel(0, 5)) <= 3);
+    QVERIFY(qRed(up.pixel(79, 5)) >= 252);
+    // The step stays sharp: two pixels either side of the middle are already close to the ends.
+    QVERIFY(qRed(up.pixel(34, 5)) < 40);
+    QVERIFY(qRed(up.pixel(45, 5)) > 215);
+    QVERIFY(qRed(up.pixel(30, 5)) <= qRed(up.pixel(44, 5)));
+}
+
+void LimgenTests::resample_coverCropsTheCentre() {
+    // Four vertical bands of 10 pixels: red, green, blue, yellow.
+    QImage image(40, 20, QImage::Format_RGB32);
+    const QRgb bands[4] = {qRgb(255, 0, 0), qRgb(0, 255, 0), qRgb(0, 0, 255), qRgb(255, 255, 0)};
+    for (int y = 0; y < 20; ++y)
+        for (int x = 0; x < 40; ++x)
+            image.setPixel(x, y, bands[x / 10]);
+    // The same height, half the width: the centre 20 pixels, green then blue, with no resampling.
+    const QImage square = Resample::cover(image, QSize(20, 20));
+    QCOMPARE(square.size(), QSize(20, 20));
+    QCOMPARE(square.pixel(0, 5), bands[1]);
+    QCOMPARE(square.pixel(9, 5), bands[1]);
+    QCOMPARE(square.pixel(10, 5), bands[2]);
+    QCOMPARE(square.pixel(19, 5), bands[2]);
+    // The ratio is kept: a taller target is covered by scaling up and cropping the sides.
+    const QImage tall = Resample::cover(image, QSize(20, 40));
+    QCOMPARE(tall.size(), QSize(20, 40));
+    // Scale 2: 80x40, crop x from 30: columns 30..49 of the scaled image, green (20..39) and blue (40..59).
+    QVERIFY(qGreen(tall.pixel(2, 20)) > 200 && qRed(tall.pixel(2, 20)) < 40);
+    QVERIFY(qBlue(tall.pixel(17, 20)) > 200 && qRed(tall.pixel(17, 20)) < 40);
+    // Rows: a wide target crops top and bottom.
+    QImage rows(20, 40, QImage::Format_RGB32);
+    for (int y = 0; y < 40; ++y)
+        for (int x = 0; x < 20; ++x)
+            rows.setPixel(x, y, y < 10 ? qRgb(255, 0, 0) : y < 30 ? qRgb(0, 255, 0) : qRgb(0, 0, 255));
+    const QImage wide = Resample::cover(rows, QSize(20, 20));
+    QCOMPARE(wide.pixel(5, 0), qRgb(0, 255, 0)); // rows 10..29: all green
+    QCOMPARE(wide.pixel(5, 19), qRgb(0, 255, 0));
+}
+
+void LimgenTests::resample_coverUpAndDown() {
+    QImage image(100, 50, QImage::Format_RGB32);
+    image.fill(QColor(30, 60, 90));
+    for (const QSize size : {QSize(40, 40), QSize(400, 300), QSize(100, 50), QSize(33, 77), QSize(1, 1)}) {
+        const QImage result = Resample::cover(image, size);
+        QCOMPARE(result.size(), size);
+        QVERIFY(qAbs(qRed(result.pixel(size.width() / 2, size.height() / 2)) - 30) <= 1);
+    }
+}
+
+void LimgenTests::resample_nullAndEmpty() {
+    QVERIFY(Resample::lanczos(QImage(), QSize(10, 10)).isNull());
+    QVERIFY(Resample::lanczos(solidImage(QSize(4, 4), Qt::red), QSize(0, 10)).isNull());
+    QVERIFY(Resample::cover(QImage(), QSize(10, 10)).isNull());
+    QVERIFY(Resample::cover(solidImage(QSize(4, 4), Qt::red), QSize()).isNull());
+}
+
+// ============================== L5: Library finals and discards ===========
+
+namespace {
+
+LibraryEntry addTestDraft(Library &library, const QString &directory, const QString &subject = "oil rig at dusk",
+                          const QDateTime &created = fixedTime) {
+    DraftRecord record = fullRecord();
+    record.subject = subject;
+    return library.addDraft(makePng(directory + "/src-" + QString::number(QRandomGenerator::global()->generate()) + ".png"),
+                            record, created);
+}
+
+void setAge(const QString &path, const QDateTime &when) {
+    QFile file(path);
+    if (file.open(QIODevice::ReadWrite))
+        file.setFileTime(when, QFileDevice::FileModificationTime);
+}
+
+} // namespace
+
+void LimgenTests::library_addFinalPngAndJpeg() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    Library library(fixture.data + "/library");
+    const QJsonObject metadata{{"subject", "oil rig at dusk"}, {"size", QJsonArray{320, 180}},
+                               {"finish", QJsonObject{{"from", "2026-11-20-aaaaaa"}}}};
+    const QString png = fixture.root.path() + "/final.png", jpg = fixture.root.path() + "/final.jpg";
+    QVERIFY(savePng(solidImage(QSize(32, 18), QColor(10, 120, 200)), png));
+    QVERIFY(solidImage(QSize(32, 18), QColor(10, 120, 200)).save(jpg, "JPEG"));
+
+    QString error;
+    const LibraryEntry a = library.addFinal(png, metadata, fixedTime, &error);
+    QVERIFY2(a.isValid(), qPrintable(error));
+    QVERIFY(Library::isValidId(a.id));
+    QVERIFY(a.id.startsWith("2026-11-20-"));
+    QCOMPARE(a.image, fixture.data + "/library/2026-11/" + a.id + ".png");
+    QCOMPARE(readFile(a.image), readFile(png));
+    // The sidecar is the given one with id, kind and created filled in.
+    const QJsonObject json = QJsonDocument::fromJson(readFile(a.sidecar)).object();
+    QCOMPARE(json["id"].toString(), a.id);
+    QCOMPARE(json["kind"].toString(), QString("final"));
+    QCOMPARE(json["created"].toString(), QString("2026-11-20T10:30:15Z"));
+    QCOMPARE(json["subject"].toString(), QString("oil rig at dusk"));
+    QCOMPARE(json["size"].toArray()[0].toInt(), 320);
+    QCOMPARE(json["finish"].toObject()["from"].toString(), QString("2026-11-20-aaaaaa"));
+    // The given metadata could carry an id, a kind or a date of its own: they are replaced.
+    QJsonObject odd = metadata;
+    odd["id"] = "wrong";
+    odd["kind"] = "draft";
+    odd["created"] = "never";
+    const LibraryEntry b = library.addFinal(jpg, odd, fixedTime);
+    QVERIFY(b.isValid());
+    QVERIFY(b.id != "wrong");
+    QCOMPARE(b.metadata["kind"].toString(), QString("final"));
+    QVERIFY(b.image.endsWith(".jpg"));
+    QCOMPARE(readFile(b.image), readFile(jpg));
+    // A ".jpeg" source is filed as .jpg; the suffix is read in any case.
+    const QString jpeg = fixture.root.path() + "/final.JPEG";
+    QVERIFY(QFile::copy(jpg, jpeg));
+    QVERIFY(library.addFinal(jpeg, metadata, fixedTime).image.endsWith(".jpg"));
+    const QString upper = fixture.root.path() + "/final.PNG";
+    QVERIFY(QFile::copy(png, upper));
+    QVERIFY(library.addFinal(upper, metadata, fixedTime).image.endsWith(".png"));
+    // Both are found by id, whichever the format, and no .part is left.
+    QCOMPARE(library.find(a.id).image, a.image);
+    QCOMPARE(library.find(b.id).image, b.image);
+    QCOMPARE(library.find(b.id).metadata["kind"].toString(), QString("final"));
+    for (const QString &file : QDir(fixture.data + "/library/2026-11").entryList(QDir::Files))
+        QVERIFY2(!file.endsWith(".part"), qPrintable(file));
+}
+
+void LimgenTests::library_addFinalFailsCleanly() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    Library library(fixture.data + "/library");
+    QString error;
+    QVERIFY(!library.addFinal(fixture.root.path() + "/nope.png", {}, fixedTime, &error).isValid());
+    QVERIFY(!error.isEmpty());
+    QCOMPARE(QDir(fixture.data + "/library/2026-11").entryList(QDir::Files | QDir::NoDotAndDotDot), QStringList());
+    QVERIFY(!library.addFinal(fixture.root.path() + "/nope.png", {}, fixedTime).isValid()); // null error pointer
+    QVERIFY(writeFile(fixture.root.path() + "/blocker", "x"));
+    Library blocked(fixture.root.path() + "/blocker/library");
+    const QString png = fixture.root.path() + "/a.png";
+    QVERIFY(savePng(solidImage(QSize(4, 4), Qt::red), png));
+    QVERIFY(!blocked.addFinal(png, {}, fixedTime, &error).isValid());
+}
+
+void LimgenTests::library_discardMovesTheDraftAside() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    Library library(fixture.data + "/library");
+    const LibraryEntry draft = addTestDraft(library, fixture.root.path());
+    const QByteArray image = readFile(draft.image), sidecar = readFile(draft.sidecar);
+    // Discarded long after it was made: the file's own date is old.
+    setAge(draft.image, QDateTime::currentDateTime().addDays(-5));
+    setAge(draft.sidecar, QDateTime::currentDateTime().addDays(-5));
+    QString error;
+    QVERIFY2(library.discard(draft.id, &error), qPrintable(error));
+    const QString bin = fixture.data + "/library/.discarded/" + draft.id;
+    QVERIFY(!QFileInfo::exists(draft.image));
+    QVERIFY(!QFileInfo::exists(draft.sidecar));
+    QVERIFY(!library.find(draft.id).isValid());
+    QCOMPARE(readFile(bin + ".png"), image); // moved, not changed
+    QCOMPARE(readFile(bin + ".json"), sidecar);
+    // The modification time says when it was discarded.
+    for (const char *suffix : {".png", ".json"})
+        QVERIFY2(QFileInfo(bin + suffix).lastModified() > QDateTime::currentDateTime().addSecs(-60), suffix);
+    // A draft that is not there cannot be discarded.
+    QVERIFY(!library.discard("2026-11-20-ffffff", &error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(!library.discard("../x", &error));
+    QVERIFY(!library.discard(draft.id, &error)); // already discarded
+}
+
+void LimgenTests::library_restoreBringsItBackExactly() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    Library library(fixture.data + "/library");
+    const LibraryEntry draft = addTestDraft(library, fixture.root.path());
+    const QByteArray image = readFile(draft.image), sidecar = readFile(draft.sidecar);
+    QVERIFY(library.discard(draft.id));
+    QString error;
+    QVERIFY2(library.restore(draft.id, &error), qPrintable(error));
+    const LibraryEntry back = library.find(draft.id);
+    QVERIFY(back.isValid());
+    QCOMPARE(back.image, draft.image);
+    QCOMPARE(readFile(back.image), image);
+    QCOMPARE(readFile(back.sidecar), sidecar);
+    QVERIFY(!QFileInfo::exists(fixture.data + "/library/.discarded/" + draft.id + ".png"));
+    // Nothing to restore the second time, or for an unknown or malformed id.
+    QVERIFY(!library.restore(draft.id, &error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(!library.restore("2026-11-20-ffffff"));
+    QVERIFY(!library.restore("../2026-11-20-ffffff"));
+    QVERIFY(!library.restore(""));
+    // Discard and restore again: the round trip can be repeated.
+    QVERIFY(library.discard(draft.id));
+    QVERIFY(library.restore(draft.id));
+    QCOMPARE(readFile(library.find(draft.id).image), image);
+}
+
+void LimgenTests::library_aFinalCannotBeDiscarded() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    Library library(fixture.data + "/library");
+    const QString png = fixture.root.path() + "/final.png";
+    QVERIFY(savePng(solidImage(QSize(8, 8), Qt::blue), png));
+    const LibraryEntry final = library.addFinal(png, {{"subject", "x"}}, fixedTime);
+    QVERIFY(final.isValid());
+    QString error;
+    QVERIFY(!library.discard(final.id, &error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(QFileInfo::exists(final.image));
+    QVERIFY(QFileInfo::exists(final.sidecar));
+    QVERIFY(library.find(final.id).isValid());
+    QVERIFY(!QFileInfo::exists(fixture.data + "/library/.discarded"));
+}
+
+void LimgenTests::library_purgeAndPurgeDiscarded() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    Library library(fixture.data + "/library");
+    const LibraryEntry a = addTestDraft(library, fixture.root.path()), b = addTestDraft(library, fixture.root.path()),
+                       c = addTestDraft(library, fixture.root.path());
+    for (const LibraryEntry &entry : {a, b, c})
+        QVERIFY(library.discard(entry.id));
+    const QString bin = fixture.data + "/library/.discarded/";
+    // purge deletes one discarded draft, and only that one.
+    library.purge(a.id);
+    QVERIFY(!QFileInfo::exists(bin + a.id + ".png") && !QFileInfo::exists(bin + a.id + ".json"));
+    QVERIFY(QFileInfo::exists(bin + b.id + ".png"));
+    library.purge(a.id);           // already gone
+    library.purge("../library/x"); // never leaves the bin
+    library.purge("");
+    QVERIFY(QFileInfo::exists(bin + c.id + ".json"));
+    // purgeDiscarded deletes those discarded before a time: b is old, c is new.
+    for (const char *suffix : {".png", ".json"})
+        setAge(bin + b.id + suffix, QDateTime::currentDateTime().addDays(-3));
+    library.purgeDiscarded(QDateTime::currentDateTime().addDays(-1));
+    QVERIFY(!QFileInfo::exists(bin + b.id + ".png") && !QFileInfo::exists(bin + b.id + ".json"));
+    QVERIFY(QFileInfo::exists(bin + c.id + ".png") && QFileInfo::exists(bin + c.id + ".json"));
+    QVERIFY(library.restore(c.id)); // the newer one can still be restored
+    // Nothing discarded: nothing to do.
+    Library empty(fixture.data + "/none");
+    empty.purgeDiscarded(QDateTime::currentDateTime());
+}
+
+void LimgenTests::config_finishKeysDefaultsAndBounds() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const QString file = fixture.root.path() + "/config/limgen/config.json";
+    Config config(file);
+    QCOMPARE(config.colorPass(), 0.3);
+    QCOMPARE(config.format(), QString("png"));
+    QCOMPARE(config.jpegQuality(), 92);
+    QCOMPARE(Config::defaultColorPass, 0.3);
+    QCOMPARE(Config::defaultJpegQuality, 92);
+    // The setters keep to the bounds.
+    config.setColorPass(1.7);
+    QCOMPARE(config.colorPass(), 1.0);
+    config.setColorPass(-2);
+    QCOMPARE(config.colorPass(), 0.0);
+    config.setColorPass(0.55);
+    config.setFormat("jpeg");
+    QVERIFY(config.save());
+    const QJsonObject json = QJsonDocument::fromJson(readFile(file)).object();
+    QCOMPARE(json["colorPass"].toDouble(), 0.55);
+    QCOMPARE(json["format"].toString(), QString("jpeg"));
+    Config again(file);
+    QCOMPARE(again.colorPass(), 0.55);
+    QCOMPARE(again.format(), QString("jpeg"));
+    again.setFormat("bmp"); // anything but jpeg is png
+    QCOMPARE(again.format(), QString("png"));
+    // A file with values out of range reads as the defaults.
+    for (const QByteArray &content :
+         {QByteArray(R"({"colorPass": 2, "format": "bmp", "jpegQuality": 0})"),
+          QByteArray(R"({"colorPass": -0.1, "format": 5, "jpegQuality": 101})"),
+          QByteArray(R"({"colorPass": "high", "format": null, "jpegQuality": "good"})")}) {
+        QVERIFY(writeFile(file, content));
+        const Config odd(file);
+        QCOMPARE(odd.colorPass(), 0.3);
+        QCOMPARE(odd.format(), QString("png"));
+        QCOMPARE(odd.jpegQuality(), 92);
+    }
+    // The ends of the ranges are allowed.
+    QVERIFY(writeFile(file, R"({"colorPass": 0, "jpegQuality": 1})"));
+    QCOMPARE(Config(file).colorPass(), 0.0);
+    QCOMPARE(Config(file).jpegQuality(), 1);
+    QVERIFY(writeFile(file, R"({"colorPass": 1, "jpegQuality": 100})"));
+    QCOMPARE(Config(file).colorPass(), 1.0);
+    QCOMPARE(Config(file).jpegQuality(), 100);
+}
+
+void LimgenTests::omarchy_themeDirectoryLookupOrder() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const QString user = fixture.root.path() + "/user-themes", stock = fixture.root.path() + "/stock-themes";
+    QVERIFY(QDir().mkpath(user + "/alpha"));
+    QVERIFY(QDir().mkpath(stock + "/alpha"));
+    QVERIFY(QDir().mkpath(stock + "/beta"));
+    QVERIFY(fixture.addTheme("gamma", tomlWith("#111111", "#eeeeee", "#ff0000")));
+    QVERIFY(fixture.switchTo("gamma"));
+    OmarchyPaths paths = fixture.paths();
+    paths.themes = {user, stock};
+    const Omarchy omarchy(paths);
+    QCOMPARE(omarchy.themeDirectory("alpha"), user + "/alpha"); // the user's first
+    QCOMPARE(omarchy.themeDirectory("beta"), stock + "/beta");  // then the stock one
+    QCOMPARE(omarchy.themeDirectory("gamma"), fixture.state + "/theme"); // the current theme: Omarchy's own copy
+    QCOMPARE(omarchy.themeDirectory("nope"), QString());
+    for (const QString &slug : {QString(), QString("../alpha"), QString("a/b"), QString(".hidden"), QString(".."), QString("x y")})
+        QCOMPARE(omarchy.themeDirectory(slug), QString());
+    // The current theme wins over a folder of the same name.
+    QVERIFY(fixture.addTheme("alpha", tomlWith("#111111", "#eeeeee", "#ff0000")));
+    QVERIFY(fixture.switchTo("alpha"));
+    QCOMPARE(omarchy.themeDirectory("alpha"), fixture.state + "/theme");
+    // A file named like a theme is not a theme.
+    QVERIFY(writeFile(stock + "/file-not-folder", "x"));
+    QCOMPARE(omarchy.themeDirectory("file-not-folder"), QString());
+}
+
+void LimgenTests::omarchy_themeBackgroundsOfATheme() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const QString stock = fixture.root.path() + "/stock-themes";
+    touchAll(stock + "/beta/backgrounds", imageFixtureNames);
+    QVERIFY(QDir().mkpath(stock + "/bare"));
+    QVERIFY(fixture.addTheme("gamma", tomlWith("#111111", "#eeeeee", "#ff0000")));
+    touchAll(fixture.themes + "/gamma/backgrounds", {"c.png", "a.jpg"});
+    QVERIFY(fixture.switchTo("gamma"));
+    OmarchyPaths paths = fixture.paths();
+    paths.themes = {stock};
+    const Omarchy omarchy(paths);
+    QStringList expected;
+    for (const QString &name : imageFixtureWanted)
+        expected << stock + "/beta/backgrounds/" + name;
+    QCOMPARE(omarchy.themeBackgrounds("beta"), expected);
+    QCOMPARE(omarchy.themeBackgrounds("bare"), QStringList()); // no backgrounds folder
+    QCOMPARE(omarchy.themeBackgrounds("nope"), QStringList());
+    QCOMPARE(omarchy.themeBackgrounds("../beta"), QStringList());
+    // The current theme's images are read through Omarchy's copy.
+    QCOMPARE(omarchy.themeBackgrounds("gamma"),
+             (QStringList{fixture.state + "/theme/backgrounds/a.jpg", fixture.state + "/theme/backgrounds/c.png"}));
+}
+
+void LimgenTests::omarchy_keepDirectory() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const Omarchy omarchy(fixture.paths());
+    QCOMPARE(omarchy.keepDirectory("tokyo-night"), fixture.backgrounds + "/tokyo-night");
+    QCOMPARE(omarchy.keepDirectory(""), fixture.pictures()); // no theme: the pictures folder
+    for (const QString &slug : {QString("../x"), QString("a/b"), QString(".hidden"), QString(".."), QString("x y")})
+        QCOMPARE(omarchy.keepDirectory(slug), QString());
+    // Asking creates nothing.
+    QVERIFY(!QFileInfo::exists(fixture.backgrounds + "/tokyo-night"));
+    QVERIFY(!QFileInfo::exists(fixture.pictures()));
+}
+
+void LimgenTests::omarchy_currentBackground() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const Omarchy omarchy(fixture.paths());
+    QCOMPARE(omarchy.currentBackground(), QString()); // no link
+    const QString target = fixture.root.path() + "/bg/one.png";
+    QVERIFY(writeFile(target, "x"));
+    QVERIFY(QFile::link(target, fixture.state + "/background"));
+    QCOMPARE(omarchy.currentBackground(), target);
+    QVERIFY(replaceSymlink(fixture.root.path() + "/bg/two.png", fixture.state + "/background"));
+    QCOMPARE(omarchy.currentBackground(), fixture.root.path() + "/bg/two.png");
+    // A plain file of that name is not Omarchy's link.
+    QVERIFY(QFile::remove(fixture.state + "/background"));
+    QVERIFY(writeFile(fixture.state + "/background", "x"));
+    QCOMPARE(omarchy.currentBackground(), QString());
+}
+
+void LimgenTests::omarchy_setBackgroundThroughTheFakeOmarchy() {
+    Sandbox sb; // FAKE_OMARCHY_FAIL is put back when it ends
+    Fixture &fixture = sb.fixture;
+    const Omarchy omarchy(fixture.paths());
+    const QString image = fixture.root.path() + "/bg/new.png";
+    QString error;
+    QVERIFY2(omarchy.setBackground(image, &error), qPrintable(error));
+    QCOMPARE(fixture.omarchyCalls(), QStringList{"theme bg set " + image});
+    QCOMPARE(omarchy.currentBackground(), image); // the fake moved the link like Omarchy does
+    QVERIFY(omarchy.setBackground(image)); // a null error pointer is accepted
+    QCOMPARE(fixture.omarchyCalls().size(), 2);
+    // Omarchy fails: false, and what it said.
+    qputenv("FAKE_OMARCHY_FAIL", "1");
+    QVERIFY(!omarchy.setBackground(fixture.root.path() + "/bg/other.png", &error));
+    QVERIFY2(error.contains("boom"), qPrintable(error));
+    QCOMPARE(omarchy.currentBackground(), image); // unchanged
+    qunsetenv("FAKE_OMARCHY_FAIL");
+    // No Omarchy known, or one that is not there.
+    OmarchyPaths paths = fixture.paths();
+    paths.omarchy = QString();
+    QVERIFY(!Omarchy(paths).setBackground(image, &error));
+    QVERIFY2(error.contains(image), qPrintable(error)); // says where the image is instead
+    paths.omarchy = fixture.root.path() + "/no-such-omarchy";
+    QVERIFY(!Omarchy(paths).setBackground(image, &error));
+    QVERIFY(!error.isEmpty());
+    QCOMPARE(fixture.omarchyCalls().size(), 3); // the failing call was logged, the others never ran
+}
+
+void LimgenTests::omarchy_pathsThemesAndPictures() {
+    EnvGuard guard({"LIMGEN_OMARCHY_THEMES", "LIMGEN_PICTURES", "XDG_CONFIG_HOME", "LIMGEN_OMARCHY_BIN"});
+    qputenv("XDG_CONFIG_HOME", "/tmp/limgen-test/config");
+    qputenv("LIMGEN_OMARCHY_THEMES", "/tmp/limgen-test/a:/tmp/limgen-test/b::/tmp/limgen-test/c");
+    qputenv("LIMGEN_PICTURES", "/tmp/limgen-test/pictures");
+    OmarchyPaths paths = OmarchyPaths::fromEnvironment();
+    QCOMPARE(paths.themes, (QStringList{"/tmp/limgen-test/a", "/tmp/limgen-test/b", "/tmp/limgen-test/c"}));
+    QCOMPARE(paths.pictures, QString("/tmp/limgen-test/pictures"));
+    // Without overrides: the user's themes, then the stock ones; pictures under Pictures/limgen.
+    qunsetenv("LIMGEN_OMARCHY_THEMES");
+    qputenv("LIMGEN_PICTURES", "");
+    paths = OmarchyPaths::fromEnvironment();
+    QCOMPARE(paths.themes, (QStringList{"/tmp/limgen-test/config/omarchy/themes", "/usr/share/omarchy/themes"}));
+    QVERIFY2(paths.pictures.endsWith("/limgen"), qPrintable(paths.pictures));
+    QVERIFY(paths.pictures.contains("Pictures"));
+}
+
+// ============================== L5: Keeper ================================
+
+namespace {
+
+struct KeeperRun {
+    bool finished = false, failed = false;
+    Keeper::Outcome outcome = Keeper::Outcome::Ok;
+    QString message;
+    KeepResult result;
+    QList<double> progress;
+    bool over() const { return finished || failed; }
+};
+
+void watchKeeper(Keeper &keeper, KeeperRun &run) {
+    QObject::connect(&keeper, &Keeper::progress, &keeper, [&run](double fraction) { run.progress << fraction; });
+    QObject::connect(&keeper, &Keeper::finished, &keeper, [&run](const KeepResult &result) {
+        run.finished = true;
+        run.result = result;
+    });
+    QObject::connect(&keeper, &Keeper::failed, &keeper, [&run](Keeper::Outcome outcome, const QString &message) {
+        run.failed = true;
+        run.outcome = outcome;
+        run.message = message;
+    });
+}
+
+// A sandbox with the upscaler installed, a theme "night-city" with a
+// colors.toml, a 64x48 draft made for it, and a Keeper on a 320x180 monitor.
+struct KeepRig {
+    Sandbox sb;
+    Catalogue catalogue = Catalogue::builtIn();
+    EngineProbe probe;
+    KeeperRun run;
+    std::unique_ptr<Keeper> keeper;
+    LibraryEntry draft;
+
+    explicit KeepRig(bool upscaler = true) {
+        if (upscaler)
+            makeSparse(Catalogue::path(*catalogue.upscaler(), sb.fixture.models), catalogue.upscaler()->bytes);
+        sb.fixture.addTheme("night-city", stockToml);
+        probe = SdCppEngine(fakeEngine).probe();
+        remake();
+        draft = makeDraft();
+    }
+    void remake(const OmarchyPaths &paths = OmarchyPaths()) {
+        run = KeeperRun();
+        keeper = std::make_unique<Keeper>(catalogue, paths.state.isEmpty() ? sb.paths() : paths, fakeEngine);
+        watchKeeper(*keeper, run);
+    }
+    LibraryEntry makeDraft(const QString &subject = "oil rig at dusk", const QString &themeSlug = "night-city",
+                           const QSize &size = QSize(64, 48)) {
+        Library library(sb.library());
+        DraftRecord record = fullRecord();
+        record.subject = subject;
+        record.themeSlug = themeSlug;
+        if (themeSlug.isEmpty()) {
+            record.themeMode.clear();
+            record.palette = QJsonObject();
+        }
+        record.width = size.width();
+        record.height = size.height();
+        return library.addDraft(makePng(sb.fixture.root.path() + "/src-" + QString::number(QRandomGenerator::global()->generate()) + ".png",
+                                        size.width(), size.height()),
+                                record, QDateTime::currentDateTimeUtc());
+    }
+    KeepSettings settings(const QString &theme = "night-city") const {
+        KeepSettings settings;
+        settings.draftId = draft.id;
+        settings.theme = theme;
+        settings.colorPass = 0.3;
+        settings.size = QSize(320, 180);
+        return settings;
+    }
+    QString keepFolder(const QString &theme = "night-city") const { return sb.fixture.backgrounds + "/" + theme; }
+    Keeper::Outcome prepare(const KeepSettings &settings, QString *message = nullptr) {
+        return keeper->prepare(settings, probe, message);
+    }
+    void keepNow(const KeepSettings &settings) {
+        QString message;
+        QVERIFY2(prepare(settings, &message) == Keeper::Outcome::Ok, qPrintable(message));
+        keeper->start();
+    }
+    QStringList keptFiles(const QString &theme = "night-city") const {
+        QStringList files = QDir(keepFolder(theme)).entryList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
+        return files;
+    }
+};
+
+#define WAIT_FOR_KEEPER(rig) QTRY_VERIFY_WITH_TIMEOUT((rig).run.over(), 30000)
+#define KEEP_AND_WAIT(rig, settings) \
+    (rig).keepNow(settings);         \
+    if (QTest::currentTestFailed())  \
+        return;                      \
+    WAIT_FOR_KEEPER(rig)
+
+// The calls that upscale, not the probe's --version and --list-devices.
+QList<QStringList> upscaleCalls(const QString &log) {
+    QList<QStringList> calls;
+    for (const QStringList &call : fakeCalls(log))
+        if (call.contains("-M"))
+            calls << call;
+    return calls;
+}
+
+int jpegLumaDc(const QByteArray &jpeg) {
+    const int at = jpeg.indexOf("\xFF\xDB");
+    return at < 0 ? -1 : quint8(jpeg.at(at + 5));
+}
+
+QStringList cacheEntries(const Sandbox &sb) {
+    return QDir(sb.fixture.cache + "/limgen").entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
+}
+
+} // namespace
+
+void LimgenTests::keeper_fileNames_data() {
+    QTest::addColumn<QString>("subject");
+    QTest::addColumn<QString>("format");
+    QTest::addColumn<QString>("expected");
+    const QString id = "2026-11-20-a3f9c1";
+    QTest::newRow("plain words") << "oil rig at dusk" << "png" << "limgen-oil-rig-at-dusk-a3f9c1.png";
+    QTest::newRow("upper case") << "Oil Rig" << "png" << "limgen-oil-rig-a3f9c1.png";
+    QTest::newRow("jpeg is .jpg") << "oil rig" << "jpeg" << "limgen-oil-rig-a3f9c1.jpg";
+    QTest::newRow("accents come off") << QString::fromUtf8("Forêt brumeuse à l'aube") << "png"
+                                      << "limgen-foret-brumeuse-a-l-aube-a3f9c1.png";
+    QTest::newRow("other scripts leave nothing") << QString::fromUtf8("夕焼けの海") << "png" << "limgen-background-a3f9c1.png";
+    QTest::newRow("other script between words") << QString::fromUtf8("Paysage 日本 fuji") << "png"
+                                                 << "limgen-paysage-fuji-a3f9c1.png";
+    QTest::newRow("full-width letters fold to ASCII") << QString::fromUtf8("ＡＢＣ day") << "png" << "limgen-abc-day-a3f9c1.png";
+    QTest::newRow("punctuation") << "!!!rock & roll??" << "png" << "limgen-rock-roll-a3f9c1.png";
+    QTest::newRow("digits") << "4k wallpaper" << "png" << "limgen-4k-wallpaper-a3f9c1.png";
+    QTest::newRow("empty") << "" << "png" << "limgen-background-a3f9c1.png";
+    QTest::newRow("only spaces") << "   " << "png" << "limgen-background-a3f9c1.png";
+    QTest::newRow("only punctuation") << "?!?" << "jpeg" << "limgen-background-a3f9c1.jpg";
+    QTest::newRow("slashes cannot make a path") << "../../etc/passwd" << "png" << "limgen-etc-passwd-a3f9c1.png";
+    // 40 characters at most, and the cut never leaves a trailing dash.
+    QTest::newRow("long") << "a very long description of an oil rig standing in the sea at dusk" << "png"
+                          << "limgen-a-very-long-description-of-an-oil-rig-st-a3f9c1.png";
+    QTest::newRow("cut at a dash") << "abcdefghijklmnopqrstuvwxyz0123456789abc defgh" << "png"
+                                   << "limgen-abcdefghijklmnopqrstuvwxyz0123456789abc-a3f9c1.png";
+    Q_UNUSED(id);
+}
+
+void LimgenTests::keeper_fileNames() {
+    QFETCH(QString, subject);
+    QFETCH(QString, format);
+    QFETCH(QString, expected);
+    const QString name = Keeper::fileName(subject, "2026-11-20-a3f9c1", format);
+    QCOMPARE(name, expected);
+    // Whatever the subject, it is one plain file name that starts with limgen-.
+    QVERIFY(name.startsWith("limgen-"));
+    QVERIFY(!name.contains('/') && !name.contains(".."));
+    QVERIFY(name.size() <= 7 + 40 + 1 + 6 + 4);
+}
+
+void LimgenTests::keeper_parametersText() {
+    const QJsonObject metadata{{"prompt", "oil rig at dusk, cinematic"},
+                               {"negative", "blurry, text"},
+                               {"steps", 8},
+                               {"sampler", "euler"},
+                               {"cfg", 1.0},
+                               {"seed", 4000000000.0},
+                               {"size", QJsonArray{2560, 1440}},
+                               {"model", QJsonObject{{"id", "z-image-turbo"}}}};
+    QCOMPARE(Keeper::parameters(metadata),
+             QString("oil rig at dusk, cinematic\nNegative prompt: blurry, text\n"
+                     "Steps: 8, Sampler: euler, CFG scale: 1, Seed: 4000000000, Size: 2560x1440, Model: z-image-turbo"));
+    // No negative prompt, no line for it.
+    QJsonObject plain = metadata;
+    plain["negative"] = "";
+    QCOMPARE(Keeper::parameters(plain).split('\n').size(), 2);
+    QVERIFY(!Keeper::parameters(plain).contains("Negative"));
+    QVERIFY(Keeper::parameters(plain).startsWith("oil rig at dusk, cinematic\nSteps: 8"));
+}
+
+void LimgenTests::keeper_prepareOutcomesInOrder() {
+    KeepRig rig;
+    QString message;
+    // A draft that is not in the library, however the id is written.
+    KeepSettings settings = rig.settings();
+    settings.draftId = "2026-11-20-ffffff";
+    QCOMPARE(int(rig.prepare(settings, &message)), int(Keeper::Outcome::UnknownDraft));
+    QVERIFY2(message.contains("2026-11-20-ffffff"), qPrintable(message));
+    settings.draftId = "nope";
+    QCOMPARE(int(rig.prepare(settings)), int(Keeper::Outcome::UnknownDraft));
+    // A final is not a draft.
+    const QString png = rig.sb.fixture.root.path() + "/f.png";
+    QVERIFY(savePng(solidImage(QSize(8, 8), Qt::red), png));
+    const LibraryEntry final = Library(rig.sb.library()).addFinal(png, {{"subject", "x"}}, fixedTime);
+    settings.draftId = final.id;
+    QCOMPARE(int(rig.prepare(settings, &message)), int(Keeper::Outcome::UnknownDraft));
+    QVERIFY2(message.contains("not a draft"), qPrintable(message));
+    // The draft is checked before the theme, the theme before the upscaler, the upscaler before the engine.
+    KeepSettings noDraftNoTheme = rig.settings("no-such-theme");
+    noDraftNoTheme.draftId = "2026-11-20-ffffff";
+    QCOMPARE(int(rig.prepare(noDraftNoTheme)), int(Keeper::Outcome::UnknownDraft));
+    QCOMPARE(int(rig.prepare(rig.settings("no-such-theme"), &message)), int(Keeper::Outcome::UnknownTheme));
+    QVERIFY2(message.contains("no-such-theme"), qPrintable(message));
+    QCOMPARE(int(rig.prepare(rig.settings("../x"))), int(Keeper::Outcome::UnknownTheme));
+    EngineProbe bad;
+    bad.error = {EngineError::NoGpu, "the engine says no", {}};
+    const CatalogueFile &upscaler = *rig.catalogue.upscaler();
+    QVERIFY(QFile::remove(Catalogue::path(upscaler, rig.sb.fixture.models)));
+    rig.probe = bad;
+    QCOMPARE(int(rig.prepare(rig.settings("no-such-theme"))), int(Keeper::Outcome::UnknownTheme));
+    QCOMPARE(int(rig.prepare(rig.settings(), &message)), int(Keeper::Outcome::NotRunnable));
+    QVERIFY2(message.contains(upscaler.name), qPrintable(message)); // names the missing upscaler, not the engine
+    QVERIFY(!message.contains("the engine says no"));
+    QVERIFY(makeSparse(Catalogue::path(upscaler, rig.sb.fixture.models), upscaler.bytes - 1)); // wrong size counts as missing
+    QCOMPARE(int(rig.prepare(rig.settings())), int(Keeper::Outcome::NotRunnable));
+    QVERIFY(makeSparse(Catalogue::path(upscaler, rig.sb.fixture.models), upscaler.bytes));
+    QCOMPARE(int(rig.prepare(rig.settings(), &message)), int(Keeper::Outcome::NotRunnable));
+    QCOMPARE(message, QString("the engine says no"));
+    rig.probe = SdCppEngine(fakeEngine).probe();
+    // A draft whose image cannot be read.
+    QVERIFY(writeFile(rig.draft.image, "not an image"));
+    QCOMPARE(int(rig.prepare(rig.settings(), &message)), int(Keeper::Outcome::Failed));
+    QVERIFY2(message.contains(".png"), qPrintable(message));
+    QVERIFY(!rig.keeper->isRunning());
+}
+
+void LimgenTests::keeper_prepareFillsTheResult() {
+    KeepRig rig;
+    QString message;
+    QVERIFY2(rig.prepare(rig.settings(), &message) == Keeper::Outcome::Ok, qPrintable(message));
+    const KeepResult &result = rig.keeper->result();
+    QCOMPARE(result.draft.id, rig.draft.id);
+    QCOMPARE(result.theme, QString("night-city"));
+    QCOMPARE(result.installed, rig.keepFolder() + "/" + Keeper::fileName("oil rig at dusk", rig.draft.id, "png"));
+    QVERIFY(!result.alreadyKept);
+    QVERIFY(!result.final.isValid());
+    QCOMPARE(rig.keeper->finalSize(), QSize(320, 180));
+    // Nothing is made or written by preparing.
+    QVERIFY(!QFileInfo::exists(rig.keepFolder()));
+    QCOMPARE(upscaleCalls(rig.sb.fakeLog()).size(), 0);
+    // With no size given, the largest monitor's: a rotated one counts turned.
+    KeepSettings noSize = rig.settings();
+    noSize.size = QSize();
+    OmarchyPaths paths = rig.sb.paths();
+    const QString script = rig.sb.fixture.root.path() + "/two-monitors";
+    QVERIFY(writeScript(script, R"(echo '[{"name":"A","width":1920,"height":1080,"transform":0},
+                                          {"name":"B","width":1080,"height":2560,"transform":1}]'
+)"));
+    paths.hyprctl = script;
+    rig.remake(paths);
+    QVERIFY(rig.prepare(noSize) == Keeper::Outcome::Ok);
+    QCOMPARE(rig.keeper->finalSize(), QSize(2560, 1080));
+    // The size in the settings wins over any monitor.
+    rig.remake(paths);
+    QVERIFY(rig.prepare(rig.settings()) == Keeper::Outcome::Ok);
+    QCOMPARE(rig.keeper->finalSize(), QSize(320, 180));
+}
+
+void LimgenTests::keeper_alreadyKeptIsFoundInEitherFormat() {
+    KeepRig rig;
+    const QString png = rig.keepFolder() + "/" + Keeper::fileName("oil rig at dusk", rig.draft.id, "png");
+    const QString jpg = rig.keepFolder() + "/" + Keeper::fileName("oil rig at dusk", rig.draft.id, "jpeg");
+    QVERIFY(writeFile(png, "old png"));
+    KeepSettings settings = rig.settings();
+    QVERIFY(rig.prepare(settings) == Keeper::Outcome::Ok);
+    QVERIFY(rig.keeper->result().alreadyKept);
+    QCOMPARE(rig.keeper->result().installed, png);
+    // Asked for JPEG while the PNG is there: still kept.
+    settings.format = "jpeg";
+    QVERIFY(rig.prepare(settings) == Keeper::Outcome::Ok);
+    QVERIFY(rig.keeper->result().alreadyKept);
+    QCOMPARE(rig.keeper->result().installed, png);
+    // And the other way round.
+    QVERIFY(QFile::remove(png));
+    QVERIFY(writeFile(jpg, "old jpg"));
+    settings.format = "png";
+    QVERIFY(rig.prepare(settings) == Keeper::Outcome::Ok);
+    QVERIFY(rig.keeper->result().alreadyKept);
+    QCOMPARE(rig.keeper->result().installed, jpg);
+    // A file of another draft's name is no match.
+    QVERIFY(QFile::remove(jpg));
+    QVERIFY(writeFile(rig.keepFolder() + "/limgen-oil-rig-at-dusk-000000.png", "other"));
+    QVERIFY(rig.prepare(settings) == Keeper::Outcome::Ok);
+    QVERIFY(!rig.keeper->result().alreadyKept);
+    QCOMPARE(rig.keeper->result().installed, png);
+}
+
+void LimgenTests::keeper_fullKeepWritesEverythingTheDocsSay() {
+    KeepRig rig;
+    const QByteArray draftImage = readFile(rig.draft.image), draftSidecar = readFile(rig.draft.sidecar);
+    KEEP_AND_WAIT(rig, rig.settings());
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    const KeepResult &result = rig.run.result;
+    QVERIFY(!result.alreadyKept);
+    QCOMPARE(result.theme, QString("night-city"));
+    // Installed under the theme's folder with the documented name, at the final size.
+    const QString name = Keeper::fileName("oil rig at dusk", rig.draft.id, "png");
+    QCOMPARE(result.installed, rig.keepFolder() + "/" + name);
+    QCOMPARE(QImageReader(result.installed).size(), QSize(320, 180));
+    QCOMPARE(rig.keptFiles(), QStringList{name}); // and nothing else: no .part, no upscaled.png
+    // The final is in the library, and the installed file is a copy of it.
+    QVERIFY(result.final.isValid());
+    QVERIFY(result.final.id != rig.draft.id);
+    const LibraryEntry found = Library(rig.sb.library()).find(result.final.id);
+    QVERIFY(found.isValid());
+    QCOMPARE(readFile(result.installed), readFile(found.image));
+    QVERIFY(found.image.endsWith(".png"));
+    // The sidecar follows docs/technical.md section 8.
+    const QJsonObject meta = found.metadata;
+    QCOMPARE(meta["id"].toString(), result.final.id);
+    QCOMPARE(meta["kind"].toString(), QString("final"));
+    QVERIFY(QDateTime::fromString(meta["created"].toString(), Qt::ISODate).isValid());
+    QCOMPARE(meta["size"].toArray()[0].toInt(), 320);
+    QCOMPARE(meta["size"].toArray()[1].toInt(), 180);
+    const QJsonObject draftMeta = rig.draft.metadata;
+    for (const char *key : {"theme", "subject", "prompt", "negative", "style", "model", "engine", "seed", "steps", "cfg", "sampler"})
+        QCOMPARE(meta[key], draftMeta[key]);
+    const QJsonObject finish = meta["finish"].toObject();
+    QCOMPARE(finish["from"].toString(), rig.draft.id);
+    QCOMPARE(finish["upscaler"].toString(), QString("realesrgan-x4plus"));
+    QCOMPARE(finish["colorPass"].toDouble(), 0.3);
+    QCOMPARE(finish["colorTarget"].toString(), QString("palette")); // the theme has colors.toml and no backgrounds
+    QCOMPARE(finish["theme"].toString(), QString("night-city"));
+    QCOMPARE(finish["size"].toArray()[0].toInt(), 320);
+    QCOMPARE(finish["format"].toString(), QString("png"));
+    QVERIFY(!finish.contains("quality"));
+    // The prompt travels in the file.
+    // (Qt's reader folds the line breaks to spaces; the file is written with them.)
+    QCOMPARE(QImageReader(result.installed).text("parameters"), Keeper::parameters(meta).simplified());
+    // The draft is untouched; the work folder is gone; the upscale ran at tile size 256.
+    QCOMPARE(readFile(rig.draft.image), draftImage);
+    QCOMPARE(readFile(rig.draft.sidecar), draftSidecar);
+    QCOMPARE(cacheEntries(rig.sb), QStringList());
+    QCOMPARE(valueAfter(upscaleCalls(rig.sb.fakeLog()).first(), "--upscale-tile-size"), QString("256"));
+    QCOMPARE(valueAfter(upscaleCalls(rig.sb.fakeLog()).first(), "-i"), rig.draft.image);
+    // Progress rose to 1.
+    QVERIFY(!rig.run.progress.isEmpty());
+    QCOMPARE(rig.run.progress.last(), 1.0);
+    for (int i = 1; i < rig.run.progress.size(); ++i)
+        QVERIFY(rig.run.progress[i] >= rig.run.progress[i - 1]);
+    QVERIFY(!rig.keeper->isRunning());
+}
+
+void LimgenTests::keeper_colorTargets_data() {
+    QTest::addColumn<int>("scenario");
+    QTest::addColumn<double>("strength");
+    QTest::addColumn<QString>("target"); // "" means null
+    QTest::addColumn<double>("recorded");
+    QTest::newRow("the theme's own backgrounds") << 0 << 0.5 << "backgrounds" << 0.5;
+    QTest::newRow("its palette when it has no backgrounds") << 1 << 0.4 << "palette" << 0.4;
+    QTest::newRow("the draft's recorded palette when the theme has no colors.toml") << 2 << 0.6 << "palette" << 0.6;
+    QTest::newRow("nothing to aim at") << 3 << 0.5 << "" << 0.0;
+    QTest::newRow("strength 0 turns it off") << 4 << 0.0 << "" << 0.0;
+    QTest::newRow("no theme") << 5 << 0.5 << "" << 0.0;
+}
+
+void LimgenTests::keeper_colorTargets() {
+    QFETCH(int, scenario);
+    QFETCH(double, strength);
+    QFETCH(QString, target);
+    QFETCH(double, recorded);
+    KeepRig rig;
+    KeepSettings settings = rig.settings();
+    settings.colorPass = strength;
+    const QString themeDir = rig.sb.fixture.themes + "/night-city";
+    switch (scenario) {
+    case 0:
+        QVERIFY(savePng(solidImage(QSize(32, 32), QColor(230, 140, 60)), themeDir + "/backgrounds/orange.png"));
+        break;
+    case 2: // a theme folder with no colors.toml, made for by this draft
+        QVERIFY(QFile::remove(themeDir + "/colors.toml"));
+        break;
+    case 3: // no colors, and the draft was made for another theme
+        QVERIFY(QFile::remove(themeDir + "/colors.toml"));
+        rig.draft = rig.makeDraft("oil rig", "some-other-theme");
+        settings.draftId = rig.draft.id;
+        break;
+    case 4:
+        QVERIFY(savePng(solidImage(QSize(32, 32), QColor(230, 140, 60)), themeDir + "/backgrounds/orange.png"));
+        break;
+    case 5:
+        settings.theme = QString();
+        break;
+    default:
+        break;
+    }
+    KEEP_AND_WAIT(rig, settings);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    const QJsonObject finish = rig.run.result.final.metadata["finish"].toObject();
+    if (target.isEmpty())
+        QVERIFY2(finish["colorTarget"].isNull(), qPrintable(finish["colorTarget"].toString()));
+    else
+        QCOMPARE(finish["colorTarget"].toString(), target);
+    QCOMPARE(finish["colorPass"].toDouble(), recorded);
+    if (scenario == 5)
+        QVERIFY(finish["theme"].isNull());
+    else
+        QCOMPARE(finish["theme"].toString(), QString("night-city"));
+}
+
+void LimgenTests::keeper_colorPassMovesTheColourTowardTheBackgrounds() {
+    // The fake upscaler paints (90, 110, 140). Orange backgrounds pull it toward orange; off, it stays.
+    auto keepWith = [](double strength, QColor *centre) {
+        KeepRig rig;
+        QVERIFY(savePng(solidImage(QSize(32, 32), QColor(230, 140, 60)),
+                        rig.sb.fixture.themes + "/night-city/backgrounds/orange.png"));
+        KeepSettings settings = rig.settings();
+        settings.colorPass = strength;
+        KEEP_AND_WAIT(rig, settings);
+        QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+        *centre = QImage(rig.run.result.installed).pixelColor(160, 90);
+    };
+    QColor off, half, full;
+    keepWith(0.0, &off);
+    keepWith(0.5, &half);
+    keepWith(1.0, &full);
+    QVERIFY2(qAbs(off.red() - 90) <= 3 && qAbs(off.green() - 110) <= 3 && qAbs(off.blue() - 140) <= 3,
+             qPrintable(off.name()));
+    // Full strength: close to the backgrounds' colour (a flat image takes the target's means).
+    QVERIFY2(qAbs(full.red() - 230) <= 14 && qAbs(full.green() - 140) <= 14 && qAbs(full.blue() - 60) <= 14,
+             qPrintable(full.name()));
+    // Half way between, on every channel.
+    QVERIFY2(half.red() > off.red() + 30 && half.red() < full.red() - 30, qPrintable(half.name()));
+    QVERIFY(half.blue() < off.blue() - 20 && half.blue() > full.blue() + 20);
+}
+
+void LimgenTests::keeper_jpegQualityAndComment() {
+    QByteArray low, high;
+    QString installedLow;
+    for (const int quality : {50, 95}) {
+        KeepRig rig;
+        KeepSettings settings = rig.settings();
+        settings.format = "jpeg";
+        settings.jpegQuality = quality;
+        KEEP_AND_WAIT(rig, settings);
+        QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+        const KeepResult &result = rig.run.result;
+        const QString name = Keeper::fileName("oil rig at dusk", rig.draft.id, "jpeg");
+        QCOMPARE(result.installed, rig.keepFolder() + "/" + name);
+        QVERIFY(name.endsWith(".jpg"));
+        QVERIFY(result.final.image.endsWith(".jpg"));
+        QCOMPARE(QImageReader(result.installed).size(), QSize(320, 180));
+        QCOMPARE(rig.keptFiles(), QStringList{name});
+        const QByteArray bytes = readFile(result.installed);
+        QVERIFY(bytes.startsWith("\xFF\xD8")); // a JPEG
+        QCOMPARE(bytes, readFile(result.final.image));
+        // The prompt is in the file as a comment.
+        QVERIFY2(bytes.contains(rig.draft.metadata["prompt"].toString().toUtf8()), "the prompt travels in the JPEG");
+        const QJsonObject finish = result.final.metadata["finish"].toObject();
+        QCOMPARE(finish["format"].toString(), QString("jpeg"));
+        QCOMPARE(finish["quality"].toInt(), quality);
+        (quality == 50 ? low : high) = bytes;
+    }
+    // The quality reached the encoder: the quantisation table is coarser at 50 than at 95.
+    const int coarse = jpegLumaDc(low), fine = jpegLumaDc(high);
+    QVERIFY2(coarse > fine && coarse >= 8 && fine <= 4, qPrintable(QString("%1 vs %2").arg(coarse).arg(fine)));
+}
+
+void LimgenTests::keeper_alreadyKeptIsReportedAsynchronously() {
+    KeepRig rig;
+    const QString existing = rig.keepFolder() + "/" + Keeper::fileName("oil rig at dusk", rig.draft.id, "png");
+    QVERIFY(writeFile(existing, "kept before"));
+    QVERIFY(rig.prepare(rig.settings()) == Keeper::Outcome::Ok);
+    QSignalSpy finished(rig.keeper.get(), &Keeper::finished);
+    rig.keeper->start();
+    QVERIFY(rig.keeper->isRunning());
+    QCOMPARE(finished.count(), 0); // not from inside start(): a caller waiting in an event loop must hear it
+    WAIT_FOR_KEEPER(rig);
+    QVERIFY(rig.run.finished);
+    QVERIFY(!rig.keeper->isRunning());
+    QVERIFY(rig.run.result.alreadyKept);
+    QVERIFY(!rig.run.result.final.isValid()); // no new final
+    QCOMPARE(rig.run.result.installed, existing);
+    QCOMPARE(readFile(existing), QByteArray("kept before"));
+    QCOMPARE(upscaleCalls(rig.sb.fakeLog()).size(), 0); // the engine was not asked
+    QCOMPARE(filesUnder(rig.sb.library()).size(), 2); // just the draft and its sidecar
+    QCOMPARE(rig.run.progress.last(), 1.0);
+}
+
+void LimgenTests::keeper_cancelDuringTheUpscale() {
+    KeepRig rig;
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.keepNow(rig.settings());
+    QTRY_VERIFY_WITH_TIMEOUT(!upscaleCalls(rig.sb.fakeLog()).isEmpty(), 15000);
+    QTest::qWait(300);
+    QVERIFY(rig.keeper->isRunning());
+    rig.keeper->cancel();
+    WAIT_FOR_KEEPER(rig);
+    QVERIFY(rig.run.failed);
+    QCOMPARE(int(rig.run.outcome), int(Keeper::Outcome::Cancelled));
+    QVERIFY(!rig.keeper->isRunning());
+    QCOMPARE(cacheEntries(rig.sb), QStringList());
+    QVERIFY(!QFileInfo::exists(rig.keepFolder()) || rig.keptFiles().isEmpty());
+    QCOMPARE(filesUnder(rig.sb.library()).size(), 2); // no final
+    // Cancelling again, or when idle, does nothing.
+    rig.run = KeeperRun();
+    rig.keeper->cancel();
+    QTest::qWait(100);
+    QVERIFY(!rig.run.over());
+}
+
+void LimgenTests::keeper_destroyingARunningKeeperIsSilent() {
+    KeepRig rig;
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.keepNow(rig.settings());
+    QTRY_VERIFY_WITH_TIMEOUT(!upscaleCalls(rig.sb.fakeLog()).isEmpty(), 15000);
+    QTest::qWait(300);
+    QCOMPARE(QProcess::execute("pgrep", {"-f", rig.sb.fixture.cache}), 0); // the engine is running
+    rig.keeper.reset();
+    QTest::qWait(200);
+    QVERIFY2(!rig.run.over(), "a destroyed keeper reports nothing");
+    QCOMPARE(QProcess::execute("pgrep", {"-f", rig.sb.fixture.cache}), 1); // and is gone
+    QCOMPARE(cacheEntries(rig.sb), QStringList());
+    QVERIFY(!QFileInfo::exists(rig.keepFolder()) || rig.keptFiles().isEmpty());
+    QCOMPARE(filesUnder(rig.sb.library()).size(), 2);
+}
+
+void LimgenTests::keeper_failuresRemoveTheWorkFolder_data() {
+    QTest::addColumn<QString>("mode");
+    QTest::addColumn<int>("outcome");
+    QTest::addColumn<int>("calls");
+    QTest::newRow("out of memory, after one retry") << "oom" << int(Keeper::Outcome::NotRunnable) << 2;
+    QTest::newRow("engine fails") << "fail" << int(Keeper::Outcome::Failed) << 1;
+    QTest::newRow("wrong size") << "wrong-size" << int(Keeper::Outcome::Failed) << 1;
+}
+
+void LimgenTests::keeper_failuresRemoveTheWorkFolder() {
+    QFETCH(QString, mode);
+    QFETCH(int, outcome);
+    QFETCH(int, calls);
+    KeepRig rig;
+    qputenv("FAKE_SD_CLI_MODE", mode.toUtf8());
+    KEEP_AND_WAIT(rig, rig.settings());
+    QVERIFY(rig.run.failed);
+    QVERIFY(!rig.run.finished);
+    QCOMPARE(int(rig.run.outcome), outcome);
+    QVERIFY(!rig.run.message.isEmpty());
+    if (mode == "oom")
+        QVERIFY2(rig.run.message.toLower().contains("memory"), qPrintable(rig.run.message));
+    QCOMPARE(upscaleCalls(rig.sb.fakeLog()).size(), calls);
+    QCOMPARE(cacheEntries(rig.sb), QStringList());
+    QVERIFY(!QFileInfo::exists(rig.keepFolder()) || rig.keptFiles().isEmpty());
+    QCOMPARE(filesUnder(rig.sb.library()).size(), 2); // nothing filed
+    QVERIFY(!rig.keeper->isRunning());
+}
+
+void LimgenTests::keeper_aFileThatAppearedMeanwhileIsNeverOverwritten() {
+    KeepRig rig;
+    QString message;
+    QVERIFY(rig.prepare(rig.settings(), &message) == Keeper::Outcome::Ok);
+    // Another limgen kept the same draft after prepare() looked.
+    const QString target = rig.keeper->result().installed;
+    QVERIFY(writeFile(target, "someone else's"));
+    rig.keeper->start();
+    WAIT_FOR_KEEPER(rig);
+    QVERIFY(rig.run.failed);
+    QCOMPARE(int(rig.run.outcome), int(Keeper::Outcome::Failed));
+    QVERIFY2(rig.run.message.contains(target), qPrintable(rig.run.message));
+    QCOMPARE(readFile(target), QByteArray("someone else's"));
+    QCOMPARE(rig.keptFiles().size(), 1); // no .part left beside it
+    QCOMPARE(cacheEntries(rig.sb), QStringList());
+}
+
+void LimgenTests::keeper_noThemeGoesToThePicturesFolder() {
+    KeepRig rig;
+    rig.draft = rig.makeDraft("a quiet harbour", QString());
+    KeepSettings settings = rig.settings(QString());
+    settings.draftId = rig.draft.id;
+    KEEP_AND_WAIT(rig, settings);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    const QString name = Keeper::fileName("a quiet harbour", rig.draft.id, "png");
+    QCOMPARE(rig.run.result.installed, rig.sb.fixture.pictures() + "/" + name);
+    QVERIFY(QFileInfo(rig.run.result.installed).isFile());
+    QCOMPARE(rig.run.result.theme, QString());
+    // Omarchy's backgrounds are not touched.
+    QCOMPARE(filesUnder(rig.sb.fixture.backgrounds), QStringList());
+    const QJsonObject finish = rig.run.result.final.metadata["finish"].toObject();
+    QVERIFY(finish["theme"].isNull());
+    QVERIFY(finish["colorTarget"].isNull());
+    QVERIFY(rig.run.result.final.metadata["theme"].isNull());
+}
+
+void LimgenTests::keeper_withoutAMonitorTheFinalIs2560x1440() {
+    KeepRig rig;
+    OmarchyPaths paths = rig.sb.paths();
+    paths.hyprctl = QString(); // no Hyprland to ask
+    rig.remake(paths);
+    KeepSettings settings = rig.settings();
+    settings.size = QSize();
+    settings.colorPass = 0;
+    KEEP_AND_WAIT(rig, settings);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(QImageReader(rig.run.result.installed).size(), QSize(2560, 1440));
+    QCOMPARE(rig.run.result.final.metadata["size"].toArray()[0].toInt(), 2560);
+}
+
+void LimgenTests::keeper_keepFolderHoldsOnlyLimgenFiles() {
+    KeepRig rig;
+    // Two drafts, one as PNG and one as JPEG, into the same theme folder.
+    KeepSettings png = rig.settings();
+    KEEP_AND_WAIT(rig, png);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    rig.draft = rig.makeDraft("a lighthouse in fog");
+    rig.remake();
+    KeepSettings jpeg = rig.settings();
+    jpeg.format = "jpeg";
+    KEEP_AND_WAIT(rig, jpeg);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    const QStringList files = rig.keptFiles();
+    QCOMPARE(files.size(), 2);
+    for (const QString &file : files)
+        QVERIFY2(file.startsWith("limgen-") && (file.endsWith(".png") || file.endsWith(".jpg")), qPrintable(file));
+    QVERIFY(files[0].contains("lighthouse") != files[1].contains("lighthouse"));
+    QCOMPARE(cacheEntries(rig.sb), QStringList());
+}
+
+// ============================== L5: CLI keep and set ======================
+
+namespace {
+
+// A fixture with the upscaler installed, themes "night-city" and "other", a
+// 64x48 draft made for night-city in the library the CLI reads, and the
+// environment that points limgen at all of it (and at a 320x180 monitor).
+struct CliKeep {
+    Fixture fixture;
+    Catalogue catalogue = Catalogue::builtIn();
+    LibraryEntry draft;
+    QHash<QString, QString> env;
+
+    explicit CliKeep(const QString &currentTheme = "night-city") {
+        makeSparse(Catalogue::path(*catalogue.upscaler(), fixture.models), catalogue.upscaler()->bytes);
+        fixture.addTheme("night-city", stockToml);
+        fixture.addTheme("other", tomlWith("#fafafa", "#111111", "#ff0000"));
+        if (!currentTheme.isEmpty())
+            fixture.switchTo(currentTheme);
+        env = engineEnvironment(fixture);
+        draft = makeDraft();
+    }
+    QString libraryDir() const { return fixture.data + "/limgen/library"; }
+    LibraryEntry makeDraft(const QString &subject = "oil rig at dusk", const QString &slug = "night-city") {
+        Library library(libraryDir());
+        DraftRecord record = fullRecord();
+        record.subject = subject;
+        record.themeSlug = slug;
+        if (slug.isEmpty()) {
+            record.themeMode.clear();
+            record.palette = QJsonObject();
+        }
+        record.width = 64;
+        record.height = 48;
+        return library.addDraft(makePng(fixture.root.path() + "/src-" + QString::number(QRandomGenerator::global()->generate()) + ".png",
+                                        64, 48),
+                                record, QDateTime::currentDateTimeUtc());
+    }
+    QString keepPath(const QString &folder, const QString &format = "png") const {
+        return folder + "/" + Keeper::fileName("oil rig at dusk", draft.id, format);
+    }
+    QString inTheme(const QString &theme) const { return fixture.backgrounds + "/" + theme; }
+    QString log() const { return fixture.root.path() + "/fake.log"; }
+    int libraryFiles() const { return filesUnder(libraryDir()).size(); }
+    int upscales() const { return upscaleCalls(log()).size(); }
+    QJsonObject sidecarOf(const QString &id) const { return Library(libraryDir()).find(id).metadata; }
+};
+
+} // namespace
+
+void LimgenTests::cli_keepGoesToTheThemeTheDraftWasMadeFor() {
+    REQUIRE_BINARY();
+    CliKeep rig("other"); // the theme has changed since the draft was made for night-city
+    const CliResult result = runCli(rig.fixture, {"keep", rig.draft.id}, rig.env);
+    QVERIFY(result.started);
+    QCOMPARE(result.exitCode, 0);
+    const QString expected = rig.keepPath(rig.inTheme("night-city"));
+    QCOMPARE(result.out.trimmed(), expected);
+    QCOMPARE(QImageReader(expected).size(), QSize(320, 180));
+    QVERIFY2(result.err.contains(rig.draft.id), qPrintable(result.err)); // says what it is finishing
+    QCOMPARE(rig.fixture.omarchyCalls(), QStringList()); // not set as the background
+    QCOMPARE(filesUnder(rig.fixture.backgrounds), QStringList{expected});
+    QCOMPARE(rig.libraryFiles(), 4); // the draft and its final, each with a sidecar
+    QCOMPARE(filesUnder(rig.fixture.cache), QStringList());
+    QCOMPARE(rig.upscales(), 1);
+}
+
+void LimgenTests::cli_keepThemeOptionOverridesAndChecksTheTheme() {
+    REQUIRE_BINARY();
+    CliKeep rig;
+    CliResult result = runCli(rig.fixture, {"keep", rig.draft.id, "--theme", "other"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(result.out.trimmed(), rig.keepPath(rig.inTheme("other")));
+    QVERIFY(QFileInfo(rig.keepPath(rig.inTheme("other"))).isFile());
+    QCOMPARE(rig.sidecarOf(QFileInfo(Library(rig.libraryDir()).find(rig.draft.id).image).baseName()).value("kind").toString(), QString("draft"));
+    // A theme that does not exist is a usage error: nothing is made.
+    const int upscalesBefore = rig.upscales();
+    result = runCli(rig.fixture, {"keep", rig.draft.id, "--theme", "nosuch"}, rig.env);
+    QCOMPARE(result.exitCode, 2);
+    QCOMPARE(result.out, QString());
+    QVERIFY2(result.err.contains("nosuch"), qPrintable(result.err));
+    QCOMPARE(rig.upscales(), upscalesBefore);
+    QVERIFY(!QFileInfo::exists(rig.inTheme("nosuch")));
+    result = runCli(rig.fixture, {"keep", rig.draft.id, "--theme", "../x"}, rig.env);
+    QCOMPARE(result.exitCode, 2);
+}
+
+void LimgenTests::cli_keepDraftWithoutAThemeUsesTheCurrentThenPictures() {
+    REQUIRE_BINARY();
+    {
+        CliKeep rig("other");
+        rig.draft = rig.makeDraft("a quiet harbour", QString());
+        const CliResult result = runCli(rig.fixture, {"keep", rig.draft.id}, rig.env);
+        QCOMPARE(result.exitCode, 0);
+        QCOMPARE(result.out.trimmed(), rig.inTheme("other") + "/" + Keeper::fileName("a quiet harbour", rig.draft.id, "png"));
+    }
+    {
+        CliKeep rig("");
+        QVERIFY(QFile::remove(rig.fixture.state + "/theme.name") || true);
+        rig.draft = rig.makeDraft("a quiet harbour", QString());
+        const CliResult result = runCli(rig.fixture, {"keep", rig.draft.id}, rig.env);
+        QCOMPARE(result.exitCode, 0);
+        QCOMPARE(result.out.trimmed(), rig.fixture.pictures() + "/" + Keeper::fileName("a quiet harbour", rig.draft.id, "png"));
+        QCOMPARE(filesUnder(rig.fixture.backgrounds), QStringList());
+    }
+}
+
+void LimgenTests::cli_keepJson() {
+    REQUIRE_BINARY();
+    CliKeep rig;
+    const CliResult result = runCli(rig.fixture, {"keep", rig.draft.id, "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(result.err, QString()); // JSON mode says nothing else
+    const QJsonObject json = jsonObject(result.out);
+    QCOMPARE(json.keys(), (QStringList{"alreadyKept", "draft", "final", "path", "set", "theme"}));
+    QCOMPARE(json["draft"].toString(), rig.draft.id);
+    QCOMPARE(json["path"].toString(), rig.keepPath(rig.inTheme("night-city")));
+    QCOMPARE(json["theme"].toString(), QString("night-city"));
+    QCOMPARE(json["alreadyKept"].toBool(), false);
+    QCOMPARE(json["set"].toBool(), false);
+    const QString finalId = json["final"].toString();
+    QVERIFY(Library::isValidId(finalId));
+    QCOMPARE(rig.sidecarOf(finalId)["kind"].toString(), QString("final"));
+    QCOMPARE(rig.sidecarOf(finalId)["finish"].toObject()["from"].toString(), rig.draft.id);
+}
+
+void LimgenTests::cli_keepSetShowsItAndFailsWhenOmarchyFails() {
+    REQUIRE_BINARY();
+    CliKeep rig;
+    CliResult result = runCli(rig.fixture, {"keep", rig.draft.id, "--set", "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    const QString path = rig.keepPath(rig.inTheme("night-city"));
+    QCOMPARE(jsonObject(result.out)["set"].toBool(), true);
+    QCOMPARE(rig.fixture.omarchyCalls(), QStringList{"theme bg set " + path});
+    QCOMPARE(QFileInfo(rig.fixture.state + "/background").symLinkTarget(), path);
+    // Omarchy fails: exit 1 with its message, and the image is kept all the same.
+    CliKeep failing;
+    QHash<QString, QString> env = failing.env;
+    env["FAKE_OMARCHY_FAIL"] = "1";
+    result = runCli(failing.fixture, {"keep", failing.draft.id, "--set"}, env);
+    QCOMPARE(result.exitCode, 1);
+    QVERIFY2(result.err.contains("boom"), qPrintable(result.err));
+    QVERIFY(QFileInfo(failing.keepPath(failing.inTheme("night-city"))).isFile());
+}
+
+void LimgenTests::cli_keepAlreadyKeptMakesNothingNew() {
+    REQUIRE_BINARY();
+    CliKeep rig;
+    CliResult first = runCli(rig.fixture, {"keep", rig.draft.id}, rig.env);
+    QCOMPARE(first.exitCode, 0);
+    const int files = rig.libraryFiles();
+    const QString path = rig.keepPath(rig.inTheme("night-city"));
+    const QByteArray bytes = readFile(path);
+    const CliResult again = runCli(rig.fixture, {"keep", rig.draft.id}, rig.env);
+    QCOMPARE(again.exitCode, 0);
+    QCOMPARE(again.out.trimmed(), path);
+    QVERIFY(!again.err.isEmpty()); // says so
+    QCOMPARE(rig.upscales(), 1);
+    QCOMPARE(rig.libraryFiles(), files);
+    QCOMPARE(readFile(path), bytes);
+    const QJsonObject json = jsonObject(runCli(rig.fixture, {"keep", rig.draft.id, "--json"}, rig.env).out);
+    QCOMPARE(json["alreadyKept"].toBool(), true);
+    QVERIFY(json["final"].isNull());
+    // Asking for JPEG now still finds the PNG.
+    const CliResult jpeg = runCli(rig.fixture, {"keep", rig.draft.id, "--format", "jpeg"}, rig.env);
+    QCOMPARE(jpeg.exitCode, 0);
+    QCOMPARE(jpeg.out.trimmed(), path);
+    QCOMPARE(rig.upscales(), 1);
+    QCOMPARE(filesUnder(rig.fixture.backgrounds), QStringList{path});
+}
+
+void LimgenTests::cli_keepArgumentErrors_data() {
+    QTest::addColumn<QStringList>("arguments");
+    QTest::newRow("no id") << QStringList{"keep"};
+    QTest::newRow("two ids") << QStringList{"keep", "@ID@", "@ID@"};
+    QTest::newRow("colour pass not a number") << QStringList{"keep", "@ID@", "--color-pass", "x"};
+    QTest::newRow("colour pass below 0") << QStringList{"keep", "@ID@", "--color-pass", "-0.1"};
+    QTest::newRow("colour pass above 1") << QStringList{"keep", "@ID@", "--color-pass", "1.5"};
+    QTest::newRow("colour pass nan") << QStringList{"keep", "@ID@", "--color-pass", "nan"};
+    QTest::newRow("format bmp") << QStringList{"keep", "@ID@", "--format", "bmp"};
+    QTest::newRow("format PNG in capitals") << QStringList{"keep", "@ID@", "--format", "PNG"};
+    QTest::newRow("unknown option") << QStringList{"keep", "@ID@", "--bogus"};
+    QTest::newRow("unknown draft") << QStringList{"keep", "2026-11-20-ffffff"};
+    QTest::newRow("not an id") << QStringList{"keep", "nope"};
+    QTest::newRow("a final, not a draft") << QStringList{"keep", "@FINAL@"};
+    QTest::newRow("unknown theme") << QStringList{"keep", "@ID@", "--theme", "nosuch"};
+}
+
+void LimgenTests::cli_keepArgumentErrors() {
+    REQUIRE_BINARY();
+    QFETCH(QStringList, arguments);
+    CliKeep rig;
+    const QString png = rig.fixture.root.path() + "/final.png";
+    QVERIFY(savePng(solidImage(QSize(8, 8), Qt::red), png));
+    const LibraryEntry final = Library(rig.libraryDir()).addFinal(png, {{"subject", "x"}}, fixedTime);
+    const int files = rig.libraryFiles();
+    for (QString &argument : arguments)
+        argument.replace("@ID@", rig.draft.id).replace("@FINAL@", final.id);
+    const CliResult result = runCli(rig.fixture, arguments, rig.env);
+    QVERIFY(result.started);
+    QCOMPARE(result.exitCode, 2);
+    QCOMPARE(result.out, QString());
+    QVERIFY(!result.err.isEmpty());
+    QCOMPARE(rig.upscales(), 0);
+    QCOMPARE(filesUnder(rig.fixture.backgrounds), QStringList());
+    QCOMPARE(rig.libraryFiles(), files);
+}
+
+void LimgenTests::cli_keepNotRunnableOrFailing_data() {
+    QTest::addColumn<QString>("mode");
+    QTest::addColumn<int>("exitCode");
+    QTest::newRow("upscaler not installed") << "no-upscaler" << 3;
+    QTest::newRow("engine sees no GPU") << "no-gpu" << 3;
+    QTest::newRow("another engine release") << "old-version" << 3;
+    QTest::newRow("out of video memory") << "oom" << 3;
+    QTest::newRow("the engine fails") << "fail" << 1;
+    QTest::newRow("the engine writes the wrong size") << "wrong-size" << 1;
+}
+
+void LimgenTests::cli_keepNotRunnableOrFailing() {
+    REQUIRE_BINARY();
+    QFETCH(QString, mode);
+    QFETCH(int, exitCode);
+    CliKeep rig;
+    QHash<QString, QString> env = rig.env;
+    if (mode == "no-upscaler")
+        QVERIFY(QFile::remove(Catalogue::path(*rig.catalogue.upscaler(), rig.fixture.models)));
+    else
+        env["FAKE_SD_CLI_MODE"] = mode;
+    const int files = rig.libraryFiles();
+    const CliResult result = runCli(rig.fixture, {"keep", rig.draft.id}, env);
+    QVERIFY(result.started);
+    QCOMPARE(result.exitCode, exitCode);
+    QCOMPARE(result.out, QString());
+    QVERIFY(!result.err.isEmpty());
+    if (mode == "no-upscaler")
+        QVERIFY2(result.err.contains(rig.catalogue.upscaler()->name), qPrintable(result.err));
+    QCOMPARE(filesUnder(rig.fixture.backgrounds), QStringList());
+    QCOMPARE(rig.libraryFiles(), files);
+    QCOMPARE(filesUnder(rig.fixture.cache), QStringList());
+}
+
+void LimgenTests::cli_keepTakesColourPassAndFormatFromTheConfigAndTheOptions() {
+    REQUIRE_BINARY();
+    CliKeep rig;
+    QVERIFY(writeFile(rig.fixture.root.path() + "/config/limgen/config.json",
+                      R"({"colorPass": 0, "format": "jpeg", "jpegQuality": 60})"));
+    // From the settings: JPEG at quality 60 with the colour pass off.
+    CliResult result = runCli(rig.fixture, {"keep", rig.draft.id, "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    QJsonObject json = jsonObject(result.out);
+    QVERIFY(json["path"].toString().endsWith(".jpg"));
+    QJsonObject finish = rig.sidecarOf(json["final"].toString())["finish"].toObject();
+    QCOMPARE(finish["format"].toString(), QString("jpeg"));
+    QCOMPARE(finish["quality"].toInt(), 60);
+    QCOMPARE(finish["colorPass"].toDouble(), 0.0);
+    QVERIFY(finish["colorTarget"].isNull());
+    // The options win over the settings.
+    const LibraryEntry second = rig.makeDraft("a lighthouse in fog");
+    result = runCli(rig.fixture, {"keep", second.id, "--format", "png", "--color-pass", "0.5", "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    json = jsonObject(result.out);
+    QVERIFY(json["path"].toString().endsWith(".png"));
+    finish = rig.sidecarOf(json["final"].toString())["finish"].toObject();
+    QCOMPARE(finish["format"].toString(), QString("png"));
+    QVERIFY(!finish.contains("quality"));
+    QCOMPARE(finish["colorPass"].toDouble(), 0.5);
+    QCOMPARE(finish["colorTarget"].toString(), QString("palette"));
+}
+
+void LimgenTests::cli_keepInterruptedExits130AndKeepsNothing() {
+    REQUIRE_BINARY();
+    CliKeep rig;
+    QHash<QString, QString> env = rig.env;
+    env["FAKE_SD_CLI_MODE"] = "hang";
+    const int files = rig.libraryFiles();
+    auto process = startProcess(cliEnvironment(rig.fixture, env), qEnvironmentVariable("LIMGEN_BINARY"),
+                                {"keep", rig.draft.id});
+    QTRY_VERIFY_WITH_TIMEOUT(rig.upscales() > 0, 20000);
+    QTest::qWait(300);
+    QCOMPARE(process->state(), QProcess::Running);
+    QVERIFY(::kill(pid_t(process->processId()), SIGINT) == 0);
+    WAIT_FOR_PROCESS(process);
+    QCOMPARE(process->exitStatus(), QProcess::NormalExit);
+    QCOMPARE(process->exitCode(), 130);
+    QCOMPARE(QString::fromUtf8(process->readAllStandardOutput()), QString());
+    QVERIFY(QString::fromUtf8(process->readAllStandardError()).contains("Interrupted"));
+    QCOMPARE(filesUnder(rig.fixture.backgrounds), QStringList());
+    QCOMPARE(rig.libraryFiles(), files);
+    QCOMPARE(filesUnder(rig.fixture.cache), QStringList());
+    QCOMPARE(QProcess::execute("pgrep", {"-f", rig.fixture.cache}), 1); // the engine was stopped too
+}
+
+void LimgenTests::cli_setAFile() {
+    REQUIRE_BINARY();
+    CliKeep rig;
+    const QString file = rig.fixture.root.path() + "/pics/mine.png";
+    QVERIFY(savePng(solidImage(QSize(16, 9), Qt::green), file));
+    CliResult result = runCli(rig.fixture, {"set", file}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(result.out.trimmed(), file);
+    QCOMPARE(rig.fixture.omarchyCalls(), QStringList{"theme bg set " + file});
+    QCOMPARE(rig.upscales(), 0); // a plain file is not finished
+    result = runCli(rig.fixture, {"set", file, "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    const QJsonObject json = jsonObject(result.out);
+    QCOMPARE(json["path"].toString(), file);
+    QCOMPARE(json["set"].toBool(), true);
+    // A relative path is made absolute for Omarchy.
+    const QString relative = QFileInfo(file).fileName();
+    QProcessEnvironment environment = cliEnvironment(rig.fixture, rig.env);
+    QProcess process;
+    process.setProcessEnvironment(environment);
+    process.setWorkingDirectory(QFileInfo(file).absolutePath());
+    process.start(qEnvironmentVariable("LIMGEN_BINARY"), {"set", relative});
+    QVERIFY(process.waitForFinished(20000));
+    QCOMPARE(process.exitCode(), 0);
+    QCOMPARE(rig.fixture.omarchyCalls().last(), "theme bg set " + file);
+}
+
+void LimgenTests::cli_setADraftKeepsItIntoTheCurrentTheme() {
+    REQUIRE_BINARY();
+    CliKeep rig("other"); // the draft was made for night-city
+    const CliResult result = runCli(rig.fixture, {"set", rig.draft.id, "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    const QJsonObject json = jsonObject(result.out);
+    const QString path = rig.keepPath(rig.inTheme("other"));
+    QCOMPARE(json["path"].toString(), path);
+    QCOMPARE(json["theme"].toString(), QString("other"));
+    QCOMPARE(json["draft"].toString(), rig.draft.id);
+    QVERIFY(Library::isValidId(json["final"].toString()));
+    QCOMPARE(json["alreadyKept"].toBool(), false);
+    QCOMPARE(json["set"].toBool(), true);
+    QCOMPARE(rig.fixture.omarchyCalls(), QStringList{"theme bg set " + path});
+    QCOMPARE(QFileInfo(rig.fixture.state + "/background").symLinkTarget(), path);
+    QVERIFY(!QFileInfo::exists(rig.inTheme("night-city"))); // not into the theme it was made for
+    // Text mode prints the path.
+    CliKeep text("other");
+    const CliResult plain = runCli(text.fixture, {"set", text.draft.id}, text.env);
+    QCOMPARE(plain.exitCode, 0);
+    QCOMPARE(plain.out.trimmed(), text.keepPath(text.inTheme("other")));
+}
+
+void LimgenTests::cli_setAFinalGoesThroughItsDraft() {
+    REQUIRE_BINARY();
+    CliKeep rig; // current theme night-city
+    const QJsonObject kept = jsonObject(runCli(rig.fixture, {"keep", rig.draft.id, "--json"}, rig.env).out);
+    const QString finalId = kept["final"].toString();
+    QVERIFY(Library::isValidId(finalId));
+    const int files = rig.libraryFiles();
+    // Same theme: the draft is already there, so nothing new is made, and it is set.
+    CliResult result = runCli(rig.fixture, {"set", finalId, "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    QJsonObject json = jsonObject(result.out);
+    QCOMPARE(json["alreadyKept"].toBool(), true);
+    QCOMPARE(json["path"].toString(), kept["path"].toString());
+    QCOMPARE(rig.libraryFiles(), files);
+    QCOMPARE(rig.upscales(), 1);
+    QCOMPARE(rig.fixture.omarchyCalls(), QStringList{"theme bg set " + kept["path"].toString()});
+    // Another theme: its draft is kept into the current one.
+    QVERIFY(rig.fixture.switchTo("other"));
+    result = runCli(rig.fixture, {"set", finalId, "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    json = jsonObject(result.out);
+    QCOMPARE(json["alreadyKept"].toBool(), false);
+    QCOMPARE(json["path"].toString(), rig.keepPath(rig.inTheme("other")));
+    QCOMPARE(rig.upscales(), 2);
+}
+
+void LimgenTests::cli_setAFinalWhoseDraftIsGone() {
+    REQUIRE_BINARY();
+    CliKeep rig;
+    const QJsonObject kept = jsonObject(runCli(rig.fixture, {"keep", rig.draft.id, "--json"}, rig.env).out);
+    const QString finalId = kept["final"].toString();
+    QVERIFY(Library::isValidId(finalId));
+    const LibraryEntry draft = Library(rig.libraryDir()).find(rig.draft.id);
+    QVERIFY(QFile::remove(draft.image) && QFile::remove(draft.sidecar));
+    const int calls = rig.fixture.omarchyCalls().size();
+    const CliResult result = runCli(rig.fixture, {"set", finalId}, rig.env);
+    // The id was right; what is missing is its draft, and the message says
+    // where the final itself is.
+    QCOMPARE(result.exitCode, 1);
+    const LibraryEntry final = Library(rig.libraryDir()).find(finalId);
+    QVERIFY2(result.err.contains(final.image), qPrintable(result.err));
+    QCOMPARE(rig.fixture.omarchyCalls().size(), calls);
+}
+
+void LimgenTests::cli_setErrors() {
+    REQUIRE_BINARY();
+    CliKeep rig;
+    CliResult result = runCli(rig.fixture, {"set"}, rig.env);
+    QCOMPARE(result.exitCode, 2);
+    result = runCli(rig.fixture, {"set", "2026-11-20-ffffff"}, rig.env); // an id that is not in the library
+    QCOMPARE(result.exitCode, 2);
+    QCOMPARE(result.out, QString());
+    result = runCli(rig.fixture, {"set", rig.fixture.root.path() + "/no-such-file.png"}, rig.env);
+    QCOMPARE(result.exitCode, 2);
+    result = runCli(rig.fixture, {"set", "a", "b"}, rig.env);
+    QCOMPARE(result.exitCode, 2);
+    QCOMPARE(rig.fixture.omarchyCalls(), QStringList()); // nothing reached Omarchy
+    // Omarchy fails, or is not there.
+    const QString file = rig.fixture.root.path() + "/mine.png";
+    QVERIFY(savePng(solidImage(QSize(16, 9), Qt::green), file));
+    QHash<QString, QString> failing = rig.env;
+    failing["FAKE_OMARCHY_FAIL"] = "1";
+    result = runCli(rig.fixture, {"set", file}, failing);
+    QCOMPARE(result.exitCode, 1);
+    QVERIFY2(result.err.contains("boom"), qPrintable(result.err));
+    QCOMPARE(result.out, QString());
+    QHash<QString, QString> missing = rig.env;
+    missing["LIMGEN_OMARCHY_BIN"] = rig.fixture.root.path() + "/no-such-omarchy";
+    result = runCli(rig.fixture, {"set", file}, missing);
+    QCOMPARE(result.exitCode, 1);
+    // A draft needs the upscaler: without it, exit 3 and Omarchy is not called.
+    QVERIFY(QFile::remove(Catalogue::path(*rig.catalogue.upscaler(), rig.fixture.models)));
+    const int calls = rig.fixture.omarchyCalls().size();
+    result = runCli(rig.fixture, {"set", rig.draft.id}, rig.env);
+    QCOMPARE(result.exitCode, 3);
+    QCOMPARE(rig.fixture.omarchyCalls().size(), calls);
+}
+
+void LimgenTests::cli_helpListsKeepAndSet() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const CliResult summary = runCli(fixture, {"help"});
+    QCOMPARE(summary.exitCode, 0);
+    QVERIFY(summary.out.contains("keep"));
+    QVERIFY(summary.out.contains("set"));
+    const CliResult keep = runCli(fixture, {"help", "keep"});
+    QCOMPARE(keep.exitCode, 0);
+    for (const QString &option : QStringList{"--theme", "--color-pass", "--format", "--set", "--json"})
+        QVERIFY2(keep.out.contains(option), qPrintable(option));
+    const CliResult set = runCli(fixture, {"help", "set"});
+    QCOMPARE(set.exitCode, 0);
+    QVERIFY(set.out.contains("--json"));
+}
+
+// ============================== L5: Backend, keeping ======================
+
+namespace {
+
+// A Backend on the small test catalogue (model "m": 64x64 drafts, one step),
+// with the model and the upscaler installed, the theme "night-city" current
+// and "other" available, and a 320x180 monitor, so batches and keeps are quick.
+struct KeepBackendRig {
+    Sandbox sb;
+    World world = makeWorld();
+    std::unique_ptr<Omarchy> omarchy;
+    std::unique_ptr<Backend> backend;
+
+    explicit KeepBackendRig(bool theme = true) {
+        const QString catalogueFile = sb.fixture.root.path() + "/catalogue.json";
+        writeFile(catalogueFile, world.json);
+        qputenv("LIMGEN_CATALOGUE", catalogueFile.toUtf8());
+        for (const QString &key : QStringList{"a", "c", "b", "u"})
+            makeSparse(Catalogue::path(world.file(key), sb.fixture.models), world.file(key).bytes);
+        if (theme) {
+            stockTheme(sb.fixture);
+            sb.fixture.addTheme("other", tomlWith("#fafafa", "#111111", "#ff0000"));
+        }
+    }
+    ~KeepBackendRig() {
+        settleBackend(backend.get());
+        backend.reset();
+        omarchy.reset();
+    }
+    void create() {
+        settleBackend(backend.get());
+        backend.reset();
+        omarchy = std::make_unique<Omarchy>(sb.paths());
+        backend = std::make_unique<Backend>(omarchy.get(), fakeEngine);
+        for (int i = 0; i < 400 && !(backend->engineReady() || !backend->engineProblem().isEmpty()); ++i)
+            QTest::qWait(50);
+    }
+    QVariantMap draft(int index) const { return backend->drafts().value(index).toMap(); }
+    // Makes a batch and waits for it; true when all four drafts are done.
+    bool makeBatch(const QString &subject = "oil rig") {
+        backend->setSubject(subject);
+        backend->generate();
+        for (int i = 0; i < 800 && (backend->running() || backend->batchWaiting() || backend->drafts().isEmpty()); ++i)
+            QTest::qWait(50);
+        if (backend->drafts().size() != 4)
+            return false;
+        for (int i = 0; i < 4; ++i)
+            if (draft(i)["state"].toString() != "done")
+                return false;
+        return true;
+    }
+    QString keepDir(const QString &theme = "night-city") const { return sb.fixture.backgrounds + "/" + theme; }
+    QString nameFor(int index, const QString &subject = "oil rig") const {
+        return keepDir() + "/" + Keeper::fileName(subject, draft(index)["id"].toString(), "png");
+    }
+    QStringList calls() const { return sb.fixture.omarchyCalls(); }
+    Library library() const { return Library(sb.library()); }
+    int upscalesDone() const { return upscaleCalls(sb.fakeLog()).size(); }
+};
+
+#define WAIT_KEPT(rig, i) QTRY_VERIFY_WITH_TIMEOUT((rig).draft(i)["kept"].toBool(), 30000)
+#define WAIT_NOT_KEEPING(rig) QTRY_VERIFY_WITH_TIMEOUT(!(rig).backend->keeping(), 30000)
+
+QStringList binFiles(const Sandbox &sb) { return QDir(sb.library() + "/.discarded").entryList(QDir::Files, QDir::Name); }
+
+} // namespace
+
+void LimgenTests::backend_keepShowsTileStatesAndInstallsTheImage() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    QCOMPARE(rig.draft(0)["theme"].toString(), QString("night-city"));
+    QVERIFY(!rig.backend->canUndo());
+    QList<double> fractions;
+    QObject::connect(rig.backend.get(), &Backend::draftsChanged, rig.backend.get(),
+                     [&] { fractions << rig.draft(0)["keepFraction"].toDouble(); });
+    rig.backend->keep(0);
+    // At once: waiting its turn or started; the tile says it is being kept.
+    QVERIFY(rig.draft(0)["keeping"].toBool());
+    QVERIFY(rig.backend->keeping());
+    QVERIFY(rig.backend->busy());
+    QVERIFY(rig.backend->canUndo());
+    WAIT_KEPT(rig, 0);
+    QVERIFY(!rig.draft(0)["keeping"].toBool());
+    QVERIFY(!rig.draft(0)["set"].toBool());
+    QTRY_VERIFY(!rig.backend->keeping());
+    const QString path = rig.draft(0)["keptPath"].toString();
+    QCOMPARE(path, rig.nameFor(0));
+    QCOMPARE(QImageReader(path).size(), QSize(320, 180));
+    QVERIFY2(rig.backend->status().contains("Kept as"), qPrintable(rig.backend->status()));
+    QVERIFY(!rig.backend->statusIsError());
+    // The fraction went from waiting (-1) to a figure from 0 to 1.
+    QVERIFY2(fractions.contains(-1.0) || fractions.contains(0.0), "the tile showed waiting or started");
+    QVERIFY(std::any_of(fractions.begin(), fractions.end(), [](double f) { return f >= 0 && f <= 1; }));
+    // Only this draft was touched; nothing was set as the background.
+    for (int i = 1; i < 4; ++i)
+        QVERIFY(!rig.draft(i)["kept"].toBool() && !rig.draft(i)["keeping"].toBool());
+    QCOMPARE(rig.calls(), QStringList());
+    QCOMPARE(filesUnder(rig.sb.fixture.backgrounds), QStringList{path});
+    QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+    // The final is in the library beside the draft's batch (4 drafts and 1 final, with sidecars).
+    QCOMPARE(filesUnder(rig.sb.library()).size(), 10);
+}
+
+void LimgenTests::backend_keepAndSetSetsTheBackgroundOnce() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    rig.backend->keepAndSet(1);
+    WAIT_KEPT(rig, 1);
+    const QString path = rig.draft(1)["keptPath"].toString();
+    QVERIFY(rig.draft(1)["set"].toBool());
+    QCOMPARE(rig.calls(), QStringList{"theme bg set " + path});
+    QCOMPARE(rig.omarchy->currentBackground(), path);
+    QVERIFY2(rig.backend->status().contains("background"), qPrintable(rig.backend->status()));
+    // K on a kept draft does nothing; S on one that is already the background neither.
+    const int files = filesUnder(rig.sb.library()).size();
+    rig.backend->keep(1);
+    rig.backend->keepAndSet(1);
+    QTest::qWait(300);
+    QCOMPARE(rig.calls().size(), 1);
+    QCOMPARE(filesUnder(rig.sb.library()).size(), files);
+    QVERIFY(!rig.backend->keeping());
+    // K first, S later: S shows the kept image without keeping it again.
+    rig.backend->keep(2);
+    WAIT_KEPT(rig, 2);
+    QVERIFY(!rig.draft(2)["set"].toBool());
+    QCOMPARE(rig.calls().size(), 1);
+    const int afterK = filesUnder(rig.sb.library()).size();
+    rig.backend->keepAndSet(2);
+    QTRY_VERIFY(rig.draft(2)["set"].toBool());
+    QCOMPARE(rig.calls().size(), 2);
+    QCOMPARE(rig.calls().last(), "theme bg set " + rig.draft(2)["keptPath"].toString());
+    QCOMPARE(filesUnder(rig.sb.library()).size(), afterK);
+    QCOMPARE(rig.upscalesDone(), 2);
+}
+
+void LimgenTests::backend_keepOnlyAppliesToDoneDrafts() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    for (const int index : {-1, 4, 99}) {
+        rig.backend->keep(index);
+        rig.backend->keepAndSet(index);
+        rig.backend->discard(index);
+    }
+    QVERIFY(!rig.backend->keeping());
+    QVERIFY(!rig.backend->canUndo());
+    // Drafts that are still being made: a new batch that hangs.
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.backend->setSubject("a lighthouse");
+    rig.backend->generate();
+    QVERIFY(rig.backend->running());
+    QTRY_VERIFY_WITH_TIMEOUT(imageCalls(rig.sb.fakeLog()).size() >= 2, 15000);
+    rig.backend->keep(0);
+    rig.backend->keepAndSet(0);
+    rig.backend->discard(0);
+    QVERIFY(!rig.backend->keeping());
+    QVERIFY(!rig.backend->canUndo());
+    QVERIFY(rig.draft(0)["state"].toString() != "done");
+    rig.backend->cancel();
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running(), 15000);
+}
+
+void LimgenTests::backend_themeChoiceWhenTheThemeChangedThenKeepInto() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    QCOMPARE(rig.draft(0)["theme"].toString(), QString("night-city"));
+    QVERIFY(rig.sb.fixture.switchTo("other"));
+    QTRY_COMPARE_WITH_TIMEOUT(rig.backend->themeName(), QString("other"), 5000);
+    QSignalSpy asked(rig.backend.get(), &Backend::themeChoiceNeeded);
+    rig.backend->keep(0);
+    // Nothing is made until the user chooses; the window is asked.
+    QCOMPARE(asked.count(), 1);
+    QCOMPARE(asked.at(0).at(0).toInt(), 0);
+    QCOMPARE(asked.at(0).at(1).toString(), QString("night-city"));
+    QCOMPARE(asked.at(0).at(2).toString(), QString("other"));
+    QCOMPARE(asked.at(0).at(3).toBool(), false);
+    QVERIFY(!rig.backend->keeping());
+    QVERIFY(!rig.draft(0)["keeping"].toBool());
+    QCOMPARE(rig.upscalesDone(), 0);
+    rig.backend->keepAndSet(1);
+    QCOMPARE(asked.count(), 2);
+    QCOMPARE(asked.at(1).at(3).toBool(), true); // S asked, so the answer is set
+    // The answers: into the theme it was made for, and into the current one (and set).
+    rig.backend->keepInto(0, "night-city", false);
+    rig.backend->keepInto(1, "other", true);
+    WAIT_KEPT(rig, 0);
+    WAIT_KEPT(rig, 1);
+    QCOMPARE(rig.draft(0)["keptPath"].toString(), rig.nameFor(0));
+    QCOMPARE(rig.draft(1)["keptPath"].toString(), rig.keepDir("other") + "/" + Keeper::fileName("oil rig", rig.draft(1)["id"].toString(), "png"));
+    QVERIFY(QFileInfo(rig.draft(0)["keptPath"].toString()).isFile());
+    QVERIFY(QFileInfo(rig.draft(1)["keptPath"].toString()).isFile());
+    QVERIFY(!rig.draft(0)["set"].toBool());
+    QVERIFY(rig.draft(1)["set"].toBool());
+    QCOMPARE(rig.calls(), QStringList{"theme bg set " + rig.draft(1)["keptPath"].toString()});
+    // The finals say where they went.
+    QCOMPARE(rig.library().find(rig.draft(1)["id"].toString()).metadata["kind"].toString(), QString("draft"));
+    // When the theme is the one it was made for, there is no question.
+    QVERIFY(rig.sb.fixture.switchTo("night-city"));
+    QTRY_COMPARE_WITH_TIMEOUT(rig.backend->themeName(), QString("night-city"), 5000);
+    rig.backend->keep(2);
+    QCOMPARE(asked.count(), 2);
+    WAIT_KEPT(rig, 2);
+}
+
+void LimgenTests::backend_discardUndoAndRedo() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    const QString id0 = rig.draft(0)["id"].toString(), id1 = rig.draft(1)["id"].toString();
+    const QByteArray image0 = readFile(rig.library().find(id0).image);
+    rig.backend->discard(0);
+    QVERIFY(rig.draft(0)["discarded"].toBool());
+    QVERIFY(rig.backend->canUndo());
+    QVERIFY(!rig.backend->canRedo());
+    QVERIFY(!rig.library().find(id0).isValid()); // moved out of the library
+    QVERIFY(binFiles(rig.sb).contains(id0 + ".png"));
+    rig.backend->discard(0); // twice: one undo step only
+    rig.backend->keep(0);    // and a discarded draft cannot be kept
+    QVERIFY(!rig.backend->keeping());
+    rig.backend->undo();
+    QVERIFY(!rig.draft(0)["discarded"].toBool());
+    QVERIFY(rig.library().find(id0).isValid());
+    QCOMPARE(readFile(rig.library().find(id0).image), image0);
+    QVERIFY(!rig.backend->canUndo());
+    QVERIFY(rig.backend->canRedo());
+    QVERIFY(binFiles(rig.sb).isEmpty());
+    rig.backend->undo(); // nothing left to undo
+    QVERIFY(!rig.draft(0)["discarded"].toBool());
+    rig.backend->redo();
+    QVERIFY(rig.draft(0)["discarded"].toBool());
+    QVERIFY(!rig.library().find(id0).isValid());
+    QVERIFY(rig.backend->canUndo());
+    QVERIFY(!rig.backend->canRedo());
+    // Two discards undo in reverse order; a new action clears what could be redone.
+    rig.backend->discard(1);
+    rig.backend->undo();
+    QVERIFY(!rig.draft(1)["discarded"].toBool());
+    QVERIFY(rig.draft(0)["discarded"].toBool());
+    QVERIFY(rig.backend->canRedo());
+    rig.backend->discard(2);
+    QVERIFY(!rig.backend->canRedo());
+    Q_UNUSED(id1);
+    // A kept draft cannot be discarded.
+    rig.backend->keep(3);
+    WAIT_KEPT(rig, 3);
+    rig.backend->discard(3);
+    QVERIFY(!rig.draft(3)["discarded"].toBool());
+    QVERIFY(rig.library().find(rig.draft(3)["id"].toString()).isValid());
+}
+
+void LimgenTests::backend_undoAndRedoOfAKeep() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    // Omarchy shows an earlier background.
+    const QString previous = rig.sb.fixture.root.path() + "/previous.png";
+    QVERIFY(writeFile(previous, "previous"));
+    QVERIFY(QFile::link(previous, rig.sb.fixture.state + "/background"));
+    rig.backend->keepAndSet(0);
+    WAIT_KEPT(rig, 0);
+    const QString installed = rig.draft(0)["keptPath"].toString();
+    const QByteArray bytes = readFile(installed);
+    QCOMPARE(rig.omarchy->currentBackground(), installed);
+    const int libraryFiles = filesUnder(rig.sb.library()).size();
+    // Undo: the file goes, the earlier background comes back, the final stays in the library.
+    rig.backend->undo();
+    QVERIFY(!QFileInfo::exists(installed));
+    QVERIFY(!rig.draft(0)["kept"].toBool());
+    QVERIFY(!rig.draft(0)["set"].toBool());
+    QCOMPARE(rig.draft(0)["keptPath"].toString(), QString());
+    QCOMPARE(rig.omarchy->currentBackground(), previous);
+    QCOMPARE(rig.calls(), (QStringList{"theme bg set " + installed, "theme bg set " + previous}));
+    QCOMPARE(filesUnder(rig.sb.library()).size(), libraryFiles);
+    QVERIFY(!rig.backend->canUndo());
+    QVERIFY(rig.backend->canRedo());
+    // Redo: the same file is copied back and shown again.
+    rig.backend->redo();
+    QVERIFY(QFileInfo(installed).isFile());
+    QCOMPARE(readFile(installed), bytes);
+    QVERIFY(rig.draft(0)["kept"].toBool());
+    QVERIFY(rig.draft(0)["set"].toBool());
+    QCOMPARE(rig.draft(0)["keptPath"].toString(), installed);
+    QCOMPARE(rig.omarchy->currentBackground(), installed);
+    QVERIFY(rig.backend->canUndo());
+    QVERIFY(!rig.backend->canRedo());
+    QCOMPARE(QDir(rig.keepDir()).entryList(QDir::Files).size(), 1); // no .part
+    // A keep without set: undo does not call Omarchy at all.
+    const int calls = rig.calls().size();
+    rig.backend->keep(1);
+    WAIT_KEPT(rig, 1);
+    rig.backend->undo();
+    QVERIFY(!QFileInfo::exists(rig.draft(1)["keptPath"].toString()) && !rig.draft(1)["kept"].toBool());
+    QCOMPARE(rig.calls().size(), calls);
+    // A draft kept before is not this keep's file to remove.
+    const QString mine = rig.nameFor(2);
+    QVERIFY(writeFile(mine, "kept before"));
+    rig.backend->keep(2);
+    WAIT_KEPT(rig, 2);
+    QVERIFY2(rig.backend->status().contains("Already kept"), qPrintable(rig.backend->status()));
+    QCOMPARE(readFile(mine), QByteArray("kept before"));
+    const bool undoable = rig.backend->canUndo();
+    if (undoable)
+        rig.backend->undo();
+    QVERIFY(QFileInfo::exists(mine)); // never deleted
+}
+
+void LimgenTests::backend_undoWhileKeepingCancelsIt() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.backend->keep(0);
+    QTRY_VERIFY_WITH_TIMEOUT(rig.upscalesDone() > 0, 15000);
+    QTest::qWait(300);
+    QVERIFY(rig.backend->keeping());
+    rig.backend->undo();
+    WAIT_NOT_KEEPING(rig);
+    QVERIFY(!rig.draft(0)["keeping"].toBool());
+    QVERIFY(!rig.draft(0)["kept"].toBool());
+    QVERIFY(!QFileInfo::exists(rig.keepDir()) || QDir(rig.keepDir()).entryList(QDir::Files).isEmpty());
+    QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+    QVERIFY(rig.backend->canRedo());
+    QVERIFY(!rig.backend->canUndo());
+    // Redo keeps it again, now that the engine works.
+    qunsetenv("FAKE_SD_CLI_MODE");
+    rig.backend->redo();
+    QVERIFY(rig.draft(0)["keeping"].toBool());
+    WAIT_KEPT(rig, 0);
+    QVERIFY(QFileInfo(rig.draft(0)["keptPath"].toString()).isFile());
+    QVERIFY(rig.backend->canUndo());
+}
+
+void LimgenTests::backend_undoThenRedoAtOnceKeepsTheTileKeeping() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.backend->keep(0);
+    QTRY_VERIFY_WITH_TIMEOUT(rig.upscalesDone() > 0, 15000);
+    QTest::qWait(200);
+    // Undo, then redo before the cancelled engine has ended: the late report
+    // of the cancelled keep must not reset the tile of the new one.
+    rig.backend->undo();
+    qunsetenv("FAKE_SD_CLI_MODE");
+    rig.backend->redo();
+    QElapsedTimer timer;
+    timer.start();
+    while (!rig.draft(0)["kept"].toBool() && timer.elapsed() < 20000) {
+        QVERIFY2(rig.draft(0)["keeping"].toBool(), "the tile looked idle while its keep was queued or running");
+        QTest::qWait(20);
+    }
+    QVERIFY(rig.draft(0)["kept"].toBool());
+    QVERIFY(!rig.draft(0)["keeping"].toBool());
+}
+
+void LimgenTests::backend_undoOfTheOnlyBackgroundIsRefused() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    // No earlier background to go back to.
+    QVERIFY(!QFileInfo(rig.sb.fixture.state + "/background").isSymLink());
+    rig.backend->keepAndSet(0);
+    WAIT_KEPT(rig, 0);
+    const QString installed = rig.draft(0)["keptPath"].toString();
+    QCOMPARE(rig.omarchy->currentBackground(), installed);
+    rig.backend->undo();
+    // Removing it would leave the desktop pointing at nothing, so it stays.
+    QVERIFY(QFileInfo(installed).isFile());
+    QVERIFY(rig.draft(0)["kept"].toBool());
+    QVERIFY(rig.backend->statusIsError());
+    QVERIFY(rig.backend->canUndo());
+    QVERIFY(!rig.backend->canRedo());
+}
+
+void LimgenTests::backend_generateWhileKeepingWaitsThenStarts() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    const QString firstId = rig.draft(0)["id"].toString();
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.backend->keep(0);
+    QTRY_VERIFY_WITH_TIMEOUT(rig.upscalesDone() > 0, 15000);
+    rig.backend->setSubject("a lighthouse in fog");
+    QVERIFY(rig.backend->canGenerate()); // a keep does not stop a new batch asking
+    rig.backend->generate();
+    QVERIFY(rig.backend->batchWaiting());
+    QVERIFY(!rig.backend->running());
+    QVERIFY(rig.backend->busy());
+    QVERIFY(!rig.backend->canGenerate()); // already asked
+    QTest::qWait(300);
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 1); // only the first batch ever ran
+    QCOMPARE(rig.draft(0)["id"].toString(), firstId); // the tiles are still the first batch's
+    // The keep ends (undone), and the batch starts by itself; the engine works again.
+    qunsetenv("FAKE_SD_CLI_MODE");
+    rig.backend->undo();
+    QTRY_VERIFY_WITH_TIMEOUT(rig.backend->running() || imageCalls(rig.sb.fakeLog()).size() == 2, 30000);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running() && !rig.backend->batchWaiting(), 40000);
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 2);
+    QCOMPARE(rig.draft(0)["state"].toString(), QString("done"));
+    QVERIFY(rig.draft(0)["id"].toString() != firstId);
+    QVERIFY(!rig.backend->canUndo()); // a new batch starts with a clean undo
+    QVERIFY(!rig.backend->canRedo());
+    QCOMPARE(rig.library().find(rig.draft(0)["id"].toString()).metadata["subject"].toString(), QString("a lighthouse in fog"));
+}
+
+void LimgenTests::backend_cancelOfAWaitingBatchAndStopAll() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.backend->keep(0);
+    rig.backend->keep(1); // queued behind the first
+    QTRY_VERIFY_WITH_TIMEOUT(rig.upscalesDone() > 0, 15000);
+    rig.backend->generate();
+    QVERIFY(rig.backend->batchWaiting());
+    // Cancel (Esc) ends the waiting, not the keeps.
+    rig.backend->cancel();
+    QVERIFY(!rig.backend->batchWaiting());
+    QVERIFY2(rig.backend->status().toLower().contains("cancelled"), qPrintable(rig.backend->status()));
+    QVERIFY(rig.backend->keeping());
+    QTest::qWait(300);
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 1); // the batch never started
+    // stopAll (before quitting) ends everything: waiting batch, queue and the running keep.
+    rig.backend->generate();
+    QVERIFY(rig.backend->batchWaiting());
+    rig.backend->stopAll();
+    QVERIFY(!rig.backend->batchWaiting());
+    WAIT_NOT_KEEPING(rig);
+    QVERIFY(!rig.draft(0)["keeping"].toBool());
+    // The keep that was only queued is dropped, and its tile is told.
+    QVERIFY(!rig.draft(1)["keeping"].toBool());
+    QVERIFY(!rig.backend->busy());
+    QTest::qWait(300);
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 1);
+    QVERIFY(!QFileInfo::exists(rig.keepDir()) || QDir(rig.keepDir()).entryList(QDir::Files).isEmpty());
+    QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+}
+
+void LimgenTests::backend_aNewBatchClearsUndoAndPurgesDiscards() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    rig.backend->keep(1);
+    WAIT_KEPT(rig, 1);
+    const QString kept = rig.draft(1)["keptPath"].toString();
+    rig.backend->discard(2);
+    const QString discardedId = rig.draft(2)["id"].toString();
+    QVERIFY(binFiles(rig.sb).contains(discardedId + ".png"));
+    QVERIFY(rig.backend->canUndo());
+    rig.backend->setSubject("a lighthouse");
+    rig.backend->generate();
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running() && rig.draft(0)["state"].toString() == "done", 40000);
+    QVERIFY(!rig.backend->canUndo());
+    QVERIFY(!rig.backend->canRedo());
+    QVERIFY2(binFiles(rig.sb).isEmpty(), "the discarded draft is deleted for good");
+    QVERIFY(QFileInfo(kept).isFile()); // what was kept stays
+    QVERIFY(!rig.library().find(discardedId).isValid());
+    rig.backend->undo(); // nothing to undo, and nothing comes back
+    QVERIFY(!rig.library().find(discardedId).isValid());
+}
+
+void LimgenTests::backend_destroyingPurgesDiscardsAndStopsKeeps() {
+    {
+        KeepBackendRig rig;
+        rig.create();
+        QVERIFY(rig.makeBatch());
+        rig.backend->discard(0);
+        rig.backend->keep(1);
+        WAIT_KEPT(rig, 1);
+        const QString kept = rig.draft(1)["keptPath"].toString();
+        QVERIFY(!binFiles(rig.sb).isEmpty());
+        rig.backend.reset(); // the window closes
+        QVERIFY2(binFiles(rig.sb).isEmpty(), "undo ends with the window, and the discarded draft with it");
+        QVERIFY(QFileInfo(kept).isFile());
+    }
+    {
+        KeepBackendRig rig;
+        rig.create();
+        QVERIFY(rig.makeBatch());
+        qputenv("FAKE_SD_CLI_MODE", "hang");
+        rig.backend->keep(0);
+        QTRY_VERIFY_WITH_TIMEOUT(rig.upscalesDone() > 0, 15000);
+        QTest::qWait(300);
+        QCOMPARE(QProcess::execute("pgrep", {"-f", rig.sb.fixture.cache}), 0);
+        rig.backend.reset(); // a keep is still running
+        QVERIFY(QProcess::execute("pgrep", {"-f", rig.sb.fixture.cache}) == 1);
+        QProcess::execute("pkill", {"-f", rig.sb.fixture.cache});
+        QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+        QVERIFY(!QFileInfo::exists(rig.keepDir()) || QDir(rig.keepDir()).entryList(QDir::Files).isEmpty());
+    }
+}
+
+void LimgenTests::backend_purgeDiscardedAtStartLeavesRecentOnes() {
+    KeepBackendRig rig;
+    Library library(rig.sb.library());
+    auto discarded = [&](bool old) {
+        DraftRecord record = fullRecord();
+        const LibraryEntry draft = library.addDraft(makePng(rig.sb.fixture.root.path() + "/s-" + QString::number(QRandomGenerator::global()->generate()) + ".png"),
+                                                    record, QDateTime::currentDateTimeUtc());
+        library.discard(draft.id);
+        if (old)
+            for (const char *suffix : {".png", ".json"})
+                setAge(rig.sb.library() + "/.discarded/" + draft.id + suffix, QDateTime::currentDateTime().addDays(-3));
+        return draft.id;
+    };
+    const QString oldId = discarded(true), recentId = discarded(false);
+    QCOMPARE(binFiles(rig.sb).size(), 4);
+    rig.create();
+    // What a window that did not close properly left is purged; a recent discard (another window's undo) stays.
+    QVERIFY(!binFiles(rig.sb).contains(oldId + ".png") && !binFiles(rig.sb).contains(oldId + ".json"));
+    QVERIFY(binFiles(rig.sb).contains(recentId + ".png") && binFiles(rig.sb).contains(recentId + ".json"));
+}
+
+void LimgenTests::backend_finishSettingsAreSaved() {
+    KeepBackendRig rig;
+    QVERIFY(writeFile(rig.sb.configFile(), R"({"future": {"x": 1}})"));
+    rig.create();
+    QCOMPARE(rig.backend->colorPass(), 0.3);
+    QCOMPARE(rig.backend->formatIndex(), 0);
+    QSignalSpy changed(rig.backend.get(), &Backend::settingsChanged);
+    rig.backend->setColorPass(0.6);
+    QCOMPARE(rig.backend->colorPass(), 0.6);
+    QCOMPARE(changed.count(), 1);
+    rig.backend->setColorPass(0.6); // the same again: nothing
+    QCOMPARE(changed.count(), 1);
+    rig.backend->setFormatIndex(1);
+    QCOMPARE(rig.backend->formatIndex(), 1);
+    QCOMPARE(changed.count(), 2);
+    rig.backend->setFormatIndex(7); // out of range: ignored
+    rig.backend->setFormatIndex(-1);
+    QCOMPARE(rig.backend->formatIndex(), 1);
+    QCOMPARE(changed.count(), 2);
+    QJsonObject config = QJsonDocument::fromJson(readFile(rig.sb.configFile())).object();
+    QCOMPARE(config["colorPass"].toDouble(), 0.6);
+    QCOMPARE(config["format"].toString(), QString("jpeg"));
+    QCOMPARE(config["future"].toObject()["x"].toInt(), 1); // other keys stay
+    rig.backend->setColorPass(3); // above 1 is 1
+    QCOMPARE(rig.backend->colorPass(), 1.0);
+    rig.backend->setColorPass(0.6);
+    // A new window starts with them, and keeps in that format.
+    rig.create();
+    QCOMPARE(rig.backend->colorPass(), 0.6);
+    QCOMPARE(rig.backend->formatIndex(), 1);
+    QVERIFY(rig.makeBatch());
+    rig.backend->keep(0);
+    WAIT_KEPT(rig, 0);
+    QVERIFY(rig.draft(0)["keptPath"].toString().endsWith(".jpg"));
+    const LibraryEntry final = [&] {
+        for (const QString &file : QDir(rig.sb.library() + "/" + QDate::currentDate().toString("yyyy-MM")).entryList({"*.jpg"}))
+            return Library(rig.sb.library()).find(QFileInfo(file).baseName());
+        return LibraryEntry();
+    }();
+    QVERIFY(final.isValid());
+    QCOMPARE(final.metadata["finish"].toObject()["format"].toString(), QString("jpeg"));
+    QCOMPARE(final.metadata["finish"].toObject()["colorPass"].toDouble(), 0.6);
+}
+
+void LimgenTests::backend_keepMessageSurvivesTheThemeReloadItCauses() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    QSignalSpy palette(rig.backend.get(), &Backend::paletteChanged);
+    rig.backend->keep(0);
+    WAIT_KEPT(rig, 0);
+    QVERIFY2(rig.backend->status().contains("Kept as"), qPrintable(rig.backend->status()));
+    // The new file in the theme's folder makes Omarchy's watcher fire, and the
+    // window reloads the theme; that must not wipe the message about the keep.
+    QTRY_VERIFY_WITH_TIMEOUT(palette.count() >= 1, 5000);
+    QTest::qWait(600);
+    QVERIFY2(rig.backend->status().contains("Kept as"), qPrintable(rig.backend->status()));
+    QVERIFY(!rig.backend->statusIsError());
+}
+
+void LimgenTests::backend_keepFailuresAreShown() {
+    {
+        KeepBackendRig rig;
+        rig.create();
+        QVERIFY(rig.makeBatch());
+        QVERIFY(QFile::remove(Catalogue::path(*rig.world.catalogue.upscaler(), rig.sb.fixture.models)));
+        rig.backend->keep(0);
+        WAIT_NOT_KEEPING(rig);
+        QVERIFY(rig.backend->statusIsError());
+        QVERIFY2(rig.backend->status().contains(rig.world.catalogue.upscaler()->name), qPrintable(rig.backend->status()));
+        QVERIFY(!rig.draft(0)["kept"].toBool());
+        QVERIFY(!rig.draft(0)["keeping"].toBool());
+        QVERIFY(!rig.backend->canUndo()); // a keep that failed leaves nothing to undo
+    }
+    {
+        KeepBackendRig rig;
+        rig.create();
+        QVERIFY(rig.makeBatch());
+        qputenv("FAKE_SD_CLI_MODE", "oom");
+        rig.backend->keep(1);
+        WAIT_NOT_KEEPING(rig);
+        QVERIFY(rig.backend->statusIsError());
+        QVERIFY2(rig.backend->status().toLower().contains("memory"), qPrintable(rig.backend->status()));
+        QVERIFY(!rig.draft(1)["kept"].toBool());
+        QVERIFY(!rig.backend->canUndo());
+        QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+        qunsetenv("FAKE_SD_CLI_MODE"); // and it can be tried again
+        rig.backend->keep(1);
+        WAIT_KEPT(rig, 1);
+    }
+}
+
+void LimgenTests::backend_keepWithoutAThemeGoesToPictures() {
+    KeepBackendRig rig(false); // no Omarchy theme at all
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    QCOMPARE(rig.draft(0)["theme"].toString(), QString());
+    rig.backend->keep(0);
+    WAIT_KEPT(rig, 0);
+    const QString path = rig.draft(0)["keptPath"].toString();
+    QCOMPARE(path, rig.sb.fixture.pictures() + "/" + Keeper::fileName("oil rig", rig.draft(0)["id"].toString(), "png"));
+    QVERIFY(QFileInfo(path).isFile());
+    QCOMPARE(filesUnder(rig.sb.fixture.backgrounds), QStringList());
+}
+
+// ============================== L5: the window, keeping ===================
+
+namespace {
+
+// Makes a batch in the window's backend and waits for it.
+bool qmlBatch(QmlRig &q, const QString &subject = "oil rig") {
+    for (int i = 0; i < 400 && !q.backend().engineReady(); ++i)
+        QTest::qWait(50);
+    q.backend().setSubject(subject);
+    q.backend().generate();
+    for (int i = 0; i < 800 && (q.backend().running() || q.backend().drafts().isEmpty()); ++i)
+        QTest::qWait(50);
+    if (q.backend().drafts().size() != 4)
+        return false;
+    for (int i = 0; i < 4; ++i)
+        if (q.backend().drafts().at(i).toMap()["state"].toString() != "done")
+            return false;
+    return true;
+}
+
+QVariantMap qmlDraft(QmlRig &q, int index) { return q.backend().drafts().value(index).toMap(); }
+
+QList<QQuickItem *> qmlTiles(QmlRig &q) {
+    QList<QQuickItem *> tiles;
+    for (QQuickItem *item : q.items())
+        if (QString(item->metaObject()->className()).startsWith("DraftTile"))
+            tiles << item;
+    return tiles;
+}
+
+QQuickItem *buttonOf(QObject *popup, const QString &text) {
+    QList<QQuickItem *> queue{qvariant_cast<QQuickItem *>(popup->property("footer"))};
+    while (!queue.isEmpty()) {
+        QQuickItem *item = queue.takeFirst();
+        if (!item)
+            continue;
+        if (item->inherits("QQuickAbstractButton") && item->property("text").toString() == text)
+            return item;
+        queue << item->childItems();
+    }
+    return nullptr;
+}
+
+QObject *themeDialogOf(const QmlRig &q) {
+    return q.popup([](QObject *o) { return o->property("title").toString() == "Which theme should it go to?"; });
+}
+
+} // namespace
+
+void LimgenTests::qml_keysKeepSetDiscardUndoRedo() {
+    QmlRig q(true, fakeEngine, true);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    auto press = [&](Qt::Key key, Qt::KeyboardModifiers modifiers = Qt::NoModifier) { QTest::keyClick(q.window, key, modifiers); };
+    // K keeps the selected draft; its tile shows the badge state.
+    QTest::keyClick(q.window, 'k');
+    QTRY_VERIFY_WITH_TIMEOUT(qmlDraft(q, 0)["kept"].toBool(), 30000);
+    QVERIFY(QFileInfo(qmlDraft(q, 0)["keptPath"].toString()).isFile());
+    QVERIFY(q.rig.sb.fixture.omarchyCalls().isEmpty());
+    const QList<QQuickItem *> tiles = qmlTiles(q);
+    QCOMPARE(tiles.size(), 4);
+    QVERIFY(tiles[0]->property("kept").toBool());
+    QVERIFY(!tiles[1]->property("kept").toBool());
+    // S on the next one keeps it and shows it. Omarchy shows an earlier
+    // background, so the keep can be undone.
+    const QString previous = q.rig.sb.fixture.root.path() + "/previous.png";
+    QVERIFY(writeFile(previous, "previous"));
+    QVERIFY(QFile::link(previous, q.rig.sb.fixture.state + "/background"));
+    press(Qt::Key_Right);
+    QTRY_COMPARE(q.prop("selected").toInt(), 1);
+    QTest::keyClick(q.window, 's');
+    QTRY_VERIFY_WITH_TIMEOUT(qmlDraft(q, 1)["kept"].toBool() && qmlDraft(q, 1)["set"].toBool(), 30000);
+    QCOMPARE(q.rig.sb.fixture.omarchyCalls(), QStringList{"theme bg set " + qmlDraft(q, 1)["keptPath"].toString()});
+    // D discards the selected one, Ctrl+Z brings it back, Ctrl+Shift+Z discards it again.
+    press(Qt::Key_Down);
+    QTRY_COMPARE(q.prop("selected").toInt(), 3);
+    QTest::keyClick(q.window, 'd');
+    QTRY_VERIFY(qmlDraft(q, 3)["discarded"].toBool());
+    QTRY_VERIFY(tiles[3]->property("discarded").toBool());
+    press(Qt::Key_Z, Qt::ControlModifier);
+    QTRY_VERIFY(!qmlDraft(q, 3)["discarded"].toBool());
+    press(Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+    QTRY_VERIFY(qmlDraft(q, 3)["discarded"].toBool());
+    // Two more undos: the discard, then the keep of draft 1, whose file goes.
+    const QString installed1 = qmlDraft(q, 1)["keptPath"].toString();
+    press(Qt::Key_Z, Qt::ControlModifier);
+    QTRY_VERIFY(!qmlDraft(q, 3)["discarded"].toBool());
+    press(Qt::Key_Z, Qt::ControlModifier);
+    QTRY_VERIFY(!qmlDraft(q, 1)["kept"].toBool());
+    QVERIFY(!QFileInfo::exists(installed1));
+    QVERIFY(qmlDraft(q, 0)["kept"].toBool()); // the older keep is still there
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_actionKeysDoNothingWhileTypingOrUnderHelpOrADialog() {
+    QmlRig q(true, fakeEngine, true);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    // Something to undo, so a stray Ctrl+Z would show.
+    q.backend().discard(1);
+    QVERIFY(qmlDraft(q, 1)["discarded"].toBool());
+    // In the subject field the letters are text, and Ctrl+Z undoes the text.
+    q.focusSubject();
+    QTRY_VERIFY(q.typing());
+    typeText(q.window, "kds");
+    QVERIFY(q.backend().subject().endsWith("kds"));
+    QTest::keyClick(q.window, Qt::Key_Z, Qt::ControlModifier);
+    QTest::qWait(100);
+    QVERIFY2(!q.backend().subject().endsWith("kds"), qPrintable(q.backend().subject())); // the text was undone
+    QVERIFY(qmlDraft(q, 1)["discarded"].toBool());                                     // the discard was not
+    QVERIFY(!qmlDraft(q, 0)["kept"].toBool());
+    QVERIFY(!qmlDraft(q, 0)["discarded"].toBool());
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_VERIFY(!q.typing());
+    // Under the help overlay.
+    QTest::keyClick(q.window, '?');
+    QTRY_COMPARE(q.prop("helpVisible").toBool(), true);
+    for (const char key : {'k', 's', 'd'})
+        QTest::keyClick(q.window, key);
+    QTest::keyClick(q.window, Qt::Key_Z, Qt::ControlModifier);
+    QTest::qWait(150);
+    QVERIFY(!qmlDraft(q, 0)["kept"].toBool() && !qmlDraft(q, 0)["keeping"].toBool());
+    QVERIFY(!qmlDraft(q, 0)["discarded"].toBool());
+    QVERIFY(qmlDraft(q, 1)["discarded"].toBool());
+    QTest::keyClick(q.window, '?');
+    QTRY_COMPARE(q.prop("helpVisible").toBool(), false);
+    // Under a dialog (the model picker).
+    QTest::keyClick(q.window, 'm');
+    QTRY_VERIFY(q.isOpen(q.modelPicker()));
+    for (const char key : {'k', 's', 'd'})
+        QTest::keyClick(q.window, key);
+    QTest::keyClick(q.window, Qt::Key_Z, Qt::ControlModifier);
+    QTest::qWait(150);
+    QVERIFY(!qmlDraft(q, 0)["kept"].toBool() && !qmlDraft(q, 0)["keeping"].toBool());
+    QVERIFY(!qmlDraft(q, 0)["discarded"].toBool());
+    QVERIFY(qmlDraft(q, 1)["discarded"].toBool());
+    QVERIFY(q.rig.sb.fixture.omarchyCalls().isEmpty());
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_VERIFY(!q.isOpen(q.modelPicker()));
+    // And with the keys free again, they act.
+    QTest::keyClick(q.window, 'd');
+    QTRY_VERIFY(qmlDraft(q, 0)["discarded"].toBool());
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_themeDialogKeepsIntoTheChosenTheme() {
+    QmlRig q(true, fakeEngine, true);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q)); // made for night-city
+    QVERIFY(q.rig.sb.fixture.switchTo("other"));
+    QTRY_COMPARE_WITH_TIMEOUT(q.backend().themeName(), QString("other"), 5000);
+    QObject *dialog = themeDialogOf(q);
+    QVERIFY(dialog);
+    QVERIFY(!q.isOpen(dialog));
+    // K asks, and nothing is made while it is open. Esc closes it.
+    QTest::keyClick(q.window, 'k');
+    QTRY_VERIFY(q.isOpen(dialog));
+    QCOMPARE(q.prop("dialogOpen").toBool(), true);
+    QVERIFY(!q.backend().keeping());
+    QVERIFY(buttonOf(dialog, "night-city") && buttonOf(dialog, "other") && buttonOf(dialog, "Cancel"));
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_VERIFY(!q.isOpen(dialog));
+    QVERIFY(!qmlDraft(q, 0)["kept"].toBool() && !q.backend().keeping());
+    QCOMPARE(upscaleCalls(q.rig.sb.fakeLog()).size(), 0);
+    // The current theme's button keeps it there.
+    QTest::keyClick(q.window, 'k');
+    QTRY_VERIFY(q.isOpen(dialog));
+    QMetaObject::invokeMethod(buttonOf(dialog, "other"), "clicked");
+    QTRY_VERIFY(!q.isOpen(dialog));
+    QTRY_VERIFY_WITH_TIMEOUT(qmlDraft(q, 0)["kept"].toBool(), 30000);
+    QCOMPARE(QFileInfo(qmlDraft(q, 0)["keptPath"].toString()).absolutePath(), q.rig.sb.fixture.backgrounds + "/other");
+    // The theme it was made for: the other button, on the next draft.
+    QTest::keyClick(q.window, Qt::Key_Right);
+    QTRY_COMPARE(q.prop("selected").toInt(), 1);
+    QTest::keyClick(q.window, 's');
+    QTRY_VERIFY(q.isOpen(dialog));
+    QMetaObject::invokeMethod(buttonOf(dialog, "night-city"), "clicked");
+    QTRY_VERIFY_WITH_TIMEOUT(qmlDraft(q, 1)["kept"].toBool() && qmlDraft(q, 1)["set"].toBool(), 30000);
+    QCOMPARE(QFileInfo(qmlDraft(q, 1)["keptPath"].toString()).absolutePath(), q.rig.sb.fixture.backgrounds + "/night-city");
+    // Cancel closes it and keeps nothing.
+    QTest::keyClick(q.window, Qt::Key_Right);
+    QTest::keyClick(q.window, Qt::Key_Down);
+    QTest::keyClick(q.window, 'k');
+    QTRY_VERIFY(q.isOpen(dialog));
+    QMetaObject::invokeMethod(buttonOf(dialog, "Cancel"), "clicked");
+    QTRY_VERIFY(!q.isOpen(dialog));
+    QVERIFY(!qmlDraft(q, q.prop("selected").toInt())["kept"].toBool());
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_quitWhileKeepingAsksFirst() {
+    QmlRig q(true, fakeEngine, true);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    QSignalSpy aboutToQuit(QCoreApplication::instance(), &QCoreApplication::aboutToQuit);
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    QTest::keyClick(q.window, 'k');
+    QTRY_VERIFY_WITH_TIMEOUT(!upscaleCalls(q.rig.sb.fakeLog()).isEmpty(), 15000);
+    QVERIFY(q.backend().keeping());
+    QVERIFY(!q.backend().running());
+    QObject *dialog = q.quitDialog();
+    QVERIFY(dialog);
+    QTest::keyClick(q.window, 'q');
+    QTRY_VERIFY(q.isOpen(dialog)); // work would be lost: it asks
+    QCOMPARE(aboutToQuit.count(), 0);
+    QVERIFY(q.backend().keeping());
+    QTest::keyClick(q.window, Qt::Key_Escape); // keep working
+    QTRY_VERIFY(!q.isOpen(dialog));
+    QVERIFY(q.backend().keeping());
+    QCOMPARE(q.prop("quitting").toBool(), false);
+    q.backend().stopAll();
+    QTRY_VERIFY_WITH_TIMEOUT(!q.backend().keeping(), 15000);
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_finishSettingsUnderTheFullPrompt() {
+    QmlRig q(true, fakeEngine, true);
+    LOAD_WINDOW(q);
+    QTRY_VERIFY_WITH_TIMEOUT(q.backend().engineReady(), 20000);
+    QQuickItem *slider = q.itemInheriting("QQuickSlider");
+    QVERIFY(slider);
+    QList<QQuickItem *> combos;
+    for (QQuickItem *item : q.items())
+        if (item->inherits("QQuickComboBox"))
+            combos << item;
+    QCOMPARE(combos.size(), 2); // the style and the format
+    // Folded away until P.
+    QVERIFY(!slider->isVisible());
+    QTest::keyClick(q.window, 'p');
+    QTRY_COMPARE(q.prop("promptVisible").toBool(), true);
+    QTRY_VERIFY(slider->isVisible());
+    QVERIFY(combos[1]->isVisible());
+    QVERIFY2(qAbs(slider->property("value").toDouble() - 0.3) < 1e-6, "the default colour pass");
+    QCOMPARE(combos[1]->property("currentIndex").toInt(), 0);
+    // The controls follow the settings, whoever changes them.
+    q.backend().setColorPass(0.8);
+    QTRY_VERIFY(qAbs(slider->property("value").toDouble() - 0.8) < 1e-6);
+    q.backend().setFormatIndex(1);
+    QTRY_COMPARE(combos[1]->property("currentIndex").toInt(), 1);
+    QTest::qWait(200);
+    NO_QML_WARNINGS(q);
+    QTest::keyClick(q.window, 'p');
+    QTRY_VERIFY(!slider->isVisible());
 }
 
 // The child of backend_destroyingWhileABatchRunsIsSafe: a Backend on the

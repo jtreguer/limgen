@@ -5,7 +5,7 @@ Omarchy theme with an image model that runs on the user's own machine. This
 document says what it does and why. `technical.md` says how, and
 `models.md` records which models it runs and why they were chosen.
 
-Status: milestones L0 (engine spike), L1 (skeleton), L2 (engine), L3 (downloads) and L4 (the window) done, L5 next.
+Status: milestones L0 (engine spike), L1 (skeleton), L2 (engine), L3 (downloads), L4 (the window) and L5 (keeping) done, L6 next.
 
 ## 1. Purpose
 
@@ -142,8 +142,11 @@ finish a draft in a few minutes.
    drafts replace the previews at the end of the batch. Esc cancels.
 4. The user moves through them with the arrow keys, opens one full screen
    with F, and keeps it with K. Keeping finishes the draft in the background
-   and adds it to the theme folder.
+   and adds it to the theme folder. A new batch asked for meanwhile waits
+   until the kept drafts are finished, since both need the GPU.
 5. S sets the selected image as the background now (keeping it first).
+   D discards a draft. Ctrl+Z undoes the last keep or discard, and
+   Ctrl+Shift+Z redoes it, until the next batch starts.
 6. V starts a variation batch from the selected image.
 7. R reruns the same prompt with new seeds.
 
@@ -180,7 +183,9 @@ rounding, as in Omarchy's own apps.
 - **Centre:** the current batch as a 2x2 grid of drafts with progress and a
   live preview while each one is made, or a single image full size.
 - **Bottom:** the subject field, the style preset, the editable full prompt
-  (folded by default), strength (shown for variations), Generate.
+  and how kept images are finished (colour pass strength, PNG or JPEG),
+  folded together by default (P), strength (shown for variations),
+  Generate.
 - A status line for errors and estimates.
 
 Shortcuts:
@@ -200,7 +205,7 @@ Shortcuts:
 | M | Choose the model |
 | P | Show or hide the full prompt |
 | ? | Show every shortcut |
-| Q | Quit (asks first while a batch runs or a keep is unfinished) |
+| Q | Quit (asks first while a batch, a keep or a download runs) |
 
 ## 9. Matching the theme
 
@@ -218,9 +223,9 @@ layers, each optional after the first:
    for themes that already have one good background.
 3. **Colour pass.** After generation, a colour transfer in Lab space moves
    the image's colour statistics toward the theme's (from its existing
-   backgrounds when there are any, from the palette otherwise). It has a
-   strength slider, defaults to light, and never runs on the stored draft,
-   only on the final copy.
+   backgrounds when there are any, from the palette otherwise, which only
+   moves the colour cast). It has a strength slider, defaults to light
+   (0.3), and never runs on the stored draft, only on the final copy.
 
 ## 10. Omarchy integration
 

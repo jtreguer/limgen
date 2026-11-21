@@ -27,7 +27,10 @@ Rectangle {
         font.pixelSize: 12
         text: {
             translator.language
-            return view.draft ? qsTr("Seed %1").arg(Number(view.draft.seed).toLocaleString(Qt.locale(), 'f', 0)) : ""
+            if (!view.draft)
+                return ""
+            const seed = qsTr("Seed %1").arg(Number(view.draft.seed).toLocaleString(Qt.locale(), 'f', 0))
+            return view.draft.kept ? qsTr("%1 · kept as %2").arg(seed).arg(view.draft.keptPath.split("/").pop()) : seed
         }
     }
 

@@ -29,6 +29,8 @@ struct ProgressEvent {
 // line is a sampling step only while some image is still unsampled.
 class ProgressParser {
 public:
+    // With steps 0, a line counts whatever its total says: an upscale counts
+    // tiles, and how many depends on the image and the tile size.
     ProgressParser(int images, int steps) : m_images(images), m_steps(steps) {}
 
     QList<ProgressEvent> feed(const QByteArray &chunk);

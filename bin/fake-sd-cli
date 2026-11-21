@@ -6,16 +6,22 @@
 
 It answers --version, --help and --list-devices like the pinned release,
 prints progress in sd-cli's format (carriage-return redraws and all), and
-writes solid-colour PNGs of the requested size, a colour per seed. Model
-files must exist, as for the real engine, but their contents are not read.
+writes solid-colour PNGs of the requested size, a colour per seed. With
+-M upscale it writes a PNG four times the size of the input, in one colour,
+counting tiles as the real upscaler does. Model files must exist, as for the
+real engine, but their contents are not read.
 
 FAKE_SD_CLI_MODE makes it misbehave the way the real engine can:
-  oom          runs out of video memory (exit 1)
-  oom-once     runs out of memory unless --vae-tiling is given
+  oom          runs out of video memory (exit 1); an upscale logs the
+               failure, saves its input unscaled and exits 0, as the
+               pinned release does
+  oom-once     runs out of memory unless --vae-tiling is given, or for an
+               upscale, unless the tile size is 128
   fail         reports an error (exit 1)
   error-exit0  reports an error but exits 0 (the pinned release does this)
   wrong-size   writes 64x64 images
-  hang         stops after the first step until it is killed
+  hang         stops after the first step (or tile) until it is killed
+  hang-ignore-term  the same, and ignores SIGTERM, so only SIGKILL ends it
   no-gpu       lists only a CPU device
   old-version  reports another release
 FAKE_SD_CLI_LOG appends each call's arguments, one JSON list per line.
@@ -58,6 +64,62 @@ def option(args, *names, default=None):
     return default
 
 
+def png_size(path):
+    with open(path, "rb") as image:
+        header = image.read(24)
+    if header[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG")
+    return struct.unpack(">II", header[16:24])
+
+
+def progress(n, total):
+    done = 50 * n // total
+    bar = "|" + "=" * done + (">" if done < 50 else "") + " " * (49 - done) + "|"
+    say(f"\r  {bar} {n}/{total} - {STEP_SECONDS:.2f}s/it\x1b[K", end="\n" if n == total else "")
+
+
+def upscale(args):
+    model = option(args, "--upscale-model")
+    source = option(args, "--init-img", "-i")
+    output = option(args, "--output", "-o", default="output.png")
+    tile = int(option(args, "--upscale-tile-size", default="128"))
+    if model is None or not os.path.isfile(model):
+        say(f"[E] cannot inspect model source '{model}': No such file or directory --- model_loader_files.cpp:25")
+        return 1
+    try:
+        width, height = png_size(source)
+    except (OSError, ValueError, TypeError):
+        say(f"[E] load image from '{source}' failed --- main.cpp:880")
+        return 1
+    say(f"[I] upscaling from ({width} x {height}) to ({width * 4} x {height * 4}) --- upscaler.cpp:71")
+    if MODE == "oom" or (MODE == "oom-once" and tile > 128):
+        say("[W] execution engine cannot make enough memory available on Vulkan0 --- execution_engine.cpp:944")
+        say("[E] upscaler compute failed --- image_upscale.cpp:125")
+        say("[E] upscale failed --- main.cpp:1038")
+        with open(source, "rb") as original, open(output, "wb") as out:
+            out.write(original.read())
+        say(f"[I] save result image 0 to '{output}' (success) --- main.cpp:501")
+        return 0
+    if MODE == "fail":
+        say("[E] fake engine failure --- fake.cpp:1")
+        return 1
+    # Tiles overlap, so the real count is higher than the area suggests;
+    # the exact number does not matter to limgen.
+    tiles = max(1, -(-width // max(1, tile // 2))) * max(1, -(-height // max(1, tile // 2)))
+    for n in range(1, tiles + 1):
+        progress(n, tiles)
+        if MODE == "hang":
+            while True:
+                time.sleep(1)
+        time.sleep(STEP_SECONDS / 4)
+    if MODE == "wrong-size":
+        width = height = 16
+    png(output, width * 4, height * 4, (90, 110, 140))
+    say(f"[I] save result image 0 to '{output}' (success) --- main.cpp:501")
+    say("[I] 1/1 images saved --- main.cpp:579")
+    return 0
+
+
 def main(args):
     log = os.environ.get("FAKE_SD_CLI_LOG")
     if log:
@@ -77,6 +139,9 @@ def main(args):
             say("Vulkan0\tFake GPU")
         say("CPU\tFake CPU")
         return 0
+
+    if option(args, "-M", "--mode") == "upscale":
+        return upscale(args)
 
     for role in ("--model", "--diffusion-model", "--llm", "--vae", "--tae"):
         path = option(args, role)
@@ -107,14 +172,14 @@ def main(args):
     previews = 0
     for image in range(count):
         for step in range(1, steps + 1):
-            done = 50 * step // steps
-            bar = "|" + "=" * done + (">" if done < 50 else "") + " " * (49 - done) + "|"
-            say(f"\r  {bar} {step}/{steps} - {STEP_SECONDS:.2f}s/it\x1b[K", end="\n" if step == steps else "")
+            if MODE == "hang-ignore-term":
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            progress(step, steps)
             if preview_path and step % interval == 0:
                 path = preview_path.replace("%03d", f"{previews:03d}")
                 png(path, max(1, width // 8), max(1, height // 8), (40 * image % 256, 80, 120))
                 previews += 1
-            if MODE == "hang":
+            if MODE in ("hang", "hang-ignore-term"):
                 while True:
                     time.sleep(1)
             time.sleep(STEP_SECONDS)

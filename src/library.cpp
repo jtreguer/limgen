@@ -17,6 +17,26 @@ QString tr(const char *text) { return QCoreApplication::translate("Library", tex
 
 QString monthOf(const QString &id) { return id.left(7); }
 
+// Copies `image` to `target` through a .part file beside it. rename()
+// refuses an existing target, so nothing is ever overwritten.
+bool copyInto(const QString &image, const QString &target) {
+    const QString part = target + ".part";
+    QFile::remove(part);
+    if (!QFile::copy(image, part))
+        return false;
+    if (!QFile::rename(part, target)) {
+        QFile::remove(part);
+        return false;
+    }
+    return true;
+}
+
+bool writeSidecar(const QString &path, const QJsonObject &metadata) {
+    QSaveFile sidecar(path);
+    return sidecar.open(QIODevice::WriteOnly) && sidecar.write(QJsonDocument(metadata).toJson()) >= 0 &&
+           sidecar.commit();
+}
+
 } // namespace
 
 Library::Library(const QString &directory) : m_directory(directory) {}
@@ -36,8 +56,10 @@ QString Library::newId(const QDateTime &created) const {
         const QString id =
             QString("%1-%2").arg(date).arg(QRandomGenerator::global()->bounded(0x1000000), 6, 16, QChar('0'));
         const QString base = m_directory + "/" + monthOf(id) + "/" + id;
-        if (!QFileInfo::exists(base + ".png") && !QFileInfo::exists(base + ".json") &&
-            !QFileInfo::exists(base + ".png.part"))
+        bool taken = false;
+        for (const char *suffix : {".png", ".jpg", ".json", ".png.part", ".jpg.part"})
+            taken = taken || QFileInfo::exists(base + suffix);
+        if (!taken)
             return id;
     }
 }
@@ -84,19 +106,34 @@ LibraryEntry Library::addDraft(const QString &image, const DraftRecord &record, 
         return fail(tr("Cannot create %1").arg(folder));
 
     LibraryEntry entry{id, folder + "/" + id + ".png", folder + "/" + id + ".json", metadata(id, created, record)};
-    const QString part = entry.image + ".part";
-    QFile::remove(part);
-    if (!QFile::copy(image, part))
+    if (!copyInto(image, entry.image))
         return fail(tr("Cannot copy %1 into the library").arg(image));
-    // rename() refuses an existing target, so an entry is never overwritten.
-    if (!QFile::rename(part, entry.image)) {
-        QFile::remove(part);
-        return fail(tr("Cannot write %1").arg(entry.image));
+    if (!writeSidecar(entry.sidecar, entry.metadata)) {
+        QFile::remove(entry.image);
+        return fail(tr("Cannot write %1").arg(entry.sidecar));
     }
+    return entry;
+}
 
-    QSaveFile sidecar(entry.sidecar);
-    if (!sidecar.open(QIODevice::WriteOnly) ||
-        sidecar.write(QJsonDocument(entry.metadata).toJson()) < 0 || !sidecar.commit()) {
+LibraryEntry Library::addFinal(const QString &image, QJsonObject metadata, const QDateTime &created,
+                               QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return LibraryEntry{};
+    };
+    const QString suffix = QFileInfo(image).suffix().toLower() == "png" ? "png" : "jpg";
+    const QString id = newId(created);
+    const QString folder = m_directory + "/" + monthOf(id);
+    if (!QDir().mkpath(folder))
+        return fail(tr("Cannot create %1").arg(folder));
+    metadata.insert("id", id);
+    metadata.insert("kind", "final");
+    metadata.insert("created", created.toUTC().toString(Qt::ISODate));
+    LibraryEntry entry{id, folder + "/" + id + "." + suffix, folder + "/" + id + ".json", metadata};
+    if (!copyInto(image, entry.image))
+        return fail(tr("Cannot copy %1 into the library").arg(image));
+    if (!writeSidecar(entry.sidecar, entry.metadata)) {
         QFile::remove(entry.image);
         return fail(tr("Cannot write %1").arg(entry.sidecar));
     }
@@ -108,9 +145,79 @@ LibraryEntry Library::find(const QString &id) const {
         return {};
     const QString folder = m_directory + "/" + monthOf(id);
     LibraryEntry entry{id, folder + "/" + id + ".png", folder + "/" + id + ".json", {}};
+    if (!QFileInfo::exists(entry.image))
+        entry.image = folder + "/" + id + ".jpg";
     QFile sidecar(entry.sidecar);
     if (!QFileInfo::exists(entry.image) || !sidecar.open(QIODevice::ReadOnly))
         return {};
     entry.metadata = QJsonDocument::fromJson(sidecar.readAll()).object();
     return entry.metadata.value("id").toString() == id ? entry : LibraryEntry{};
+}
+
+bool Library::discard(const QString &id, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    const LibraryEntry entry = find(id);
+    if (!entry.isValid())
+        return fail(tr("No draft %1 in the library").arg(id));
+    if (entry.metadata.value("kind").toString() != "draft")
+        return fail(tr("%1 is not a draft").arg(id));
+    const QString bin = m_directory + "/.discarded";
+    if (!QDir().mkpath(bin))
+        return fail(tr("Cannot create %1").arg(bin));
+    // Both files are renamed within the library, so nothing is copied.
+    if (!QFile::rename(entry.image, bin + "/" + id + ".png"))
+        return fail(tr("Cannot move %1").arg(entry.image));
+    if (!QFile::rename(entry.sidecar, bin + "/" + id + ".json")) {
+        QFile::rename(bin + "/" + id + ".png", entry.image);
+        return fail(tr("Cannot move %1").arg(entry.sidecar));
+    }
+    // The modification time says when it was discarded, for purgeDiscarded;
+    // the contents stay as they were.
+    for (const char *suffix : {".png", ".json"}) {
+        QFile file(bin + "/" + id + suffix);
+        if (file.open(QIODevice::ReadWrite))
+            file.setFileTime(QDateTime::currentDateTime(), QFileDevice::FileModificationTime);
+    }
+    return true;
+}
+
+bool Library::restore(const QString &id, QString *error) {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (!isValidId(id))
+        return fail(tr("No draft %1 in the library").arg(id));
+    const QString bin = m_directory + "/.discarded", folder = m_directory + "/" + monthOf(id);
+    if (!QFileInfo::exists(bin + "/" + id + ".png") || !QFileInfo::exists(bin + "/" + id + ".json"))
+        return fail(tr("Draft %1 is no longer there to restore").arg(id));
+    if (!QDir().mkpath(folder))
+        return fail(tr("Cannot create %1").arg(folder));
+    if (!QFile::rename(bin + "/" + id + ".png", folder + "/" + id + ".png"))
+        return fail(tr("Cannot restore %1").arg(id));
+    if (!QFile::rename(bin + "/" + id + ".json", folder + "/" + id + ".json")) {
+        QFile::rename(folder + "/" + id + ".png", bin + "/" + id + ".png");
+        return fail(tr("Cannot restore %1").arg(id));
+    }
+    return true;
+}
+
+void Library::purge(const QString &id) {
+    if (!isValidId(id))
+        return;
+    const QString bin = m_directory + "/.discarded/" + id;
+    QFile::remove(bin + ".png");
+    QFile::remove(bin + ".json");
+}
+
+void Library::purgeDiscarded(const QDateTime &before) {
+    const QDir bin(m_directory + "/.discarded");
+    for (const QFileInfo &file : bin.entryInfoList(QDir::Files))
+        if (file.lastModified() < before)
+            QFile::remove(file.absoluteFilePath());
 }

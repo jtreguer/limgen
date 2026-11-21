@@ -15,11 +15,15 @@ Rectangle {
         ["Esc", qsTr("Cancel the batch, close full view, or leave a text field")],
         ["←  →  ↑  ↓", qsTr("Move between drafts")],
         ["F", qsTr("Show the selected draft full size")],
+        ["K", qsTr("Keep: finish it and add it to the theme's backgrounds")],
+        ["S", qsTr("Keep it and show it as the background now")],
+        ["D", qsTr("Discard the selected draft")],
+        ["Ctrl+Z  Ctrl+Shift+Z", qsTr("Undo or redo the last keep or discard")],
         ["R", qsTr("The same prompt again, with new seeds")],
         ["P", qsTr("Show or hide the full prompt")],
         ["M", qsTr("Choose the model")],
         ["?", qsTr("Show or hide this list")],
-        ["Q", qsTr("Quit (asks first while a batch or a download runs)")],
+        ["Q", qsTr("Quit (asks first while a batch, a keep or a download runs)")],
     ]
 
     Rectangle {

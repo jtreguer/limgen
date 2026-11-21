@@ -46,6 +46,11 @@ OmarchyPaths OmarchyPaths::fromEnvironment() {
                                                   ? QString()
                                                   : QStandardPaths::findExecutable("hyprctl"));
     paths.language = config + "/omarchy/language";
+    const QString themes = qEnvironmentVariable("LIMGEN_OMARCHY_THEMES");
+    paths.themes = themes.isEmpty() ? QStringList{config + "/omarchy/themes", "/usr/share/omarchy/themes"}
+                                    : themes.split(':', Qt::SkipEmptyParts);
+    paths.pictures = fromEnv("LIMGEN_PICTURES",
+                             QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) + "/limgen");
     return paths;
 }
 
@@ -95,6 +100,56 @@ QString Omarchy::userBackgroundDirectory() const {
 }
 
 QStringList Omarchy::userBackgrounds() const { return imagesIn(userBackgroundDirectory()); }
+
+QString Omarchy::themeDirectory(const QString &slug) const {
+    if (!isSafeSlug(slug))
+        return {};
+    if (slug == this->slug())
+        return m_paths.state + "/theme";
+    for (const QString &root : m_paths.themes)
+        if (QFileInfo(root + "/" + slug).isDir())
+            return root + "/" + slug;
+    return {};
+}
+
+QStringList Omarchy::themeBackgrounds(const QString &slug) const {
+    const QString directory = themeDirectory(slug);
+    return directory.isEmpty() ? QStringList() : imagesIn(directory + "/backgrounds");
+}
+
+QString Omarchy::keepDirectory(const QString &slug) const {
+    if (slug.isEmpty())
+        return m_paths.pictures;
+    return isSafeSlug(slug) ? m_paths.backgrounds + "/" + slug : QString();
+}
+
+QString Omarchy::currentBackground() const {
+    const QFileInfo link(m_paths.state + "/background");
+    return link.isSymLink() ? link.symLinkTarget() : QString();
+}
+
+bool Omarchy::setBackground(const QString &file, QString *error) const {
+    auto fail = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+    if (m_paths.omarchy.isEmpty())
+        return fail(QCoreApplication::translate("Omarchy", "Omarchy is not installed, so limgen cannot set the "
+                                                           "background. The image is at %1.")
+                        .arg(file));
+    QProcess process;
+    process.start(m_paths.omarchy, {"theme", "bg", "set", file});
+    if (!process.waitForFinished(10000)) {
+        process.kill();
+        process.waitForFinished(1000);
+        return fail(QCoreApplication::translate("Omarchy", "omarchy theme bg set did not finish."));
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+        return fail(QCoreApplication::translate("Omarchy", "omarchy theme bg set failed: %1")
+                        .arg(QString::fromUtf8(process.readAllStandardError()).trimmed()));
+    return true;
+}
 
 QList<Monitor> Omarchy::monitors() const {
     if (m_paths.hyprctl.isEmpty())

@@ -17,3 +17,8 @@ tests in L2. Recapture both files when the pin changes.
   512) that ran out of video memory. It logs `[E] upscale failed`, then
   saves the unscaled input as if it had worked, and the process exits 0.
   SdCppEngine must report this as a failure.
+- `sd-cli-esrgan-upscale.log`: a successful ESRGAN upscale (`-M upscale`,
+  default tile size 128, Vulkan build, with `-v`) of a 1344x768 draft, from
+  L0's `bench/finish`. Its progress line counts 112 tiles, in the same
+  redrawn format as sampling steps, with `it/s` once the rate passes one per
+  second.

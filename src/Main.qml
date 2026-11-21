@@ -25,7 +25,7 @@ ApplicationWindow {
     // Single-letter shortcuts are off while the user types, or a dialog is
     // up. Under the help only ? and Q act, so nothing changes out of sight.
     readonly property bool typing: promptBar.typing
-    readonly property bool dialogOpen: modelPicker.opened || quitDialog.opened
+    readonly property bool dialogOpen: modelPicker.opened || quitDialog.opened || themeDialog.opened
     readonly property bool keysFree: !typing && !dialogOpen
     readonly property bool actionKeysFree: keysFree && !helpVisible
     readonly property var selectedDraft: backend.drafts.length > selected ? backend.drafts[selected] : null
@@ -64,6 +64,18 @@ ApplicationWindow {
         }
     }
 
+    // Keeping a draft made for another theme asks where it should go.
+    Connections {
+        target: backend
+        function onThemeChoiceNeeded(index, madeFor, current, set) {
+            themeDialog.index = index
+            themeDialog.madeFor = madeFor
+            themeDialog.current = current
+            themeDialog.set = set
+            themeDialog.open()
+        }
+    }
+
     // A new batch starts with its first draft selected and the grid shown.
     // This handler runs only when the value changes, not on every change of
     // the backend's state, such as a letter typed during the batch.
@@ -92,6 +104,12 @@ ApplicationWindow {
                 win.fullView = true
         }
     }
+    Shortcut { sequence: "K"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.keep(win.selected) }
+    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.keepAndSet(win.selected) }
+    Shortcut { sequence: "D"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.discard(win.selected) }
+    // Off while typing, so a text field keeps its own undo.
+    Shortcut { sequences: [StandardKey.Undo]; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.undo() }
+    Shortcut { sequences: [StandardKey.Redo]; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.redo() }
     Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(-1, 0) }
     Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(1, 0) }
     Shortcut { sequence: "Up"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(0, -1) }
@@ -109,7 +127,7 @@ ApplicationWindow {
                 win.fullView = false
             else if (win.typing)
                 win.leaveFields()
-            else if (backend.running)
+            else if (backend.running || backend.batchWaiting)
                 backend.cancel()
         }
     }
@@ -218,9 +236,11 @@ ApplicationWindow {
         Label {
             width: parent.width
             wrapMode: Text.Wrap
-            text: backend.running
+            text: backend.running || backend.batchWaiting
                   ? qsTr("A batch is running. Quitting stops it, and its drafts are not kept.")
-                  : qsTr("A download is running. Quitting pauses it; it resumes where it stopped next time.")
+                  : backend.keeping
+                    ? qsTr("A kept draft is still being finished. Quitting stops it; keep the draft again to finish it.")
+                    : qsTr("A download is running. Quitting pauses it; it resumes where it stopped next time.")
         }
 
         footer: DialogButtonBox {
@@ -239,6 +259,49 @@ ApplicationWindow {
             backend.stopAll()
             win.quitting = true
             Qt.quit()
+        }
+    }
+
+    Dialog {
+        id: themeDialog
+        property int index: -1
+        property string madeFor
+        property string current
+        property bool set: false
+        anchors.centerIn: Overlay.overlay
+        modal: true
+        title: qsTr("Which theme should it go to?")
+        width: Math.min(win.width - 64, 500)
+        Overlay.modal: Rectangle { color: "#a0000000" }
+
+        Label {
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: qsTr("This draft was made for %1, and the theme is now %2.").arg(themeDialog.madeFor).arg(themeDialog.current)
+        }
+
+        footer: DialogButtonBox {
+            Button {
+                text: qsTr("Cancel")
+                flat: true
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+            Button {
+                text: themeDialog.madeFor
+                flat: true
+                onClicked: {
+                    backend.keepInto(themeDialog.index, themeDialog.madeFor, themeDialog.set)
+                    themeDialog.close()
+                }
+            }
+            Button {
+                text: themeDialog.current
+                highlighted: true
+                onClicked: {
+                    backend.keepInto(themeDialog.index, themeDialog.current, themeDialog.set)
+                    themeDialog.close()
+                }
+            }
         }
     }
 }

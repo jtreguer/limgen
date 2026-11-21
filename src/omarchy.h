@@ -16,6 +16,13 @@ struct OmarchyPaths {
     QString omarchy;     // LIMGEN_OMARCHY_BIN, default `omarchy` on PATH
     QString hyprctl;     // LIMGEN_HYPRCTL, default `hyprctl` on PATH when Hyprland runs
     QString language;    // $XDG_CONFIG_HOME/omarchy/language
+    // LIMGEN_OMARCHY_THEMES (folders separated by colons), default
+    // $XDG_CONFIG_HOME/omarchy/themes (the user's) then
+    // /usr/share/omarchy/themes (stock), searched in that order.
+    QStringList themes;
+    // LIMGEN_PICTURES, default ~/Pictures/limgen: where kept images go when
+    // there is no Omarchy theme.
+    QString pictures;
 
     static OmarchyPaths fromEnvironment();
 };
@@ -56,6 +63,25 @@ public:
     QString userBackgroundDirectory() const;
     // Images already in that folder, sorted by name.
     QStringList userBackgrounds() const;
+
+    // The folder of theme `slug`: for the current theme, Omarchy's copy in
+    // the state folder; otherwise the first theme folder that has it. Empty
+    // when there is none.
+    QString themeDirectory(const QString &slug) const;
+    // The images in that theme's backgrounds folder, sorted by name.
+    QStringList themeBackgrounds(const QString &slug) const;
+    // Where kept images go: ~/.config/omarchy/backgrounds/<slug>, or the
+    // pictures folder for an empty slug (no Omarchy theme). Empty for a slug
+    // that is not a safe folder name.
+    QString keepDirectory(const QString &slug) const;
+
+    // The file the desktop shows now (Omarchy's `background` link in the
+    // state folder), or an empty string.
+    QString currentBackground() const;
+    // `omarchy theme bg set <file>`, the one way limgen changes the
+    // background. Returns false with *error set when it fails or Omarchy is
+    // not installed.
+    bool setBackground(const QString &file, QString *error = nullptr) const;
 
     // Monitors from `hyprctl monitors -j`; empty when hyprctl is missing,
     // fails, or takes longer than two seconds.

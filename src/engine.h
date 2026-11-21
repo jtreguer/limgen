@@ -5,9 +5,14 @@
 #include <QString>
 #include <QStringList>
 
-// One batch for an engine to make: everything it needs, already decided.
+// One run for an engine: a batch of drafts, or the upscale that finishes a
+// kept draft. Everything it needs, already decided.
 struct EngineRequest {
-    QMap<QString, QString> files; // sd-cli role ("diffusion-model", "llm", "vae", "tae", "model") to path
+    enum class Mode { Generate, Upscale };
+    Mode mode = Mode::Generate;
+    // sd-cli role to path: "diffusion-model", "llm", "vae", "tae", "model"
+    // for a batch; "upscale-model" for an upscale.
+    QMap<QString, QString> files;
     QString prompt;
     QString negative; // passed only to models that use guidance (cfg above 1)
     int width = 0, height = 0;
@@ -20,6 +25,12 @@ struct EngineRequest {
     bool previews = false;   // needs files["tae"]; previews land in outputDirectory/preview/
     int previewInterval = 2;
     bool vaeTiling = false;  // decode in tiles, for less video memory
+
+    // Upscale only: the image to enlarge. The result lands in
+    // outputDirectory/upscaled.png and must be width x height (four times
+    // the input, for the x4 upscaler).
+    QString input;
+    int upscaleTileSize = 256;
 };
 
 struct EngineError {
@@ -53,11 +64,13 @@ public:
     virtual bool isRunning() const = 0;
 
 signals:
+    // For an upscale, `step` of `steps` counts tiles.
     void progress(int image, int step, int steps, double secondsPerStep);
     void sampled(int image);
     // A preview of `image` that is complete on disk.
     void preview(int image, const QString &path);
-    // The drafts, in batch order, all checked to exist at the requested size.
+    // The drafts, in batch order, all checked to exist at the requested size;
+    // for an upscale, the one upscaled image.
     void finished(const QStringList &drafts);
     void failed(const EngineError &error);
 };

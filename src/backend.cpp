@@ -5,6 +5,8 @@
 #include "timings.h"
 
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QLocale>
 #include <QUrl>
 #include <QVariantMap>
@@ -68,6 +70,9 @@ Backend::Backend(Omarchy *omarchy, const QString &engineProgram, QObject *parent
     refreshModel();
     if (!m_catalogue.isValid())
         setStatus(m_catalogueError, true);
+    // Discarded drafts a window left behind when it did not close normally.
+    // A day's grace leaves another window's undo alone.
+    Library().purgeDiscarded(QDateTime::currentDateTime().addDays(-1));
     recheckEngine();
 }
 
@@ -79,6 +84,16 @@ Backend::~Backend() {
         m_batch->disconnect(this);
         m_batch.reset();
     }
+    if (m_keeper) {
+        m_keeper->disconnect(this);
+        m_keeper.reset();
+    }
+    // Undo ends with the window, and with it the discarded drafts. Nothing
+    // is announced: the window may already be gone.
+    Library library;
+    for (const Action &action : std::as_const(m_undo))
+        if (action.kind == Action::Discard)
+            library.purge(action.draftId);
     // The engine check runs in a worker thread and must end before the
     // objects it reports to.
     m_probing.waitForFinished();
@@ -95,22 +110,31 @@ QVariantList Backend::swatches() const {
 
 void Backend::reload() {
     m_themeName = m_omarchy->slug();
+    // Only what the last reload said is taken back: a kept image lands in
+    // a watched folder and reloads the theme, and its message must stay.
+    QString themeStatus;
+    bool themeError = false;
     if (m_themeName.isEmpty()) {
         m_palette = Palette{};
         m_palette.error = tr("No Omarchy theme found");
-        setStatus(tr("No Omarchy theme found in %1. limgen still runs, with the default accent and no palette.")
-                      .arg(m_omarchy->paths().state));
+        themeStatus = tr("No Omarchy theme found in %1. limgen still runs, with the default accent and no palette.")
+                          .arg(m_omarchy->paths().state);
     } else {
         QString error;
         const QString text = m_omarchy->readColors(&error);
         m_palette = error.isEmpty() ? Palette::fromToml(text) : Palette{};
         if (!error.isEmpty())
             m_palette.error = error;
-        if (!m_palette.isValid())
-            setStatus(m_palette.error, true);
-        else if (!m_statusIsError)
-            setStatus(QString());
+        if (!m_palette.isValid()) {
+            themeStatus = m_palette.error;
+            themeError = true;
+        }
     }
+    if (!themeStatus.isEmpty())
+        setStatus(themeStatus, themeError);
+    else if (!m_themeStatus.isEmpty() && m_status == m_themeStatus)
+        setStatus(QString());
+    m_themeStatus = themeStatus;
     emit paletteChanged();
     // The built prompt follows the theme live; a running batch keeps the
     // theme it started with (Batch reads it once).
@@ -304,7 +328,9 @@ void Backend::resetPrompt() {
 // ------------------------------------------------------------ batch
 
 bool Backend::canGenerateWith(const QString &prompt) const {
-    return !prompt.trimmed().isEmpty() && m_catalogue.isValid() && engineReady() && modelInstalled() && !busy();
+    // A keep does not stop a new batch; the batch waits for it.
+    return !prompt.trimmed().isEmpty() && m_catalogue.isValid() && engineReady() && modelInstalled() && !running() &&
+           !m_batchWaiting && !downloading();
 }
 
 bool Backend::canGenerate() const {
@@ -329,6 +355,16 @@ void Backend::rerun() {
 }
 
 void Backend::startBatch(const QString &fullPrompt, const QString &subject, Prompt::Style style) {
+    if (keeping()) {
+        m_batchWaiting = true;
+        m_waitingPrompt = fullPrompt;
+        m_waitingSubject = subject;
+        m_waitingStyle = style;
+        setStatus(tr("The batch starts when the kept image is finished."));
+        emit stateChanged();
+        updateEstimate();
+        return;
+    }
     BatchSettings settings;
     settings.modelId = m_modelId;
     settings.subject = subject;
@@ -353,6 +389,9 @@ void Backend::startBatch(const QString &fullPrompt, const QString &subject, Prom
     m_lastPrompt = batch->request().prompt;
     m_lastSubject = subject;
     m_lastStyle = style;
+    m_batchTheme = batch->themeSlug();
+    // Undo covers one batch: its tiles are about to go.
+    forgetActions();
 
     // The batch is owned by m_batch before it starts, so a failure reported
     // at once still finds it there.
@@ -403,7 +442,14 @@ void Backend::startBatch(const QString &fullPrompt, const QString &subject, Prom
                                 {"preview", QString()},
                                 {"image", QString()},
                                 {"id", QString()},
-                                {"seed", double(batch->request().seed + quint32(i))}};
+                                {"seed", double(batch->request().seed + quint32(i))},
+                                {"theme", m_batchTheme},
+                                {"keeping", false},
+                                {"keepFraction", -1.0},
+                                {"kept", false},
+                                {"keptPath", QString()},
+                                {"set", false},
+                                {"discarded", false}};
     m_batchEstimate = batch->estimate();
     m_secondsPerStep = -1;
     m_stepsDone = 0;
@@ -417,13 +463,31 @@ void Backend::startBatch(const QString &fullPrompt, const QString &subject, Prom
 }
 
 void Backend::cancel() {
-    if (running())
+    if (running()) {
         m_batch->cancel();
+    } else if (m_batchWaiting) {
+        m_batchWaiting = false;
+        setStatus(tr("Cancelled; the batch did not start."));
+        emit stateChanged();
+        updateEstimate();
+    }
 }
 
 void Backend::stopAll() {
     cancel();
+    m_batchWaiting = false;
+    // Keeps still waiting their turn are dropped, and no unfinished keep is
+    // left to undo.
+    for (const KeepJob &job : std::as_const(m_keepQueue))
+        setDraftFor(job.index, job.draftId, {{"keeping", false}, {"keepFraction", -1.0}});
+    m_keepQueue.clear();
+    m_undo.removeIf([](const Action &a) { return a.kind == Action::Keep && !a.done; });
+    if (m_keeper) {
+        setDraftFor(m_keepJob.index, m_keepJob.draftId, {{"keeping", false}, {"keepFraction", -1.0}});
+        m_keeper->cancel();
+    }
     pauseDownload();
+    emit stateChanged();
 }
 
 void Backend::setDraft(int index, const QVariantMap &changes) {
@@ -448,7 +512,9 @@ QString Backend::durationText(double seconds) {
 
 void Backend::updateEstimate() {
     QString text;
-    if (running()) {
+    if (m_batchWaiting) {
+        text = tr("Waits for the kept image");
+    } else if (running()) {
         const double elapsed = m_batchClock.elapsed() / 1000.0;
         const int steps = m_batch->request().steps;
         const int remainingSteps = qMax(0, draftCount * steps - m_stepsDone);
@@ -470,4 +536,326 @@ void Backend::updateEstimate() {
         m_estimate = text;
         emit estimateChanged();
     }
+}
+
+// ------------------------------------------------------------ keeping
+
+void Backend::setColorPass(double strength) {
+    if (qFuzzyCompare(1 + strength, 1 + colorPass()))
+        return;
+    m_config.setColorPass(strength);
+    QString error;
+    if (!m_config.save(&error))
+        setStatus(error, true);
+    emit settingsChanged();
+}
+
+void Backend::setFormatIndex(int index) {
+    if (index == formatIndex() || index < 0 || index > 1)
+        return;
+    m_config.setFormat(index == 1 ? "jpeg" : "png");
+    QString error;
+    if (!m_config.save(&error))
+        setStatus(error, true);
+    emit settingsChanged();
+}
+
+QVariantMap Backend::draftAt(int index, const QString &id) const {
+    if (index < 0 || index >= m_drafts.size())
+        return {};
+    const QVariantMap draft = m_drafts.at(index).toMap();
+    return id.isEmpty() || draft.value("id").toString() == id ? draft : QVariantMap();
+}
+
+// The tile may belong to a later batch by the time a keep ends, so the id
+// must still match.
+void Backend::setDraftFor(int index, const QString &id, const QVariantMap &changes) {
+    if (!draftAt(index, id).isEmpty())
+        setDraft(index, changes);
+}
+
+void Backend::keep(int index) { requestKeep(index, false); }
+
+void Backend::keepAndSet(int index) { requestKeep(index, true); }
+
+void Backend::requestKeep(int index, bool set) {
+    const QVariantMap draft = draftAt(index, QString());
+    if (draft.value("state").toString() != "done" || draft.value("discarded").toBool() ||
+        draft.value("keeping").toBool())
+        return;
+    if (draft.value("kept").toBool()) {
+        // Kept already: S still shows it, K has nothing left to do.
+        if (set && !draft.value("set").toBool()) {
+            QString error;
+            if (!m_omarchy->setBackground(draft.value("keptPath").toString(), &error)) {
+                setStatus(error, true);
+                return;
+            }
+            setDraft(index, {{"set", true}});
+            setStatus(tr("Set as the background."));
+        }
+        return;
+    }
+    const QString madeFor = draft.value("theme").toString();
+    if (!madeFor.isEmpty() && !m_themeName.isEmpty() && madeFor != m_themeName) {
+        emit themeChoiceNeeded(index, madeFor, m_themeName, set);
+        return;
+    }
+    keepInto(index, m_themeName.isEmpty() ? madeFor : m_themeName, set);
+}
+
+void Backend::keepInto(int index, const QString &theme, bool set) {
+    const QVariantMap draft = draftAt(index, QString());
+    if (draft.value("state").toString() != "done" || draft.value("discarded").toBool() ||
+        draft.value("keeping").toBool() || draft.value("kept").toBool())
+        return;
+    Action action;
+    action.kind = Action::Keep;
+    action.index = index;
+    action.draftId = draft.value("id").toString();
+    action.theme = theme;
+    action.set = set;
+    m_redo.clear();
+    enqueueKeep(action);
+}
+
+void Backend::enqueueKeep(const Action &queued) {
+    Action action = queued;
+    action.serial = m_nextSerial++;
+    action.done = false;
+    m_undo << action;
+    m_keepQueue << KeepJob{action.serial, action.index, action.draftId, action.theme, action.set};
+    setDraftFor(action.index, action.draftId, {{"keeping", true}, {"keepFraction", -1.0}});
+    emit stateChanged();
+    nextKeep();
+}
+
+void Backend::nextKeep() {
+    if (m_keeper || running())
+        return;
+    if (m_keepQueue.isEmpty()) {
+        if (m_batchWaiting) {
+            m_batchWaiting = false;
+            startBatch(m_waitingPrompt, m_waitingSubject, m_waitingStyle);
+        }
+        return;
+    }
+    const KeepJob job = m_keepQueue.takeFirst();
+    KeepSettings settings;
+    settings.draftId = job.draftId;
+    settings.theme = job.theme;
+    settings.colorPass = m_config.colorPass();
+    settings.format = m_config.format();
+    settings.jpegQuality = m_config.jpegQuality();
+
+    m_keeper = std::make_unique<Keeper>(m_catalogue, m_omarchy->paths(), m_engineProgram);
+    Keeper *keeper = m_keeper.get();
+    QString message;
+    if (keeper->prepare(settings, m_probe, &message) != Keeper::Outcome::Ok) {
+        m_keeper.reset();
+        keepFailed(job, message);
+        QTimer::singleShot(0, this, &Backend::nextKeep);
+        return;
+    }
+    m_keepJob = job;
+    // Owned by m_keeper until it reports, then deleted from the event loop,
+    // since it is still inside its own signal then.
+    auto release = [this, keeper] {
+        if (m_keeper.get() == keeper)
+            m_keeper.release()->deleteLater();
+        emit stateChanged();
+        QTimer::singleShot(0, this, &Backend::nextKeep);
+    };
+    connect(keeper, &Keeper::progress, this,
+            [this, job](double fraction) { setDraftFor(job.index, job.draftId, {{"keepFraction", fraction}}); });
+    connect(keeper, &Keeper::finished, this, [this, job, release](const KeepResult &result) {
+        keepFinished(job, result);
+        release();
+    });
+    connect(keeper, &Keeper::failed, this, [this, job, release](Keeper::Outcome outcome, const QString &text) {
+        // A cancel comes from undo or stopAll, which already reset the tile.
+        // The engine can take a moment to end, and by then the tile may hold
+        // a new keep of the same draft, which this must not touch.
+        if (outcome != Keeper::Outcome::Cancelled)
+            keepFailed(job, text);
+        release();
+    });
+    setDraftFor(job.index, job.draftId, {{"keepFraction", 0.0}});
+    keeper->start();
+    emit stateChanged();
+}
+
+Backend::Action *Backend::actionFor(quint64 serial) {
+    for (Action &action : m_undo)
+        if (action.kind == Action::Keep && action.serial == serial)
+            return &action;
+    return nullptr;
+}
+
+void Backend::setBackgroundFor(Action &action) {
+    action.previousBackground = m_omarchy->currentBackground();
+    QString error;
+    if (!m_omarchy->setBackground(action.installed, &error)) {
+        action.set = false;
+        setStatus(error, true);
+    }
+}
+
+void Backend::keepFinished(const KeepJob &job, const KeepResult &result) {
+    Action fallback;
+    Action *action = actionFor(job.serial);
+    if (!action)
+        action = &fallback; // undo was cleared meanwhile; the keep still counts
+    action->done = true;
+    action->installed = result.installed;
+    action->installedByUs = !result.alreadyKept;
+    action->finalImage = result.final.image;
+    action->set = job.set;
+
+    const QString name = QFileInfo(result.installed).fileName();
+    const QString where = result.theme.isEmpty() ? QFileInfo(result.installed).absolutePath() : result.theme;
+    if (result.alreadyKept)
+        setStatus(tr("Already kept as %1 in %2.").arg(name, where));
+    else
+        setStatus(tr("Kept as %1 in %2.").arg(name, where));
+    if (action->set) {
+        setBackgroundFor(*action);
+        if (action->set)
+            setStatus(tr("Kept as %1 in %2 and set as the background.").arg(name, where));
+    }
+    const bool set = action->set;
+    // Kept before: there is nothing of this keep to undo, unless it also
+    // changed the background.
+    if (!action->installedByUs && !set && action != &fallback)
+        m_undo.removeIf([&](const Action &a) { return a.kind == Action::Keep && a.serial == job.serial; });
+    setDraftFor(job.index, job.draftId,
+                {{"keeping", false}, {"kept", true}, {"keptPath", result.installed}, {"set", set}});
+    emit stateChanged();
+}
+
+void Backend::keepFailed(const KeepJob &job, const QString &message) {
+    m_undo.removeIf([&](const Action &a) { return a.kind == Action::Keep && a.serial == job.serial; });
+    setDraftFor(job.index, job.draftId, {{"keeping", false}, {"keepFraction", -1.0}});
+    setStatus(message, true);
+    emit stateChanged();
+}
+
+void Backend::discard(int index) {
+    const QVariantMap draft = draftAt(index, QString());
+    if (draft.value("state").toString() != "done" || draft.value("discarded").toBool() ||
+        draft.value("keeping").toBool() || draft.value("kept").toBool())
+        return;
+    QString error;
+    if (!Library().discard(draft.value("id").toString(), &error)) {
+        setStatus(error, true);
+        return;
+    }
+    Action action;
+    action.kind = Action::Discard;
+    action.index = index;
+    action.draftId = draft.value("id").toString();
+    m_undo << action;
+    m_redo.clear();
+    setDraft(index, {{"discarded", true}});
+    setStatus(tr("Discarded. Ctrl+Z brings it back."));
+    emit stateChanged();
+}
+
+void Backend::undo() {
+    if (m_undo.isEmpty())
+        return;
+    // Undoing a keep that is the background now needs an earlier one to
+    // go back to; removing the file would leave the desktop pointing at
+    // nothing.
+    const Action &last = m_undo.last();
+    if (last.kind == Action::Keep && last.done && last.set && last.installedByUs &&
+        m_omarchy->currentBackground() == last.installed &&
+        (last.previousBackground.isEmpty() || !QFileInfo::exists(last.previousBackground))) {
+        setStatus(tr("%1 is the background, and there is no earlier one to go back to. Set another background "
+                     "first, then undo.")
+                      .arg(QFileInfo(last.installed).fileName()),
+                  true);
+        return;
+    }
+    Action action = m_undo.takeLast();
+    if (action.kind == Action::Discard) {
+        QString error;
+        if (!Library().restore(action.draftId, &error)) {
+            setStatus(error, true);
+            emit stateChanged();
+            return;
+        }
+        setDraftFor(action.index, action.draftId, {{"discarded", false}});
+        setStatus(tr("The draft is back."));
+    } else if (!action.done) {
+        // Still waiting or being finished: it simply stops.
+        m_keepQueue.removeIf([&](const KeepJob &job) { return job.serial == action.serial; });
+        if (m_keeper && m_keepJob.serial == action.serial)
+            m_keeper->cancel();
+        setDraftFor(action.index, action.draftId, {{"keeping", false}, {"keepFraction", -1.0}});
+        setStatus(tr("The keep was cancelled."));
+    } else {
+        // The background goes back first, while the kept file still exists
+        // for Omarchy to move away from.
+        if (action.set && !action.previousBackground.isEmpty() && QFileInfo::exists(action.previousBackground) &&
+            m_omarchy->currentBackground() == action.installed)
+            m_omarchy->setBackground(action.previousBackground);
+        if (action.installedByUs)
+            QFile::remove(action.installed);
+        setDraftFor(action.index, action.draftId, {{"kept", false}, {"keptPath", QString()}, {"set", false}});
+        setStatus(tr("Removed %1 from the backgrounds.").arg(QFileInfo(action.installed).fileName()));
+    }
+    m_redo << action;
+    emit stateChanged();
+}
+
+void Backend::redo() {
+    if (m_redo.isEmpty())
+        return;
+    Action action = m_redo.takeLast();
+    if (action.kind == Action::Discard) {
+        QString error;
+        if (!Library().discard(action.draftId, &error)) {
+            setStatus(error, true);
+            emit stateChanged();
+            return;
+        }
+        setDraftFor(action.index, action.draftId, {{"discarded", true}});
+        setStatus(tr("Discarded. Ctrl+Z brings it back."));
+        m_undo << action;
+    } else if (!action.done) {
+        enqueueKeep(action);
+        return;
+    } else {
+        // The final is still in the library, so the copy comes back as it was.
+        if (action.installedByUs && !QFileInfo::exists(action.installed)) {
+            const QString part = action.installed + ".part";
+            QFile::remove(part);
+            if (!QFile::copy(action.finalImage, part) || !QFile::rename(part, action.installed)) {
+                QFile::remove(part);
+                setStatus(tr("Cannot write %1.").arg(action.installed), true);
+                emit stateChanged();
+                return;
+            }
+        }
+        if (action.set)
+            setBackgroundFor(action);
+        setDraftFor(action.index, action.draftId,
+                    {{"kept", true}, {"keptPath", action.installed}, {"set", action.set}});
+        setStatus(tr("Kept again as %1.").arg(QFileInfo(action.installed).fileName()));
+        m_undo << action;
+    }
+    emit stateChanged();
+}
+
+void Backend::forgetActions() {
+    Library library;
+    for (const Action &action : std::as_const(m_undo))
+        if (action.kind == Action::Discard)
+            library.purge(action.draftId);
+    const bool had = !m_undo.isEmpty() || !m_redo.isEmpty();
+    m_undo.clear();
+    m_redo.clear();
+    if (had)
+        emit stateChanged();
 }

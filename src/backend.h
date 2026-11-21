@@ -13,6 +13,7 @@
 #include "catalogue.h"
 #include "config.h"
 #include "hardware.h"
+#include "keeper.h"
 #include "modelstore.h"
 #include "palette.h"
 #include "sdcppengine.h"
@@ -64,6 +65,15 @@ class Backend : public QObject {
     Q_PROPERTY(bool canRerun READ canRerun NOTIFY stateChanged)
     Q_PROPERTY(QVariantList drafts READ drafts NOTIFY draftsChanged)
     Q_PROPERTY(QString estimate READ estimate NOTIFY estimateChanged)
+    // Keeping: kept drafts are finished one at a time, in the background; a
+    // batch asked for meanwhile waits for them, since both need the GPU.
+    Q_PROPERTY(bool keeping READ keeping NOTIFY stateChanged)
+    Q_PROPERTY(bool batchWaiting READ batchWaiting NOTIFY stateChanged)
+    Q_PROPERTY(bool canUndo READ canUndo NOTIFY stateChanged)
+    Q_PROPERTY(bool canRedo READ canRedo NOTIFY stateChanged)
+    // How kept drafts are finished, saved in config.json.
+    Q_PROPERTY(double colorPass READ colorPass WRITE setColorPass NOTIFY settingsChanged)
+    Q_PROPERTY(int formatIndex READ formatIndex WRITE setFormatIndex NOTIFY settingsChanged)
 
 public:
     static constexpr int draftCount = 4;
@@ -113,16 +123,30 @@ public:
     bool promptEdited() const { return m_promptEdited; }
 
     bool running() const { return m_batch && m_batch->isRunning(); }
-    bool busy() const { return running() || downloading(); }
+    // Work that quitting would stop: a batch (or one waiting), a keep, a
+    // download.
+    bool busy() const { return running() || m_batchWaiting || keeping() || downloading(); }
     bool canGenerate() const;
     bool canRerun() const { return !m_lastPrompt.isEmpty() && canGenerateWith(m_lastPrompt); }
     // One map per draft: state ("waiting", "sampling", "sampled", "done"),
-    // step, steps, preview and image (file URLs), id and seed.
+    // step, steps, preview and image (file URLs), id, seed, the theme it was
+    // made for; and once done, whether it is being kept (keeping, with
+    // keepFraction, -1 while it waits its turn), kept (with keptPath, and
+    // set when it became the background) or discarded.
     QVariantList drafts() const { return m_drafts; }
     QString estimate() const { return m_estimate; }
 
     // A duration for people: "45 s", "2 min 5 s", through the locale.
     static QString durationText(double seconds);
+
+    bool keeping() const { return m_keeper || !m_keepQueue.isEmpty(); }
+    bool batchWaiting() const { return m_batchWaiting; }
+    bool canUndo() const { return !m_undo.isEmpty(); }
+    bool canRedo() const { return !m_redo.isEmpty(); }
+    double colorPass() const { return m_config.colorPass(); }
+    void setColorPass(double strength);
+    int formatIndex() const { return m_config.format() == "jpeg" ? 1 : 0; }
+    void setFormatIndex(int index);
 
 public slots:
     void reload();
@@ -137,8 +161,22 @@ public slots:
     void pauseDownload();
     void resetPrompt();
     void recheckEngine();
-    // Before quitting: stops a batch and pauses a download.
+    // Before quitting: stops a batch and the keeps, and pauses a download.
     void stopAll();
+
+    // K and S: finish the draft and add it to the theme's backgrounds; S
+    // also shows it now. When the theme changed since the draft was made,
+    // themeChoiceNeeded asks the window which theme to use, and the answer
+    // comes back through keepInto.
+    void keep(int index);
+    void keepAndSet(int index);
+    void keepInto(int index, const QString &theme, bool set);
+    // D: moves the draft out of the library until undone, or for good when
+    // the next batch starts or the window closes.
+    void discard(int index);
+    // Ctrl+Z and Ctrl+Shift+Z, for the keeps and discards of this batch.
+    void undo();
+    void redo();
 
 signals:
     void paletteChanged();
@@ -148,6 +186,8 @@ signals:
     void downloadChanged();
     void promptChanged();
     void stateChanged();
+    void settingsChanged();
+    void themeChoiceNeeded(int index, const QString &madeFor, const QString &current, bool set);
     void draftsChanged();
     void estimateChanged();
 
@@ -160,6 +200,35 @@ private:
     QString builtPrompt() const;
     bool canGenerateWith(const QString &prompt) const;
     void startBatch(const QString &fullPrompt, const QString &subject, Prompt::Style style);
+
+    // One keep in the queue, or running.
+    struct KeepJob {
+        quint64 serial = 0;
+        int index = -1;
+        QString draftId, theme;
+        bool set = false;
+    };
+    // A keep or a discard, for undo and redo.
+    struct Action {
+        enum Kind { Keep, Discard } kind = Keep;
+        quint64 serial = 0; // the keep job it came from
+        int index = -1;
+        QString draftId, theme;
+        bool set = false;
+        bool done = false;          // the keep has finished
+        bool installedByUs = false; // false when the draft was kept before
+        QString installed, finalImage, previousBackground;
+    };
+    void requestKeep(int index, bool set);
+    void enqueueKeep(const Action &action);
+    void nextKeep();
+    void keepFinished(const KeepJob &job, const KeepResult &result);
+    void keepFailed(const KeepJob &job, const QString &message);
+    Action *actionFor(quint64 serial);
+    QVariantMap draftAt(int index, const QString &id) const;
+    void setDraftFor(int index, const QString &id, const QVariantMap &changes);
+    void setBackgroundFor(Action &action);
+    void forgetActions();
     void setStatus(const QString &status, bool error = false);
     void refreshModel();
     void updateEstimate();
@@ -177,6 +246,7 @@ private:
     Palette m_palette;
     QString m_status;
     bool m_statusIsError = false;
+    QString m_themeStatus; // what the last reload put in the status line
 
     QFutureWatcher<Probe> m_probing;
     bool m_probed = false;
@@ -198,6 +268,17 @@ private:
     QString m_lastPrompt;
     QString m_lastSubject;
     Prompt::Style m_lastStyle = Prompt::defaultStyle;
+    QString m_batchTheme;
+    // A batch asked for while keeps run starts when they are done.
+    bool m_batchWaiting = false;
+    QString m_waitingPrompt, m_waitingSubject;
+    Prompt::Style m_waitingStyle = Prompt::defaultStyle;
+
+    std::unique_ptr<Keeper> m_keeper;
+    KeepJob m_keepJob;
+    QList<KeepJob> m_keepQueue;
+    quint64 m_nextSerial = 1;
+    QList<Action> m_undo, m_redo;
     QVariantList m_drafts;
     QString m_estimate;
     QElapsedTimer m_batchClock;

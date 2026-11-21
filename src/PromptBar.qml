@@ -47,15 +47,16 @@ Rectangle {
             }
 
             Button {
-                text: backend.running ? qsTr("Cancel") : qsTr("Generate")
+                readonly property bool stops: backend.running || backend.batchWaiting
+                text: stops ? qsTr("Cancel") : qsTr("Generate")
                 // The main action is filled with the theme accent, with text
                 // in whichever of black or white reads on it.
                 Material.elevation: 0
-                Material.background: backend.running || !enabled ? undefined : Material.accent
-                Material.foreground: backend.running || !enabled ? undefined : theme.accentForeground
-                enabled: backend.running || backend.canGenerate
+                Material.background: stops || !enabled ? undefined : Material.accent
+                Material.foreground: stops || !enabled ? undefined : theme.accentForeground
+                enabled: stops || backend.canGenerate
                 focusPolicy: Qt.NoFocus
-                onClicked: backend.running ? backend.cancel() : bar.submitted()
+                onClicked: stops ? backend.cancel() : bar.submitted()
             }
         }
 
@@ -78,6 +79,46 @@ Rectangle {
                 focusPolicy: Qt.NoFocus
                 onClicked: backend.resetPrompt()
             }
+        }
+
+        // How kept drafts are finished; folded with the prompt, since both
+        // are set once and rarely changed.
+        RowLayout {
+            Layout.fillWidth: true
+            visible: bar.promptVisible
+            spacing: 12
+
+            Label { text: qsTr("Colour pass"); color: "#9a9aa0" }
+            Slider {
+                id: colorPass
+                Layout.preferredWidth: 180
+                from: 0
+                to: 1
+                stepSize: 0.05
+                focusPolicy: Qt.NoFocus
+                value: backend.colorPass
+                // Saved once the handle is let go, not at every step of a drag.
+                onPressedChanged: if (!pressed) backend.colorPass = value
+            }
+            Label {
+                Layout.preferredWidth: 48
+                color: "#9a9aa0"
+                text: {
+                    translator.language
+                    return colorPass.value <= 0 ? qsTr("Off")
+                                                : qsTr("%1%").arg(Math.round(colorPass.value * 100).toLocaleString(Qt.locale(), 'f', 0))
+                }
+            }
+            Label { text: qsTr("Kept images as"); color: "#9a9aa0" }
+            ComboBox {
+                Layout.preferredWidth: 110
+                // File formats are names, not words, in every language.
+                model: ["PNG", "JPEG"]
+                currentIndex: backend.formatIndex
+                focusPolicy: Qt.NoFocus
+                onActivated: (index) => backend.formatIndex = index
+            }
+            Item { Layout.fillWidth: true }
         }
 
         ScrollView {

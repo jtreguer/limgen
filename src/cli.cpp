@@ -2,7 +2,9 @@
 
 #include "batch.h"
 #include "catalogue.h"
+#include "config.h"
 #include "hardware.h"
+#include "keeper.h"
 #include "library.h"
 #include "modelstore.h"
 #include "omarchy.h"
@@ -384,6 +386,180 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
     return Ok;
 }
 
+// Finishes one draft and adds it to a theme's background folder, for keep
+// and set. Prints nothing on success; the caller reports the result.
+int runKeep(const KeepSettings &settings, const OmarchyPaths &paths, bool json, KeepResult *result) {
+    QString catalogueError;
+    const Catalogue catalogue = Catalogue::fromEnvironment(&catalogueError);
+    if (!catalogue.isValid())
+        return fail(catalogueError);
+    Keeper keeper(catalogue, paths);
+    QString message;
+    const Keeper::Outcome prepared = keeper.prepare(settings, SdCppEngine().probe(), &message);
+    if (prepared != Keeper::Outcome::Ok)
+        return fail(message, prepared == Keeper::Outcome::UnknownDraft || prepared == Keeper::Outcome::UnknownTheme
+                                 ? Usage
+                                 : prepared == Keeper::Outcome::NotRunnable ? NotRunnable : Error);
+    if (!json && !keeper.result().alreadyKept)
+        print(stderr, tr("Finishing %1 at %2x%3")
+                          .arg(settings.draftId)
+                          .arg(keeper.finalSize().width())
+                          .arg(keeper.finalSize().height()));
+
+    Keeper::Outcome outcome = Keeper::Outcome::Ok;
+    QEventLoop loop;
+    QObject::connect(&keeper, &Keeper::finished, &loop, [&](const KeepResult &kept) {
+        *result = kept;
+        loop.quit();
+    });
+    QObject::connect(&keeper, &Keeper::failed, &loop, [&](Keeper::Outcome failure, const QString &text) {
+        outcome = failure;
+        message = text;
+        loop.quit();
+    });
+    QTimer watch;
+    QObject::connect(&watch, &QTimer::timeout, &keeper, [&] {
+        if (interrupted)
+            keeper.cancel();
+    });
+    const InterruptHandlers handlers;
+    watch.start(100);
+    keeper.start();
+    loop.exec();
+    watch.stop();
+
+    if (outcome == Keeper::Outcome::Cancelled || (outcome != Keeper::Outcome::Ok && interrupted))
+        return fail(tr("Interrupted; nothing was kept."), Interrupted);
+    if (outcome != Keeper::Outcome::Ok)
+        return fail(message, outcome == Keeper::Outcome::NotRunnable ? NotRunnable : Error);
+    return Ok;
+}
+
+QJsonObject keptJson(const KeepResult &kept) {
+    return {{"draft", kept.draft.id},
+            {"final", kept.final.isValid() ? QJsonValue(kept.final.id) : QJsonValue()},
+            {"path", kept.installed},
+            {"theme", kept.theme.isEmpty() ? QJsonValue() : QJsonValue(kept.theme)},
+            {"alreadyKept", kept.alreadyKept}};
+}
+
+int keep(const QStringList &arguments, const OmarchyPaths &paths) {
+    Command command("keep", tr("Finish a draft (upscale, colour pass) and add it to a theme's backgrounds. Prints "
+                               "the path of the image added."));
+    command.parser.addPositionalArgument("id", tr("A draft id, as limgen generate prints it"), "<id>");
+    command.parser.addOption({"theme", tr("The theme to add it to (default: the theme it was made for)"), "slug"});
+    command.parser.addOption({"color-pass", tr("Colour pass strength from 0 (off) to 1 (default from the "
+                                               "settings, 0.3 at first)"),
+                              "strength"});
+    command.parser.addOption({"format", tr("png or jpeg (default from the settings, png at first)"), "format"});
+    command.parser.addOption({"set", tr("Also show it as the background now")});
+    if (!command.parse(arguments, 1))
+        return command.status;
+
+    const Config config;
+    KeepSettings settings;
+    settings.draftId = command.argument(0);
+    settings.colorPass = config.colorPass();
+    settings.format = config.format();
+    settings.jpegQuality = config.jpegQuality();
+    if (command.parser.isSet("color-pass")) {
+        bool numberOk = false;
+        settings.colorPass = command.parser.value("color-pass").toDouble(&numberOk);
+        // Written this way round so "nan" fails too.
+        if (!numberOk || !(settings.colorPass >= 0 && settings.colorPass <= 1))
+            return fail(tr("--color-pass takes a number from 0 to 1."), Usage);
+    }
+    if (command.parser.isSet("format")) {
+        settings.format = command.parser.value("format");
+        if (settings.format != "png" && settings.format != "jpeg")
+            return fail(tr("--format takes png or jpeg."), Usage);
+    }
+    // A script cannot be asked which theme it meant, so a draft goes to the
+    // theme it was made for, whose palette it matches; --theme overrides.
+    const Omarchy omarchy(paths);
+    const LibraryEntry draft = Library().find(settings.draftId);
+    settings.theme = command.parser.isSet("theme") ? command.parser.value("theme")
+                                                   : draft.metadata.value("theme").toObject().value("slug").toString();
+    if (settings.theme.isEmpty())
+        settings.theme = omarchy.slug();
+
+    KeepResult kept;
+    if (const int status = runKeep(settings, paths, command.json(), &kept); status != Ok)
+        return status;
+    bool set = false;
+    if (command.parser.isSet("set")) {
+        QString error;
+        if (!omarchy.setBackground(kept.installed, &error))
+            return fail(error);
+        set = true;
+    }
+    if (command.json()) {
+        QJsonObject object = keptJson(kept);
+        object.insert("set", set);
+        print(object);
+        return Ok;
+    }
+    if (kept.alreadyKept)
+        print(stderr, tr("Already kept."));
+    print(stdout, kept.installed);
+    return Ok;
+}
+
+int set(const QStringList &arguments, const OmarchyPaths &paths) {
+    Command command("set", tr("Show an image as the background now. A draft is kept first, into the current "
+                              "theme."));
+    command.parser.addPositionalArgument("image", tr("A draft or final id, or an image file"), "<id-or-file>");
+    if (!command.parse(arguments, 1))
+        return command.status;
+
+    const Omarchy omarchy(paths);
+    const QString given = command.argument(0);
+    QString file;
+    QJsonObject object;
+    if (Library::isValidId(given)) {
+        const LibraryEntry entry = Library().find(given);
+        if (!entry.isValid())
+            return fail(tr("No draft or final %1 in the library.").arg(given), Usage);
+        // A final is set through its draft, so it lands in the current
+        // theme's folder like any kept draft (or is found there already).
+        const bool isFinal = entry.metadata.value("kind").toString() == "final";
+        const QString draftId =
+            isFinal ? entry.metadata.value("finish").toObject().value("from").toString() : entry.id;
+        if (isFinal && !Library().find(draftId).isValid())
+            return fail(tr("The draft %1 that %2 was finished from is no longer in the library. Set the final's "
+                           "file instead: %3")
+                            .arg(draftId, given, entry.image));
+        const Config config;
+        KeepSettings settings;
+        settings.draftId = draftId;
+        settings.theme = omarchy.slug();
+        settings.colorPass = config.colorPass();
+        settings.format = config.format();
+        settings.jpegQuality = config.jpegQuality();
+        KeepResult kept;
+        if (const int status = runKeep(settings, paths, command.json(), &kept); status != Ok)
+            return status;
+        file = kept.installed;
+        object = keptJson(kept);
+    } else {
+        const QFileInfo info(given);
+        if (!info.isFile())
+            return fail(tr("No draft, final or file %1.").arg(given), Usage);
+        file = info.absoluteFilePath();
+        object.insert("path", file);
+    }
+    QString error;
+    if (!omarchy.setBackground(file, &error))
+        return fail(error);
+    if (command.json()) {
+        object.insert("set", true);
+        print(object);
+        return Ok;
+    }
+    print(stdout, file);
+    return Ok;
+}
+
 int modelsList(bool json) {
     QString catalogueError;
     const Catalogue catalogue = Catalogue::fromEnvironment(&catalogueError);
@@ -620,6 +796,8 @@ QString summary() {
               "  palette           The current theme's palette and the words it becomes\n"
               "  doctor            The engine, the GPU, the installed models, and what is missing\n"
               "  generate          Make drafts for the current theme\n"
+              "  keep <id>         Finish a draft and add it to the theme's backgrounds\n"
+              "  set <id-or-file>  Show an image as the background now\n"
               "  models [list]     The models limgen can run, installed or not\n"
               "  models pull <id>  Download a model, after showing its licence and size\n"
               "  help [command]    This summary, or one command's options\n"
@@ -627,8 +805,8 @@ QString summary() {
 }
 
 bool isCommand(const QString &word) {
-    return QStringList{"open",  "palette", "doctor", "generate", "models",
-                       "help",  "--help",  "-h",     "--version"}
+    return QStringList{"open", "palette", "doctor", "generate", "keep", "set",
+                       "models", "help", "--help", "-h", "--version"}
         .contains(word);
 }
 
@@ -642,6 +820,10 @@ int run(const QStringList &arguments, const OmarchyPaths &paths) {
         return doctor(arguments);
     if (command == "generate")
         return generate(arguments, paths);
+    if (command == "keep")
+        return keep(arguments, paths);
+    if (command == "set")
+        return set(arguments, paths);
     if (command == "models")
         return models(arguments);
     if (command == "help" || command == "--help" || command == "-h")

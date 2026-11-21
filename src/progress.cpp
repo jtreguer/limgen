@@ -39,7 +39,7 @@ void ProgressParser::parseLine(const QString &raw, QList<ProgressEvent> &events)
 
     if (const auto m = step.match(line); m.hasMatch()) {
         const int n = m.captured(1).toInt(), total = m.captured(2).toInt();
-        if (m_sampled >= m_images || total != m_steps || n < 1 || n > total)
+        if (m_sampled >= m_images || (m_steps > 0 && total != m_steps) || n < 1 || n > total)
             return;
         double seconds = m.captured(3).toDouble();
         if (m.captured(4) == "it/s" && seconds > 0)
