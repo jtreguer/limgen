@@ -30,6 +30,9 @@ Rectangle {
         asynchronous: true
         // Previews get a new file name each step; nothing gains from caching.
         cache: false
+        // The last preview stays until the next has loaded, rather than the
+        // tile going blank for a moment at every step.
+        retainWhileLoading: true
         smooth: true
         opacity: tile.discarded ? 0.15 : 1
         source: !tile.draft ? "" : tile.draft.image !== "" ? tile.draft.image : tile.draft.preview

@@ -1154,6 +1154,18 @@ test_pkgbuild_ties_limgen_to_its_engine_version() {
   done
 }
 
+test_pkgbuild_needs_qt_6_8() {
+  # The draft tiles use Image.retainWhileLoading, new in Qt 6.8; older Qt
+  # would fail to load the grid.
+  local depends makedepends
+  depends=$(pkgbuild_eval 'install() { :; }; pkgdir=/nonexistent startdir=/nonexistent srcdir=/nonexistent; package_limgen; echo " ${depends[*]} "')
+  makedepends=$(pkgbuild_eval 'echo " ${makedepends[*]} "')
+  contains "$depends" " qt6-base>=6.8 "
+  contains "$depends" " qt6-declarative>=6.8 "
+  contains "$makedepends" " qt6-base>=6.8 "
+  contains "$makedepends" " qt6-declarative>=6.8 "
+}
+
 test_pkgbuild_defines_a_package_function_per_package() {
   local pkg
   for pkg in limgen limgen-engine-vulkan limgen-engine-cuda; do
@@ -1188,6 +1200,25 @@ test_pkgbuild_keeps_build_paths_out_of_the_engine() {
   recorded=$(head -1 "$calls")
   contains "$recorded" "CFLAGS=-O2 -ffile-prefix-map=/build/src="
   contains "$recorded" "CXXFLAGS=-O2 -ffile-prefix-map=/build/src="
+}
+
+test_pkgbuild_stamps_the_engine_with_its_release() {
+  # Built from an archive, the engine cannot ask git for its version and
+  # would call itself "unknown", which limgen refuses; the PKGBUILD names
+  # the release instead, and keeps git from answering for a repository the
+  # build folder happens to sit in.
+  local bin=$T/fakebin-version calls=$T/version.calls tag commit
+  mkdir -p "$bin"
+  printf '#!/bin/sh\necho "ARGS=$*" >>"%s"\nexit 1\n' "$calls" >"$bin/cmake"
+  chmod +x "$bin/cmake"
+  status env PATH="$bin:$PATH" srcdir=/build/src bash -c 'source "$1"; build' _ "$root/pkgbuild/PKGBUILD"
+  tag=$(sed -n 's/^_sdcpp_tag=//p' "$root/pkgbuild/PKGBUILD")
+  commit=$(sed -n 's/^_sdcpp_commit=//p' "$root/pkgbuild/PKGBUILD")
+  local recorded
+  recorded=$(head -1 "$calls")
+  contains "$recorded" "-DSDCPP_BUILD_VERSION=$tag "
+  contains "$recorded" "-DSDCPP_BUILD_COMMIT=${commit:0:7} "
+  contains "$recorded" "-DGIT_EXE=OFF "
 }
 
 test_pkgbuild_installs_what_the_desktop_file_names() {

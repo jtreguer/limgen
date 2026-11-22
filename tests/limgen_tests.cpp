@@ -720,6 +720,8 @@ private slots:
     void keeper_colorTargets_data();
     void keeper_colorTargets();
     void keeper_colorPassMovesTheColourTowardTheBackgrounds();
+    void keeper_paletteCastComesFromTheBaseTones();
+    void keeper_recordedPaletteCastComesFromTheBaseTones();
     void keeper_jpegQualityAndComment();
     void keeper_alreadyKeptIsReportedAsynchronously();
     void keeper_cancelDuringTheUpscale();
@@ -9223,6 +9225,53 @@ void LimgenTests::keeper_colorPassMovesTheColourTowardTheBackgrounds() {
     // Half way between, on every channel.
     QVERIFY2(half.red() > off.red() + 30 && half.red() < full.red() - 30, qPrintable(half.name()));
     QVERIFY(half.blue() < off.blue() - 20 && half.blue() > full.blue() + 20);
+}
+
+void LimgenTests::keeper_paletteCastComesFromTheBaseTones() {
+    // A theme without backgrounds: the cast comes from its background and
+    // foreground, not its accents, which are highlights. Neutral base tones
+    // with a bright yellow and red accent pull the fake upscaler's blue-grey
+    // (90, 110, 140) toward neutral grey, not toward yellow.
+    KeepRig rig;
+    const QByteArray toml = tomlWith("#303030", "#d0d0d0", "#ffd60a", "red = \"#ff2020\"\nyellow = \"#ffd60a\"\n");
+    QVERIFY(writeFile(rig.sb.fixture.themes + "/night-city/colors.toml", toml));
+    QVERIFY(writeFile(rig.sb.fixture.state + "/theme/colors.toml", toml));
+    KeepSettings settings = rig.settings();
+    settings.colorPass = 1.0;
+    KEEP_AND_WAIT(rig, settings);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.run.result.final.metadata["finish"].toObject()["colorTarget"].toString(), QString("palette"));
+    const QColor centre = QImage(rig.run.result.installed).pixelColor(160, 90);
+    double lab[3];
+    ColorPass::toLab(centre.rgb(), lab);
+    QVERIFY2(qAbs(lab[1]) < 3 && qAbs(lab[2]) < 3, qPrintable(centre.name()));
+}
+
+void LimgenTests::keeper_recordedPaletteCastComesFromTheBaseTones() {
+    // The same when the palette comes from the draft's own record (its theme
+    // has no colors.toml): the accents in the record do not tint the image.
+    KeepRig rig;
+    QFile::remove(rig.sb.fixture.themes + "/night-city/colors.toml");
+    QFile::remove(rig.sb.fixture.state + "/theme/colors.toml");
+    DraftRecord record = fullRecord();
+    record.palette = QJsonObject{{"background", "#303030"},
+                                 {"foreground", "#d0d0d0"},
+                                 {"accent", "#ffd60a"},
+                                 {"red", "#ff2020"}};
+    record.width = 64;
+    record.height = 48;
+    rig.draft = Library(rig.sb.library()).addDraft(makePng(rig.sb.fixture.root.path() + "/recorded.png", 64, 48), record);
+    QVERIFY(rig.draft.isValid());
+    KeepSettings settings = rig.settings();
+    settings.draftId = rig.draft.id;
+    settings.colorPass = 1.0;
+    KEEP_AND_WAIT(rig, settings);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.run.result.final.metadata["finish"].toObject()["colorTarget"].toString(), QString("palette"));
+    const QColor centre = QImage(rig.run.result.installed).pixelColor(160, 90);
+    double lab[3];
+    ColorPass::toLab(centre.rgb(), lab);
+    QVERIFY2(qAbs(lab[1]) < 3 && qAbs(lab[2]) < 3, qPrintable(centre.name()));
 }
 
 void LimgenTests::keeper_jpegQualityAndComment() {

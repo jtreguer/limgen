@@ -1,7 +1,6 @@
 # limgen
 
-<!-- The screenshot of limgen at work comes with the first release: real
-drafts, a made-up subject and Omarchy's default accent. -->
+![limgen with four drafts of "oil rig at dusk" for a dark theme](docs/screenshot.jpg)
 
 limgen (Local IMage GENeration) makes desktop backgrounds for the current
 [Omarchy](https://omarchy.org) theme with an image model that runs on your own

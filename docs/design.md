@@ -5,7 +5,7 @@ Omarchy theme with an image model that runs on the user's own machine. This
 document says what it does and why. `technical.md` says how, and
 `models.md` records which models it runs and why they were chosen.
 
-Status: milestones L0 (engine spike), L1 (skeleton), L2 (engine), L3 (downloads), L4 (the window), L5 (keeping), L6 (variations, library) and L7 (packaging) done, L8 (the first release) next.
+Status: milestones L0 (engine spike), L1 (skeleton), L2 (engine), L3 (downloads), L4 (the window), L5 (keeping), L6 (variations, library), L7 (packaging) and L8 (the first release, `v0.1.0`) done.
 
 ## 1. Purpose
 
@@ -231,8 +231,8 @@ layers, each optional after the first:
    for themes that already have one good background.
 3. **Colour pass.** After generation, a colour transfer in Lab space moves
    the image's colour statistics toward the theme's (from its existing
-   backgrounds when there are any, from the palette otherwise, which only
-   moves the colour cast). It has a strength slider, defaults to light
+   backgrounds when there are any, otherwise from the palette's background
+   and foreground, which only move the colour cast). It has a strength slider, defaults to light
    (0.3), and never runs on the stored draft, only on the final copy.
 
 ## 10. Omarchy integration

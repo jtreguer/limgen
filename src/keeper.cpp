@@ -164,19 +164,25 @@ Keeper::Outcome Keeper::prepare(const KeepSettings &settings, const EngineProbe 
 
     // The colour pass aims at the theme's own backgrounds when it has any,
     // and at its palette otherwise: from its colors.toml, or, for the theme
-    // the draft was made for, from the draft's record.
+    // the draft was made for, from the draft's record. Of the palette only
+    // the base tones count, the background and foreground: the accents are
+    // highlights, and a bright yellow accent would otherwise tint the whole
+    // image yellow (seen in the first real keeps).
+    static const QStringList baseTones{"background", "foreground"};
     if (settings.colorPass > 0 && !settings.theme.isEmpty()) {
         m_backgrounds = omarchy.themeBackgrounds(settings.theme);
         QFile colors(omarchy.themeDirectory(settings.theme) + "/colors.toml");
         if (colors.open(QIODevice::ReadOnly)) {
             const Palette palette = Palette::fromToml(QString::fromUtf8(colors.readAll()));
             for (const PaletteColor &colour : palette.colors)
-                m_palette << QColor(colour.hex);
+                if (baseTones.contains(colour.role))
+                    m_palette << QColor(colour.hex);
         }
         const QJsonObject made = draft.value("theme").toObject();
         if (m_palette.isEmpty() && made.value("slug").toString() == settings.theme)
-            for (const QJsonValue &hex : made.value("palette").toObject())
-                m_palette << QColor(hex.toString());
+            for (const QString &role : baseTones)
+                if (const QJsonValue hex = made.value("palette").toObject().value(role); hex.isString())
+                    m_palette << QColor(hex.toString());
     }
 
     m_request = EngineRequest{};

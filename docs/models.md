@@ -237,6 +237,26 @@ refineries, beached ships) worked well, interiors came out flat and
 overlit. A 2048x1152 detail pass needed sequential CPU offload once another
 process held 1.6 GB, at about 90 s per image.
 
+### First real run of the app (L8)
+
+On 22 November 2026, on the reference card with the desktop holding about
+1.3 GB, the packaged Vulkan engine (x86-64-v3 build) ran limgen end to end:
+
+| Step | Time |
+|---|---|
+| Z-Image Turbo, batch of four, first run (cold disk cache) | about 90 s |
+| Z-Image Turbo, batch of four, in the window with previews | 53 to 59 s |
+| Keeping one draft (ESRGAN x4, tile 256, cover to 2560x1440, colour pass, PNG) | 30 s |
+| Variation of a draft at 0.5, two drafts (5 of 8 steps) | 20 s |
+| FLUX.2 klein 4B, two drafts | 24 s, model loading included |
+
+The run found three faults the fake engine could not: the packaged engine
+named itself "unknown" (it reads its version from git, which an archive
+build does not have, so the PKGBUILD now passes it in); the colour pass
+toward a palette was pulled by the theme's accents (it now uses the
+background and foreground only); and previews could blank while the next
+one loaded (the tile now keeps the last one).
+
 ## 7. Sources
 
 - Leaderboard: https://artificialanalysis.ai/image/leaderboard/text-to-image/open-weights

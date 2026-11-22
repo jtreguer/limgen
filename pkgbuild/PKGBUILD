@@ -40,7 +40,8 @@ for _engine in "${_engines[@]}"; do
   pkgname+=("limgen-engine-$_engine")
 done
 
-makedepends=('qt6-base' 'qt6-declarative' 'cmake' 'ninja' 'vulkan-headers' 'spirv-headers' 'shaderc' 'vulkan-icd-loader')
+# Qt 6.8 for Image.retainWhileLoading, which the draft tiles use.
+makedepends=('qt6-base>=6.8' 'qt6-declarative>=6.8' 'cmake' 'ninja' 'vulkan-headers' 'spirv-headers' 'shaderc' 'vulkan-icd-loader')
 source=("stable-diffusion.cpp-$_sdcpp_commit.tar.gz::https://github.com/leejet/stable-diffusion.cpp/archive/$_sdcpp_commit.tar.gz"
         "ggml-$_ggml_commit.tar.gz::https://github.com/leejet/ggml/archive/$_ggml_commit.tar.gz"
         "libwebp-$_libwebp_commit.tar.gz::https://github.com/webmproject/libwebp/archive/$_libwebp_commit.tar.gz")
@@ -102,8 +103,12 @@ build() {
     # Built for x86-64-v3 (Haswell, 2013, and newer) rather than the machine
     # that builds the package. WebM is only for video, which limgen never
     # makes; WebP stays, since many themes ship WebP backgrounds.
+    # An archive has no git history for the engine to read its version from,
+    # and limgen refuses an engine that does not name its release, so the
+    # release is passed in and git is kept out of it.
     cmake -S "$(_engine_source)" -B "$srcdir/engine-$engine" -G Ninja \
       -DCMAKE_BUILD_TYPE=Release -DSD_WEBM=OFF -DGGML_NATIVE=OFF \
+      -DGIT_EXE=OFF -DSDCPP_BUILD_VERSION="$_sdcpp_tag" -DSDCPP_BUILD_COMMIT="${_sdcpp_commit:0:7}" \
       -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_BMI2=ON -DGGML_FMA=ON -DGGML_F16C=ON \
       "${_flags[@]}"
     cmake --build "$srcdir/engine-$engine" --target sd-cli
@@ -114,7 +119,7 @@ build() {
 
 package_limgen() {
   # The engine of this very release: limgen builds its arguments for it.
-  depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'qt6-imageformats' "limgen-engine=$pkgver")
+  depends=('qt6-base>=6.8' 'qt6-declarative>=6.8' 'qt6-wayland' 'qt6-imageformats' "limgen-engine=$pkgver")
   optdepends=('omarchy: the theme it makes backgrounds for, and setting them'
               'hyprland: the monitor size kept images are finished at')
   local app

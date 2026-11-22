@@ -18,9 +18,8 @@ Design done, MIT licence. Milestones L0 (the engine spike, results in
 (the engine, `limgen doctor` and `limgen generate`), L3 (model downloads,
 `limgen models`), L4 (the window), L5 (keeping, `limgen keep` and
 `limgen set`), L6 (variations, the library view, `limgen library`) and L7
-(packaging, translations, README, `limgen skill`) are done; L8 is next
-(`docs/technical.md` section 12). The README's screenshot still waits for
-real drafts on a free GPU:
+(packaging, translations, README, `limgen skill`) are done, and L8 released
+`v0.1.0` (`docs/technical.md` section 12):
 
 | # | Deliverable |
 |---|---|

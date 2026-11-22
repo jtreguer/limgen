@@ -3,14 +3,13 @@
 How limgen is built. Read `design.md` first for what it does and why. Model
 choices and benchmarks live in `models.md`.
 
-Status: milestones L0 to L7 done, L8 next. The README's screenshot waits
-for real drafts (L7 had no free GPU) and comes before L8. Section 12 lists the
-milestones.
+Status: milestones L0 to L8 done; `v0.1.0` is released. Section 12 lists
+the milestones.
 
 ## 1. Stack
 
-- C++17, Qt 6 (Core, Gui, Qml, Quick, QuickControls2, DBus, Network,
-  Concurrent), qmake6 and make. Material style, as Omarchy's own apps.
+- C++17, Qt 6.8 or newer (Core, Gui, Qml, Quick, QuickControls2, DBus,
+  Network, Concurrent), qmake6 and make. Material style, as Omarchy's own apps.
 - No Python, no PyTorch at runtime.
 - Engine: stable-diffusion.cpp's `sd-cli` (https://github.com/leejet/stable-diffusion.cpp),
   pinned to one release (`master-1106-532d2c1`, 15 November 2026), built by
@@ -156,8 +155,10 @@ README.md  LICENSE  .gitignore
   and spread move toward the target's, blended with the image at the
   strength. The target is the theme's own backgrounds (not those added to
   the user folder, limgen's included, so kept images do not pull the next
-  ones), sampled small; without any, the palette, which moves only the
-  colour cast (the a and b means), since five colours say nothing reliable
+  ones), sampled small; without any, the palette's base tones (its
+  background and foreground, not the accents, which are highlights and
+  tinted the whole image in the first real keeps), which move only the
+  colour cast (the a and b means), since two colours say nothing reliable
   about an image's lightness or contrast. The spread is scaled by at most a
   factor of two either way.
 - **Resample** (pure). Lanczos-3 resize, done across and then down in
@@ -546,7 +547,13 @@ cover the window's strings and leave the command-line ones out.
   language file is read from `$XDG_CONFIG_HOME/omarchy/language`). Tests
   never read or write the real theme folders.
 - Window checks: the offscreen QML harness from the Omarchy app conventions,
-  screenshots with the default accent, and one language switch.
+  screenshots with the default accent, and one language switch. Offscreen,
+  Qt Quick falls back to software rendering, which leaves out the shader
+  layer Material draws an enabled button's fill with; the README's
+  screenshot was taken from the real display instead, with the harness's
+  window opened on a hidden Hyprland special workspace (`hyprctl eval
+  'hl.exec_cmd(cmd, { workspace = "special:x silent", float = true, size =
+  "1200 820" })'`), so it renders on the GPU without showing.
 - Real engine runs are manual (they need a GPU and downloaded models) and are
   recorded in `models.md`.
 
