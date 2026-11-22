@@ -9,6 +9,8 @@
         <file alias="SetupPanel.qml">SetupPanel.qml</file>
         <file alias="ModelPicker.qml">ModelPicker.qml</file>
         <file alias="FullView.qml">FullView.qml</file>
+        <file alias="BackgroundColumn.qml">BackgroundColumn.qml</file>
+        <file alias="LibraryView.qml">LibraryView.qml</file>
         <file alias="i18n/en.json">i18n/en.json</file>
         <file alias="models.json">models.json</file>
     </qresource>

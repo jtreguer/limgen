@@ -16,8 +16,9 @@ silently picking one, and update the docs in the same change as the code.
 Design done, MIT licence. Milestones L0 (the engine spike, results in
 `docs/models.md` section 6), L1 (the skeleton and `limgen palette`), L2
 (the engine, `limgen doctor` and `limgen generate`), L3 (model downloads,
-`limgen models`), L4 (the window) and L5 (keeping, `limgen keep` and
-`limgen set`) are done; L6 is next (`docs/technical.md` section 12):
+`limgen models`), L4 (the window), L5 (keeping, `limgen keep` and
+`limgen set`) and L6 (variations, the library view, `limgen library`) are
+done; L7 is next (`docs/technical.md` section 12):
 
 | # | Deliverable |
 |---|---|

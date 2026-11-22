@@ -7,6 +7,8 @@
 It answers --version, --help and --list-devices like the pinned release,
 prints progress in sd-cli's format (carriage-return redraws and all), and
 writes solid-colour PNGs of the requested size, a colour per seed. With
+--init-img and --strength it runs image to image as the pinned release
+does: it announces "target t_enc is N steps" and samples N + 1. With
 -M upscale it writes a PNG four times the size of the input, in one colour,
 counting tiles as the real upscaler does. Model files must exist, as for the
 real engine, but their contents are not read.
@@ -157,6 +159,13 @@ def main(args):
     output = option(args, "--output", "-o", default="output.png")
     preview_path = option(args, "--preview-path") if option(args, "--preview") not in (None, "none") else None
     interval = int(option(args, "--preview-interval", default="1"))
+    init_image = option(args, "--init-img", "-i")
+    if init_image is not None:
+        try:
+            png_size(init_image)
+        except (OSError, ValueError):
+            say(f"[E] load image from '{init_image}' failed --- main.cpp:880")
+            return 1
     if MODE == "wrong-size":
         width = height = 64
 
@@ -169,6 +178,20 @@ def main(args):
         return 1
 
     say("[I] loading tensors completed, taking 0.01s (read: 0.01s) --- model_loader.cpp:1437")
+    if init_image is not None:
+        # sd-cli computes this in single precision; float32 rounding is
+        # mirrored through struct.
+        strength = struct.unpack("f", struct.pack("f", float(option(args, "--strength", default="0.75"))))[0]
+        t_enc = int(struct.unpack("f", struct.pack("f", steps * strength))[0])
+        say(f"[I] target t_enc is {t_enc} steps --- image.cpp:245")
+        # With tiling, encoding the source prints tile progress in the same
+        # format as sampling steps. The count here is the sampling count on
+        # purpose: the worst case for telling them apart.
+        if "--vae-tiling" in args:
+            for n in range(1, t_enc + 2):
+                progress(n, t_enc + 1)
+        say("[I] encode_first_stage completed, taking 0.01s --- image.cpp:509")
+        steps = t_enc + 1
     previews = 0
     for image in range(count):
         for step in range(1, steps + 1):

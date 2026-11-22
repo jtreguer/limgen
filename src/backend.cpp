@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QLocale>
+#include <QSet>
 #include <QUrl>
 #include <QVariantMap>
 #include <QtConcurrent/QtConcurrentRun>
@@ -65,6 +66,8 @@ Backend::Backend(Omarchy *omarchy, const QString &engineProgram, QObject *parent
 
     m_estimateTimer.setInterval(1000);
     connect(&m_estimateTimer, &QTimer::timeout, this, &Backend::updateEstimate);
+    connect(this, &Backend::sourceChanged, this, &Backend::updateEstimate);
+    connect(this, &Backend::settingsChanged, this, &Backend::updateEstimate);
 
     reload();
     refreshModel();
@@ -135,6 +138,20 @@ void Backend::reload() {
     else if (!m_themeStatus.isEmpty() && m_status == m_themeStatus)
         setStatus(QString());
     m_themeStatus = themeStatus;
+    // The left column: the theme's own backgrounds, then the user's.
+    m_backgrounds.clear();
+    const QString userFolder = m_omarchy->userBackgroundDirectory();
+    for (const QString &path : m_omarchy->themeBackgrounds() + m_omarchy->userBackgrounds()) {
+        const QString name = QFileInfo(path).fileName();
+        m_backgrounds << QVariantMap{{"path", path},
+                                     {"url", QUrl::fromLocalFile(path).toString()},
+                                     {"name", name},
+                                     {"user", !userFolder.isEmpty() && path.startsWith(userFolder + "/")},
+                                     {"limgen", name.startsWith("limgen-")}};
+    }
+    forgetMissingSource();
+    if (m_libraryLoaded)
+        loadLibrary();
     emit paletteChanged();
     // The built prompt follows the theme live; a running batch keeps the
     // theme it started with (Batch reads it once).
@@ -304,10 +321,17 @@ void Backend::setStyleIndex(int index) {
     emit stateChanged();
 }
 
+QString Backend::shownPrompt() const {
+    // A variation of a library image with nothing typed uses that image's
+    // prompt (Batch does the same), so that is the one shown.
+    const QString reused = m_source.value("prompt").toString();
+    return m_subject.trimmed().isEmpty() && !reused.isEmpty() ? reused : builtPrompt();
+}
+
 void Backend::setFullPrompt(const QString &prompt) {
-    // Text that matches the built prompt is not an edit, so the prompt keeps
-    // following the subject and the theme.
-    const bool edited = prompt != builtPrompt();
+    // Text that matches the prompt shown is not an edit, so the prompt keeps
+    // following the subject, the theme and the source.
+    const bool edited = prompt != shownPrompt();
     if (edited == m_promptEdited && (!edited || prompt == m_editedPrompt))
         return;
     m_promptEdited = edited;
@@ -336,7 +360,8 @@ bool Backend::canGenerateWith(const QString &prompt) const {
 bool Backend::canGenerate() const {
     if (m_promptEdited)
         return canGenerateWith(m_editedPrompt);
-    return !m_subject.trimmed().isEmpty() && canGenerateWith(builtPrompt());
+    // A variation needs nothing typed: it keeps its source's look.
+    return (!m_subject.trimmed().isEmpty() || !m_source.isEmpty()) && canGenerateWith(builtPrompt());
 }
 
 void Backend::generate() {
@@ -344,32 +369,36 @@ void Backend::generate() {
         return;
     // Unedited, the prompt is built when the batch starts, from the theme as
     // it is then.
-    startBatch(m_promptEdited ? m_editedPrompt : QString(), m_subject.trimmed(), m_style);
+    BatchSettings settings;
+    settings.fullPrompt = m_promptEdited ? m_editedPrompt : QString();
+    settings.subject = m_subject.trimmed();
+    settings.style = m_style;
+    settings.source = m_source.value("key").toString();
+    settings.strength = strength();
+    startBatch(settings);
 }
 
 void Backend::rerun() {
-    // The drafts are filed with the subject and style the prompt came from,
-    // not those typed since.
-    if (canRerun())
-        startBatch(m_lastPrompt, m_lastSubject, m_lastStyle);
+    // The drafts are filed with the subject, style and source the prompt
+    // came from, not those chosen since.
+    if (!canRerun())
+        return;
+    BatchSettings settings = m_lastSettings;
+    settings.fullPrompt = m_lastPrompt;
+    settings.seed.reset();
+    startBatch(settings);
 }
 
-void Backend::startBatch(const QString &fullPrompt, const QString &subject, Prompt::Style style) {
+void Backend::startBatch(BatchSettings settings) {
     if (keeping()) {
         m_batchWaiting = true;
-        m_waitingPrompt = fullPrompt;
-        m_waitingSubject = subject;
-        m_waitingStyle = style;
+        m_waitingSettings = settings;
         setStatus(tr("The batch starts when the kept image is finished."));
         emit stateChanged();
         updateEstimate();
         return;
     }
-    BatchSettings settings;
     settings.modelId = m_modelId;
-    settings.subject = subject;
-    settings.style = style;
-    settings.fullPrompt = fullPrompt;
     settings.count = draftCount;
     settings.previews = true;
 
@@ -387,8 +416,7 @@ void Backend::startBatch(const QString &fullPrompt, const QString &subject, Prom
         emit engineChanged();
     }
     m_lastPrompt = batch->request().prompt;
-    m_lastSubject = subject;
-    m_lastStyle = style;
+    m_lastSettings = settings;
     m_batchTheme = batch->themeSlug();
     // Undo covers one batch: its tiles are about to go.
     forgetActions();
@@ -421,6 +449,8 @@ void Backend::startBatch(const QString &fullPrompt, const QString &subject, Prom
                          .arg(durationText(m_batchClock.elapsed() / 1000.0));
         emit estimateChanged();
         setStatus(QString());
+        if (m_libraryLoaded)
+            loadLibrary();
         release();
     });
     connect(batch, &Batch::failed, this, [this, release](Batch::Outcome outcome, const QString &text) {
@@ -516,7 +546,7 @@ void Backend::updateEstimate() {
         text = tr("Waits for the kept image");
     } else if (running()) {
         const double elapsed = m_batchClock.elapsed() / 1000.0;
-        const int steps = m_batch->request().steps;
+        const int steps = m_batch->request().samplingSteps();
         const int remainingSteps = qMax(0, draftCount * steps - m_stepsDone);
         double remaining = -1;
         if (m_batchEstimate > 0)
@@ -528,7 +558,14 @@ void Backend::updateEstimate() {
         const CatalogueModel *model = currentModel();
         const Timing timing =
             Timings().get(Timings::key(model->id, model->levels.first().id, m_probe.gpu().backend()));
-        const double seconds = timing.estimate(draftCount, model->steps);
+        // A variation runs only part of the steps; the same formula as the
+        // engine request's works it out.
+        EngineRequest request;
+        request.steps = model->steps;
+        request.strength = Batch::strengthFor(model->steps, strength());
+        if (!m_source.isEmpty())
+            request.initImage = m_source.value("path").toString();
+        const double seconds = timing.estimate(draftCount, request.samplingSteps());
         text = seconds > 0 ? tr("About %1 for %n drafts", "", draftCount).arg(durationText(seconds))
                            : tr("The first batch measures how fast this machine is.");
     }
@@ -636,7 +673,7 @@ void Backend::nextKeep() {
     if (m_keepQueue.isEmpty()) {
         if (m_batchWaiting) {
             m_batchWaiting = false;
-            startBatch(m_waitingPrompt, m_waitingSubject, m_waitingStyle);
+            startBatch(m_waitingSettings);
         }
         return;
     }
@@ -730,6 +767,8 @@ void Backend::keepFinished(const KeepJob &job, const KeepResult &result) {
         m_undo.removeIf([&](const Action &a) { return a.kind == Action::Keep && a.serial == job.serial; });
     setDraftFor(job.index, job.draftId,
                 {{"keeping", false}, {"kept", true}, {"keptPath", result.installed}, {"set", set}});
+    if (m_libraryLoaded)
+        loadLibrary();
     emit stateChanged();
 }
 
@@ -758,6 +797,8 @@ void Backend::discard(int index) {
     m_redo.clear();
     setDraft(index, {{"discarded", true}});
     setStatus(tr("Discarded. Ctrl+Z brings it back."));
+    if (m_libraryLoaded)
+        loadLibrary();
     emit stateChanged();
 }
 
@@ -802,10 +843,13 @@ void Backend::undo() {
             m_omarchy->setBackground(action.previousBackground);
         if (action.installedByUs)
             QFile::remove(action.installed);
+        forgetMissingSource();
         setDraftFor(action.index, action.draftId, {{"kept", false}, {"keptPath", QString()}, {"set", false}});
         setStatus(tr("Removed %1 from the backgrounds.").arg(QFileInfo(action.installed).fileName()));
     }
     m_redo << action;
+    if (m_libraryLoaded)
+        loadLibrary();
     emit stateChanged();
 }
 
@@ -823,6 +867,8 @@ void Backend::redo() {
         setDraftFor(action.index, action.draftId, {{"discarded", true}});
         setStatus(tr("Discarded. Ctrl+Z brings it back."));
         m_undo << action;
+        if (m_libraryLoaded)
+            loadLibrary();
     } else if (!action.done) {
         enqueueKeep(action);
         return;
@@ -845,6 +891,8 @@ void Backend::redo() {
         setStatus(tr("Kept again as %1.").arg(QFileInfo(action.installed).fileName()));
         m_undo << action;
     }
+    if (m_libraryLoaded)
+        loadLibrary();
     emit stateChanged();
 }
 
@@ -858,4 +906,131 @@ void Backend::forgetActions() {
     m_redo.clear();
     if (had)
         emit stateChanged();
+}
+
+// ------------------------------------------------------------ variations
+
+void Backend::setStrength(double strength) {
+    if (qFuzzyCompare(1 + strength, 1 + this->strength()))
+        return;
+    m_config.setStrength(strength);
+    QString error;
+    if (!m_config.save(&error))
+        setStatus(error, true);
+    emit settingsChanged();
+}
+
+void Backend::useBackground(int index) {
+    if (index < 0 || index >= m_backgrounds.size())
+        return;
+    const QVariantMap background = m_backgrounds.at(index).toMap();
+    if (m_source.value("path") == background.value("path")) {
+        clearSource();
+        return;
+    }
+    m_source = {{"kind", "background"},
+                {"key", background.value("path")},
+                {"path", background.value("path")},
+                {"url", background.value("url")},
+                {"name", background.value("name")}};
+    emit sourceChanged();
+    emit promptChanged();
+    emit stateChanged();
+}
+
+void Backend::cycleBackground(int step) {
+    if (m_backgrounds.isEmpty())
+        return;
+    int current = -1;
+    for (int i = 0; i < m_backgrounds.size(); ++i)
+        if (m_backgrounds.at(i).toMap().value("path") == m_source.value("path"))
+            current = i;
+    const int count = int(m_backgrounds.size());
+    const int next = current < 0 ? (step > 0 ? 0 : count - 1) : ((current + step) % count + count) % count;
+    if (next != current)
+        useBackground(next);
+}
+
+void Backend::useLibrary(const QString &id) {
+    const LibraryEntry entry = Library().find(id);
+    if (!entry.isValid()) {
+        setStatus(tr("No image %1 in the library.").arg(id), true);
+        return;
+    }
+    const QString subject = entry.metadata.value("subject").toString();
+    m_source = {{"kind", "library"},
+                {"key", entry.id},
+                {"path", entry.image},
+                {"url", QUrl::fromLocalFile(entry.image).toString()},
+                {"name", subject.isEmpty() ? entry.id : subject},
+                {"prompt", entry.metadata.value("prompt").toString()}};
+    emit sourceChanged();
+    emit promptChanged();
+    emit stateChanged();
+}
+
+void Backend::clearSource() {
+    if (m_source.isEmpty())
+        return;
+    m_source.clear();
+    emit sourceChanged();
+    emit promptChanged();
+    emit stateChanged();
+}
+
+// A background chosen as the source goes with its file: when the theme
+// changes, or the file is removed (a keep undone).
+void Backend::forgetMissingSource() {
+    if (m_source.value("kind").toString() != "background")
+        return;
+    const QString path = m_source.value("path").toString();
+    bool listed = false;
+    for (const QVariant &background : std::as_const(m_backgrounds))
+        listed = listed || background.toMap().value("path").toString() == path;
+    if (!listed || !QFileInfo::exists(path))
+        clearSource();
+}
+
+void Backend::vary(int index) {
+    // V starts a batch; when none can start, it changes nothing either.
+    const QVariantMap draft = draftAt(index, QString());
+    if (draft.value("state").toString() != "done" || draft.value("discarded").toBool() ||
+        !canGenerateWith(builtPrompt()))
+        return;
+    useLibrary(draft.value("id").toString());
+    generate();
+}
+
+void Backend::varyLibrary(const QString &id) {
+    if (!canGenerateWith(builtPrompt()))
+        return;
+    useLibrary(id);
+    if (m_source.value("key") == id)
+        generate();
+}
+
+void Backend::loadLibrary() {
+    const QList<LibraryEntry> entries = Library().list();
+    // A draft counts as kept when a final was made from it.
+    QSet<QString> kept;
+    for (const LibraryEntry &entry : entries)
+        if (entry.metadata.value("kind").toString() == "final")
+            kept.insert(entry.metadata.value("finish").toObject().value("from").toString());
+    m_library.clear();
+    for (const LibraryEntry &entry : entries) {
+        const QString made = entry.metadata.value("theme").toObject().value("slug").toString();
+        if (!m_themeName.isEmpty() && made != m_themeName)
+            continue;
+        m_library << QVariantMap{{"id", entry.id},
+                                 {"kind", entry.metadata.value("kind").toString()},
+                                 {"image", QUrl::fromLocalFile(entry.image).toString()},
+                                 {"subject", entry.metadata.value("subject").toString()},
+                                 {"seed", entry.metadata.value("seed").toDouble()},
+                                 {"created", entry.metadata.value("created").toString()},
+                                 {"kept", kept.contains(entry.id)},
+                                 {"keptPath", QString()},
+                                 {"state", "done"}};
+    }
+    m_libraryLoaded = true;
+    emit libraryChanged();
 }

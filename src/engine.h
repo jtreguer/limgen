@@ -26,6 +26,19 @@ struct EngineRequest {
     int previewInterval = 2;
     bool vaeTiling = false;  // decode in tiles, for less video memory
 
+    // A variation: the image the drafts start from (image to image), already
+    // at width x height, and how far they may move from it. Empty for a
+    // plain batch.
+    QString initImage;
+    double strength = 0.5;
+    // How many sampling steps the engine runs. Image to image skips the
+    // first ones: the pinned release runs (int)(steps x strength) + 1, with
+    // that product in single precision, and says so ("target t_enc is N
+    // steps"), as seen in L0's runs.
+    int samplingSteps() const {
+        return initImage.isEmpty() ? steps : int(float(steps) * float(strength)) + 1;
+    }
+
     // Upscale only: the image to enlarge. The result lands in
     // outputDirectory/upscaled.png and must be width x height (four times
     // the input, for the x4 upscaler).

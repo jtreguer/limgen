@@ -3,7 +3,7 @@
 How limgen is built. Read `design.md` first for what it does and why. Model
 choices and benchmarks live in `models.md`.
 
-Status: milestones L0 to L5 done, L6 next. Section 12 lists the
+Status: milestones L0 to L6 done, L7 next. Section 12 lists the
 milestones.
 
 ## 1. Stack
@@ -49,7 +49,7 @@ src/progress.{h,cpp}    sd-cli output to progress events (pure)
 src/library.{h,cpp}     stored drafts and finals with metadata
 src/keeper.{h,cpp}      finish a draft, file the final, install it into the theme folder
 src/Main.qml            the window
-src/*.qml               PaletteBar, DraftGrid, DraftTile, PromptBar, SetupPanel, ModelPicker, FullView, HelpOverlay
+src/*.qml               PaletteBar, BackgroundColumn, DraftGrid, DraftTile, LibraryView, PromptBar, SetupPanel, ModelPicker, FullView, HelpOverlay
 src/models.json         the model catalogue, compiled in
 src/skill.md            the agent skill installed by `limgen skill install`
 src/i18n/<code>.json    translations
@@ -147,7 +147,8 @@ README.md  LICENSE  .gitignore
   PNG text chunk or a JPEG comment). The image is copied in first and the
   sidecar written after, so a crash between the two can leave an image
   without a sidecar; `find()` ignores it, and listing the library (L6) must
-  too. A discarded draft moves to `library/.discarded/`, from where undo
+  too; `list()` gives every entry newest first, without such images or
+  discarded drafts. A discarded draft moves to `library/.discarded/`, from where undo
   brings it back; it is deleted when the next batch starts or the window
   closes, and one a window left behind is deleted a day later.
 - **ColorPass** (pure). Reinhard's transfer in CIELAB: each channel's mean
@@ -174,10 +175,18 @@ README.md  LICENSE  .gitignore
   theme switch mid-batch does not change it); builds the request; runs the
   engine; files the drafts with their sidecars; removes the batch folder;
   and records its timings, unless the engine retried after running out of
-  memory (the clock then covers both attempts). With previews (the window)
-  it needs the level's tiny decoder too.
+  memory (the clock then covers both attempts) or the batch was a
+  variation (fewer steps, and the source encoded first). With previews
+  (the window) it needs the level's tiny decoder too. A variation starts
+  from a library image or any image file: the source is covered to the
+  draft size (its centre kept) as `source.png` in the batch folder, at a
+  strength from 0.1 to 0.9; a model with so few steps that the strength
+  would leave none to run gets the lowest strength that runs one, and the
+  sidecar records the strength used. With nothing typed and no edited
+  prompt, a variation of a library image reuses that image's prompt.
 - **Config** and **Timings.** `config.json` (the chosen model and style,
-  the colour pass strength, the format and the JPEG quality) and
+  the variation strength, the colour pass strength, the format and the
+  JPEG quality) and
   `bench.json` (section 7), both written beside the file and renamed.
 - **Backend.** The QObject QML talks to. It probes the engine and the GPU in
   a worker thread at start, so the window opens at once; tracks the chosen
@@ -195,8 +204,16 @@ README.md  LICENSE  .gitignore
   removes the copy from the theme folder (the final stays in the library)
   and puts the earlier background back if it was set (and is refused when
   there is no earlier one, rather than leave the desktop pointing at a
-  missing file); undoing a keep that is still running cancels it. Holds no file logic of its own. The
-  selection, full view and overlays are QML state.
+  missing file); undoing a keep that is still running cancels it. Lists
+  the current theme's backgrounds (its own, then the user's) for the left
+  column, holds the variation source (a background, a draft or a library
+  image) until it is cleared (a background also goes when the theme
+  changes or its file goes), shows a library source's prompt as the full
+  prompt while nothing is typed, and reads the library for the current
+  theme when the library view opens (and again after each batch, keep,
+  discard, undo and redo while it is loaded). V changes nothing when no
+  batch can start. Holds no file logic of its own. The selection, full view,
+  library view and overlays are QML state.
 
 ## 4. Engine
 
@@ -230,7 +247,15 @@ can be added if L0 shows `sd-cli` falls short.
   last) and `--output <batch>/draft-%d.png`. `--negative-prompt` only for
   models that use guidance (cfg above 1). The batch folder is under
   `~/.cache/limgen/` and is removed once the drafts are in the library.
-- Image to image: adds `-i <source>` (`--init-img`) and `--strength`.
+- Image to image (a variation): adds `--init-img <batch>/source.png` and
+  `--strength`. The pinned release then runs only the last
+  `(int)(steps x strength) + 1` sampling steps (the product in single
+  precision), and prints `target t_enc is N steps` first; L0's runs showed
+  3 steps for Z-Image Turbo at 0.3 and 2 for FLUX.2 klein. Progress and
+  previews count those steps, taking the engine's own figure when it
+  prints it. The source is encoded between that line and
+  `encode_first_stage completed`; with tiling (the retry) the encoding
+  prints tile lines in the same format as steps, which are not counted.
 - Upscale (keeping a draft): `-M upscale --upscale-model <esrgan> -i <draft>
   -o <keep>/upscaled.png --upscale-tile-size 256`, in a folder
   `~/.cache/limgen/keep-<random>/` removed afterwards. Its progress line
@@ -296,8 +321,9 @@ can be added if L0 shows `sd-cli` falls short.
 ## 5. Generation pipeline
 
 1. Snapshot the palette, theme slug, model and settings for the batch.
-2. Drafts: text to image (or image to image for a variation) at the model's
-   native 16:9 size, for example 1344x768 for SDXL-class models, batch of 4.
+2. Drafts: text to image (or image to image for a variation, from the
+   source covered to the same size) at the model's native 16:9 size, for
+   example 1344x768 for SDXL-class models, batch of 4.
 3. Store drafts in the library with metadata.
 4. On keep, finish: upscale with Real-ESRGAN x4plus (`sd-cli -M upscale
    --upscale-model ... --upscale-tile-size 256`), then scale to cover the
@@ -349,13 +375,13 @@ metadata.
 
 | Path | Contents |
 |---|---|
-| `~/.config/limgen/config.json` | `model` and `style`, chosen in the window; `colorPass` (0 to 1, default 0.3), `format` (`png` or `jpeg`) and `jpegQuality` (default 92) for kept images. `limgen generate` takes `--model` and `--style`, `limgen keep` `--color-pass` and `--format`, instead |
+| `~/.config/limgen/config.json` | `model` and `style`, chosen in the window; `strength` for variations (0.1 to 0.9, default 0.5); `colorPass` (0 to 1, default 0.3), `format` (`png` or `jpeg`) and `jpegQuality` (default 92) for kept images. `limgen generate` takes `--model` and `--style`, `limgen keep` `--color-pass` and `--format`, instead |
 | `~/.local/share/limgen/models/<folder>/` | downloaded model files, one folder per file group as the catalogue names it (`LIMGEN_MODELS` overrides the whole path); `<file>.part` while downloading, kept when paused |
 | `~/.local/share/limgen/models/.download.lock` | held while a download runs, so two limgen processes never write the same file |
 | `~/.local/share/limgen/library/<yyyy-mm>/<id>.{png,jpg}` and `.json` | drafts (always PNG) and finals (the output format) with metadata |
 | `~/.local/share/limgen/library/.discarded/` | discarded drafts, until undo brings them back or they are deleted |
 | `~/.local/state/limgen/bench.json` | per model, level and backend: seconds per step, the overhead of a batch (start, loading, prompt encoding, the slow first step) and decoding seconds per draft; each batch is blended in half and half, except a batch retried after running out of memory |
-| `~/.cache/limgen/batch-<random>/` | a batch's drafts and previews while it runs; removed after |
+| `~/.cache/limgen/batch-<random>/` | a batch's drafts, previews and (for a variation) its prepared source while it runs; removed after |
 | `~/.cache/limgen/keep-<random>/` | a keep's upscaled image and encoded final while it is finished; removed after |
 | `~/.config/omarchy/backgrounds/<slug>/limgen-*.{png,jpg}` | kept backgrounds (the only Omarchy path written) |
 | `~/Pictures/limgen/limgen-*.{png,jpg}` | kept images when there is no Omarchy theme (`LIMGEN_PICTURES` overrides) |
@@ -388,7 +414,10 @@ A seed remakes a draft exactly only with the same engine build and
 backend: in L0, CUDA and Vulkan gave the same composition for a seed but
 not the same pixels. The `engine` field records both.
 
-`source` holds the source image id or path and strength for variations;
+`source` holds a variation's source and the strength used:
+`{"id": "2026-11-20-a3f9c1", "strength": 0.5}` for a library image,
+`{"path": "/usr/share/omarchy/themes/.../1-night.png", "strength": 0.5}`
+for a file;
 `finish` holds the upscale method, colour pass strength, final size and
 format. A final's sidecar is its draft's, with its own `id`, `kind`
 (`final`), `created` and `size`, and:
@@ -422,10 +451,10 @@ the codes below. Hype's `src/cli.cpp` is the pattern.
 | `limgen doctor [--verify]` | engine version, backend, GPU, memory, models, problems found; exit 0 when the default model can run, 3 when not; `--verify` checks SHA-256 too |
 | `limgen models [list]` | catalogue with installed state, the size left to download and whether it runs here (free video memory now) |
 | `limgen models pull <id> [--level q4_k] [--yes]` | prints the licence, each file with its size and licence, the total and the free disk space (on stderr), then asks; without a terminal it needs `--yes` (exit 2 otherwise). Downloads the level's files and the upscaler. Exit 3 when the disk is too full, 1 on a failed download or a declined prompt, 130 on Ctrl+C, which pauses: the same command resumes |
-| `limgen generate <subject> [--count 4] [--style ...] [--model ...] [--seed ...] [--prompt <full>]` | make drafts, add them to the library, print ids and paths; exit 3 when the model is missing, the engine unusable or memory short, 1 when the engine fails, 130 on Ctrl+C (nothing kept). `--from <image> [--strength 0.5]` arrive with variations in L6 |
+| `limgen generate [<subject>] [--count 4] [--style ...] [--model ...] [--seed ...] [--prompt <full>] [--from <id-or-file> [--strength 0.5]]` | make drafts, add them to the library, print ids and paths. `--from` makes variations of a library image or an image file, at a strength from 0.1 to 0.9; the subject is then optional. Exit 2 for an unknown or unreadable source, 3 when the model is missing, the engine unusable or memory short, 1 when the engine fails, 130 on Ctrl+C (nothing kept) |
 | `limgen keep <id> [--set] [--theme <slug>] [--color-pass 0.3] [--format png\|jpeg]` | finish a draft and install it into a theme's folder; prints the path. The theme is the one the draft was made for unless `--theme` says otherwise (a script cannot be asked); strength and format default to `config.json`. A draft already there is reported, not made again. Exit 2 for an unknown draft or theme, 3 when the upscaler is missing or the engine unusable, 1 when finishing fails, 130 on Ctrl+C (nothing kept) |
 | `limgen set <id-or-file>` | `omarchy theme bg set` on it. A draft (or a final, through its draft) is kept into the current theme first; a file is set as it is |
-| `limgen library [--theme <slug>]` | list stored images |
+| `limgen library [--theme <slug>]` | the drafts and finals in the library, newest first: id, kind, the theme they were made for and the path (with `--json` also the subject, the creation time and, for a final, its draft) |
 | `limgen skill install` | install the bundled agent skill |
 
 Exit codes: 0 success, 1 error, 2 usage, 3 not runnable here (no backend,
@@ -475,8 +504,9 @@ not enough memory, model missing), 130 interrupted.
 - `bin/fake-sd-cli` stands in for the engine: it answers `--version`,
   `--help` and `--list-devices` like the pinned release, prints progress in
   its format, writes solid-colour PNGs of the requested size (a colour per
-  seed), upscales (`-M upscale`: a PNG four times the input's size, with
-  tile progress), and `FAKE_SD_CLI_MODE` makes it run out of memory (always
+  seed), runs image to image (`--init-img`, announcing and running
+  `t_enc + 1` steps as the pinned release does), upscales (`-M upscale`: a
+  PNG four times the input's size, with tile progress), and `FAKE_SD_CLI_MODE` makes it run out of memory (always
   or until `--vae-tiling`; an upscale fails the way the pinned release
   does, logging the error and exiting 0, until the tile size is 128), fail, report an error but exit 0, write the wrong
   size, hang (for cancel tests, also ignoring SIGTERM), list no GPU or report another release.

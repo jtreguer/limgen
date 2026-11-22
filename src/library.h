@@ -19,6 +19,9 @@ struct DraftRecord {
     double cfg = 1.0;
     QString sampler;
     int width = 0, height = 0;
+    // A variation's source: {"id": <library id>} or {"path": <file>}, with
+    // "strength". Empty for a plain draft.
+    QJsonObject source;
 };
 
 struct LibraryEntry {
@@ -57,6 +60,9 @@ public:
     LibraryEntry addFinal(const QString &image, QJsonObject metadata,
                           const QDateTime &created = QDateTime::currentDateTimeUtc(), QString *error = nullptr);
     LibraryEntry find(const QString &id) const;
+    // Every draft and final, newest first. An image without its sidecar
+    // (a crash between the two writes) and discarded drafts are left out.
+    QList<LibraryEntry> list() const;
 
     // A discarded draft moves to <library>/.discarded/, where restore() can
     // bring it back until purge() deletes it. Only drafts can be discarded.

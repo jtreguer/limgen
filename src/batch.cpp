@@ -1,11 +1,15 @@
 #include "batch.h"
 
+#include "resample.h"
 #include "timings.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QFileInfo>
+#include <QImageReader>
 #include <QRandomGenerator>
+#include <QTimer>
 #include <QStandardPaths>
 #include <algorithm>
 
@@ -72,6 +76,27 @@ Batch::Outcome Batch::prepare(const BatchSettings &settings, const EngineProbe &
         return refuse(Outcome::NotRunnable, tr("%1 is not installed. Missing in %2: %3. Run limgen models pull %4.")
                                                 .arg(m_model->name, modelsDirectory, names.join(", "), m_model->id));
     }
+    // A variation's source: a library image, whose prompt it can reuse, or
+    // any image file.
+    m_sourceImage.clear();
+    QJsonObject source;
+    QString sourcePrompt;
+    if (!settings.source.isEmpty()) {
+        if (Library::isValidId(settings.source)) {
+            const LibraryEntry entry = Library().find(settings.source);
+            if (!entry.isValid())
+                return refuse(Outcome::UnknownSource, tr("No image %1 in the library.").arg(settings.source));
+            m_sourceImage = entry.image;
+            sourcePrompt = entry.metadata.value("prompt").toString();
+            source.insert("id", entry.id);
+        } else {
+            m_sourceImage = QFileInfo(settings.source).absoluteFilePath();
+            source.insert("path", m_sourceImage);
+        }
+        if (!QImageReader(m_sourceImage).canRead())
+            return refuse(Outcome::UnknownSource, tr("Cannot read the image %1.").arg(settings.source));
+    }
+
     if (probe.error.kind != EngineError::None)
         return refuse(Outcome::NotRunnable, probe.error.message);
     m_gpu = Hardware::matching(Hardware::detect(), probe.gpu().description);
@@ -96,6 +121,10 @@ Batch::Outcome Batch::prepare(const BatchSettings &settings, const EngineProbe &
     Prompt::Text text = Prompt::build(settings.subject, palette, settings.style);
     if (!settings.fullPrompt.trimmed().isEmpty())
         text.positive = settings.fullPrompt.trimmed();
+    // A variation of a library image with nothing typed says again what
+    // the image was made from.
+    else if (settings.subject.trimmed().isEmpty() && !sourcePrompt.isEmpty())
+        text.positive = sourcePrompt;
     m_seed = settings.seed ? *settings.seed : QRandomGenerator::global()->bounded(1u << 31);
 
     const QString cache = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/limgen";
@@ -115,6 +144,14 @@ Batch::Outcome Batch::prepare(const BatchSettings &settings, const EngineProbe &
     m_request.previews = settings.previews;
     m_request.outputDirectory =
         QString("%1/batch-%2").arg(cache).arg(QRandomGenerator::global()->generate(), 8, 16, QChar('0'));
+    if (!m_sourceImage.isEmpty()) {
+        // A model with few steps needs at least one to change anything, so
+        // a lower strength is raised to that; the sidecar records the one
+        // used. The file is made at start().
+        m_request.initImage = m_request.outputDirectory + "/source.png";
+        m_request.strength = strengthFor(m_request.steps, settings.strength);
+        source.insert("strength", m_request.strength);
+    }
 
     m_record = DraftRecord{};
     m_record.themeSlug = palette.isValid() ? themeSlug : QString();
@@ -137,7 +174,19 @@ Batch::Outcome Batch::prepare(const BatchSettings &settings, const EngineProbe &
     m_record.sampler = m_request.sampler;
     m_record.width = m_request.width;
     m_record.height = m_request.height;
+    m_record.source = source;
     return Outcome::Ok;
+}
+
+double Batch::strengthFor(int steps, double strength) {
+    strength = qBound(minStrength, strength, maxStrength);
+    EngineRequest request;
+    request.steps = steps;
+    request.initImage = "source";
+    request.strength = strength;
+    if (steps > 0 && request.samplingSteps() < 2)
+        strength = std::min(maxStrength, std::max(strength, 1.0001 / steps));
+    return strength;
 }
 
 QString Batch::timingKey() const {
@@ -147,7 +196,7 @@ QString Batch::timingKey() const {
 double Batch::estimate() const {
     if (!m_model)
         return -1;
-    return Timings().get(timingKey()).estimate(m_request.count, m_request.steps);
+    return Timings().get(timingKey()).estimate(m_request.count, m_request.samplingSteps());
 }
 
 void Batch::start() {
@@ -157,6 +206,22 @@ void Batch::start() {
     m_stepSeconds.clear();
     m_lastSampledMs = -1;
     m_clock.start();
+    if (!m_request.initImage.isEmpty()) {
+        // The engine takes the source at the drafts' size; covering it here
+        // keeps its centre rather than squeezing it.
+        const QImage source = Resample::cover(QImage(m_sourceImage), QSize(m_request.width, m_request.height));
+        if (source.isNull() || !QDir().mkpath(m_request.outputDirectory) || !source.save(m_request.initImage)) {
+            // Reported from the event loop, as an engine failure would be.
+            QTimer::singleShot(0, this, [this] {
+                if (!m_running)
+                    return;
+                cleanUp();
+                m_running = false;
+                emit failed(Outcome::Failed, tr("Cannot prepare the image %1 for the variation.").arg(m_sourceImage));
+            });
+            return;
+        }
+    }
     m_engine->start(m_request);
 }
 
@@ -214,8 +279,9 @@ void Batch::engineFailed(const EngineError &error) {
 
 void Batch::recordTiming() {
     // After an out-of-memory retry the clock covers both attempts, which says
-    // nothing about how fast a batch runs here.
-    if (m_stepSeconds.isEmpty() || m_lastSampledMs < 0 || m_engine->retried())
+    // nothing about how fast a batch runs here. A variation runs fewer steps
+    // and encodes its source first, so it is not a measure of a batch either.
+    if (m_stepSeconds.isEmpty() || m_lastSampledMs < 0 || m_engine->retried() || !m_request.initImage.isEmpty())
         return;
     QList<double> sorted = m_stepSeconds;
     std::sort(sorted.begin(), sorted.end());

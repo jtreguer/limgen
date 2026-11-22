@@ -33,6 +33,14 @@ int Config::jpegQuality() const {
     return quality >= 1 && quality <= 100 ? quality : defaultJpegQuality;
 }
 
+double Config::strength() const {
+    const QJsonValue value = m_values.value("strength");
+    const double strength = value.toDouble(-1);
+    return value.isDouble() && strength >= 0.1 && strength <= 0.9 ? strength : defaultStrength;
+}
+
+void Config::setStrength(double strength) { m_values.insert("strength", qBound(0.1, strength, 0.9)); }
+
 QString Config::defaultFile() {
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/limgen/config.json";
 }

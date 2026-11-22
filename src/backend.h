@@ -71,6 +71,13 @@ class Backend : public QObject {
     Q_PROPERTY(bool batchWaiting READ batchWaiting NOTIFY stateChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY stateChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY stateChanged)
+    // Variations: the theme's backgrounds to start from, the chosen source,
+    // and how far the drafts may move from it.
+    Q_PROPERTY(QVariantList backgrounds READ backgrounds NOTIFY paletteChanged)
+    Q_PROPERTY(QVariantMap source READ source NOTIFY sourceChanged)
+    Q_PROPERTY(double strength READ strength WRITE setStrength NOTIFY settingsChanged)
+    // The library view: what limgen made for the current theme.
+    Q_PROPERTY(QVariantList library READ library NOTIFY libraryChanged)
     // How kept drafts are finished, saved in config.json.
     Q_PROPERTY(double colorPass READ colorPass WRITE setColorPass NOTIFY settingsChanged)
     Q_PROPERTY(int formatIndex READ formatIndex WRITE setFormatIndex NOTIFY settingsChanged)
@@ -118,7 +125,7 @@ public:
     void setStyleIndex(int index);
     // The edited prompt when the user changed it, else the one built from
     // the subject, the style and the theme, which follows them live.
-    QString fullPrompt() const { return m_promptEdited ? m_editedPrompt : builtPrompt(); }
+    QString fullPrompt() const { return m_promptEdited ? m_editedPrompt : shownPrompt(); }
     void setFullPrompt(const QString &prompt);
     bool promptEdited() const { return m_promptEdited; }
 
@@ -143,6 +150,14 @@ public:
     bool batchWaiting() const { return m_batchWaiting; }
     bool canUndo() const { return !m_undo.isEmpty(); }
     bool canRedo() const { return !m_redo.isEmpty(); }
+    QVariantList backgrounds() const { return m_backgrounds; }
+    QVariantMap source() const { return m_source; }
+    double strength() const { return m_config.strength(); }
+    void setStrength(double strength);
+    // One map per image, newest first: id, kind ("draft" or "final"),
+    // image (a file URL), subject, seed, created, kept (a draft with a
+    // final), state "done" (so the full view takes it like a draft).
+    QVariantList library() const { return m_library; }
     double colorPass() const { return m_config.colorPass(); }
     void setColorPass(double strength);
     int formatIndex() const { return m_config.format() == "jpeg" ? 1 : 0; }
@@ -178,6 +193,19 @@ public slots:
     void undo();
     void redo();
 
+    // The source of the next batch, which makes it a variation: one of the
+    // theme's backgrounds (clicking it again clears it), the next or
+    // previous one (B), or a library image.
+    void useBackground(int index);
+    void cycleBackground(int step);
+    void useLibrary(const QString &id);
+    void clearSource();
+    // V: a variation batch of a draft in the grid, or of a library image.
+    void vary(int index);
+    void varyLibrary(const QString &id);
+    // Reads the library for the current theme into `library`.
+    void loadLibrary();
+
 signals:
     void paletteChanged();
     void statusChanged();
@@ -187,6 +215,8 @@ signals:
     void promptChanged();
     void stateChanged();
     void settingsChanged();
+    void sourceChanged();
+    void libraryChanged();
     void themeChoiceNeeded(int index, const QString &madeFor, const QString &current, bool set);
     void draftsChanged();
     void estimateChanged();
@@ -199,7 +229,7 @@ private:
 
     QString builtPrompt() const;
     bool canGenerateWith(const QString &prompt) const;
-    void startBatch(const QString &fullPrompt, const QString &subject, Prompt::Style style);
+    void startBatch(BatchSettings settings);
 
     // One keep in the queue, or running.
     struct KeepJob {
@@ -229,6 +259,8 @@ private:
     void setDraftFor(int index, const QString &id, const QVariantMap &changes);
     void setBackgroundFor(Action &action);
     void forgetActions();
+    void forgetMissingSource();
+    QString shownPrompt() const;
     void setStatus(const QString &status, bool error = false);
     void refreshModel();
     void updateEstimate();
@@ -266,13 +298,18 @@ private:
 
     std::unique_ptr<Batch> m_batch;
     QString m_lastPrompt;
-    QString m_lastSubject;
-    Prompt::Style m_lastStyle = Prompt::defaultStyle;
+    BatchSettings m_lastSettings;
     QString m_batchTheme;
     // A batch asked for while keeps run starts when they are done.
     bool m_batchWaiting = false;
-    QString m_waitingPrompt, m_waitingSubject;
-    Prompt::Style m_waitingStyle = Prompt::defaultStyle;
+    BatchSettings m_waitingSettings;
+    // The variation source: kind ("background" or "library"), key (what
+    // the batch is given: a path or a library id), path, url, name. Empty
+    // for a plain batch.
+    QVariantMap m_source;
+    QVariantList m_backgrounds;
+    QVariantList m_library;
+    bool m_libraryLoaded = false;
 
     std::unique_ptr<Keeper> m_keeper;
     KeepJob m_keepJob;

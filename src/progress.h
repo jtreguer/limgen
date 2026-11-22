@@ -38,11 +38,18 @@ public:
     QList<ProgressEvent> finish();
 
     int sampled() const { return m_sampled; }
+    // The sampling steps per image: as constructed, or as an image-to-image
+    // run announced them.
+    int steps() const { return m_steps; }
 
 private:
     void parseLine(const QString &line, QList<ProgressEvent> &events);
 
     int m_images, m_steps;
     int m_sampled = 0;
+    // Image to image encodes its source between the t_enc line and
+    // "encode_first_stage completed"; with tiling, that prints tile lines
+    // in the same format as steps, which are not steps.
+    bool m_encoding = false;
     QByteArray m_pending;
 };

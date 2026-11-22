@@ -30,7 +30,8 @@ Rectangle {
             if (!view.draft)
                 return ""
             const seed = qsTr("Seed %1").arg(Number(view.draft.seed).toLocaleString(Qt.locale(), 'f', 0))
-            return view.draft.kept ? qsTr("%1 · kept as %2").arg(seed).arg(view.draft.keptPath.split("/").pop()) : seed
+            return view.draft.kept && view.draft.keptPath ? qsTr("%1 · kept as %2").arg(seed).arg(view.draft.keptPath.split("/").pop())
+                                                          : seed
         }
     }
 

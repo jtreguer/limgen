@@ -5,7 +5,7 @@ Omarchy theme with an image model that runs on the user's own machine. This
 document says what it does and why. `technical.md` says how, and
 `models.md` records which models it runs and why they were chosen.
 
-Status: milestones L0 (engine spike), L1 (skeleton), L2 (engine), L3 (downloads), L4 (the window) and L5 (keeping) done, L6 next.
+Status: milestones L0 (engine spike), L1 (skeleton), L2 (engine), L3 (downloads), L4 (the window), L5 (keeping) and L6 (variations, library) done, L7 next.
 
 ## 1. Purpose
 
@@ -152,11 +152,16 @@ finish a draft in a few minutes.
 
 ### 7.3 Variations of an existing background
 
-The theme's existing backgrounds are listed in the window. Selecting one and
-pressing V makes a batch that keeps its colours and layout while changing
-details, or, at a higher strength, the subject typed in the prompt field.
-This is the quickest way to get more backgrounds that clearly belong to a
-theme.
+The theme's existing backgrounds are listed in the window. Selecting one
+(a click, or B and Shift+B to step through them) makes it the source:
+the next batch keeps its colours and layout while changing details, or,
+at a higher strength, follows the subject typed in the prompt field. V
+does the same with the selected draft, or with an image in the library
+(L). The source stays for the following batches until it is cleared
+(Clear, or Esc once nothing else is open); a background also stops being
+the source when the theme changes. With nothing typed, a library image's
+variations reuse its prompt, which the full prompt (P) then shows. This is the quickest way to get more
+backgrounds that clearly belong to a theme.
 
 ### 7.4 Theme switch while open
 
@@ -181,11 +186,12 @@ rounding, as in Omarchy's own apps.
 - **Left column:** the theme's existing backgrounds (stock and user), small,
   scrollable. Selecting one makes it the source for a variation.
 - **Centre:** the current batch as a 2x2 grid of drafts with progress and a
-  live preview while each one is made, or a single image full size.
+  live preview while each one is made, or a single image full size, or
+  the library: everything made for the current theme, newest first.
 - **Bottom:** the subject field, the style preset, the editable full prompt
   and how kept images are finished (colour pass strength, PNG or JPEG),
-  folded together by default (P), strength (shown for variations),
-  Generate.
+  folded together by default (P), the variation source with its strength
+  (shown for variations), Generate.
 - A status line for errors and estimates.
 
 Shortcuts:
@@ -193,12 +199,14 @@ Shortcuts:
 | Key | Action |
 |---|---|
 | Space | Generate (or Enter in the subject field) |
-| Esc | Cancel the running batch, or close full screen |
+| Esc | Close full screen or the library, leave a field, cancel the running batch, or clear the variation source |
 | Arrow keys | Move between drafts |
 | F | Full screen view of the selected image |
 | K | Keep: finish and add to the theme's backgrounds |
 | S | Keep and set as the current background |
 | V | Variation batch from the selected image |
+| B / Shift+B | Make the theme's next or previous background the variation source |
+| L | Show or hide the library |
 | R | Same prompt, new seeds |
 | D | Discard the selected draft (Ctrl+Z restores it) |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo the last discard or keep |

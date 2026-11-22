@@ -18,6 +18,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPainter>
 #include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -776,6 +777,66 @@ private slots:
     void qml_themeDialogKeepsIntoTheChosenTheme();
     void qml_quitWhileKeepingAsksFirst();
     void qml_finishSettingsUnderTheFullPrompt();
+
+    // ---- L6: image to image, the library, variations ----------------------
+    void engine_samplingStepsFollowTheEnginesFloatMaths_data();
+    void engine_samplingStepsFollowTheEnginesFloatMaths();
+    void engine_argumentsForAVariation();
+    void progress_targetLineSetsTheStepsPerImage();
+    void progress_vaeTileLinesAreNotStepsInAVariation();
+    void engine_imageToImageRunWithTheFake();
+    void engine_imageToImagePreviewsFollowTheShortRun();
+    void engine_imageToImageNeedsAReadableSource();
+    void library_listIsNewestFirstAcrossMonths();
+    void library_listSkipsWhatIsNotAnEntry();
+    void library_sidecarRecordsTheSource();
+    void batch_variationFromAFileRecordsItsSource();
+    void batch_retriedVariationCountsOnlySamplingSteps();
+    void batch_variationFromALibraryIdAndWhenItsPromptIsReused();
+    void batch_variationStrengthIsClampedAndRaised();
+    void batch_variationSourceProblemsComeInOrder();
+    void batch_variationSourceIsCoveredToTheDraftSize();
+    void batch_variationRecordsNoTimingAndEstimatesItsSteps();
+    void batch_variationSourceThatCannotBePrepared();
+    void cli_generateFromAFileAndALibraryImage();
+    void cli_generateFromArgumentErrors_data();
+    void cli_generateFromArgumentErrors();
+    void cli_libraryListsNewestFirst();
+    void cli_libraryJsonAndTheme();
+    void cli_libraryEmptyAndErrors();
+
+    // ---- L6: Backend, variations and the library ---------------------------
+    void backend_backgroundsAreTheThemesOwnThenTheUsers();
+    void backend_backgroundsRefreshAfterAKeepAndAThemeSwitch();
+    void backend_useBackgroundTogglesTheSource();
+    void backend_cycleBackgroundBothWaysAndWraps();
+    void backend_aBackgroundSourceGoesWithItsFile();
+    void backend_libraryFollowsDiscardUndoAndRedo();
+    void backend_varyDoesNothingWhenNoBatchCanStart();
+    void backend_fullPromptShowsTheReusedPrompt();
+    void batch_strengthForRaisesAndClamps();
+    void backend_estimateUsesTheRaisedStrength();
+    void backend_varyAndVaryLibrary();
+    void backend_rerunAndTheWaitingBatchKeepTheSource();
+    void backend_canGenerateWithAnEmptySubjectOnlyWithASource();
+    void backend_loadLibraryFiltersByThemeAndFlagsKept();
+    void backend_strengthIsSavedToConfig();
+
+    // ---- L6: the window, variations and the library ------------------------
+    void qml_keysBAndShiftBCycleTheBackgrounds();
+    void qml_clickInTheLeftColumnChoosesAndClears();
+    void qml_vVariesTheSelectedDraftAndTheSourceRowShows();
+    void qml_strengthSliderSavesWhenLetGo();
+    void qml_libraryOpensAndClosesWithL();
+    void qml_arrowsMoveByRowInTheLibrary();
+    void qml_theLibraryTakesTheClicks();
+    void qml_closingTheLibraryClosesItsFullView();
+    void qml_librarySelectionFollowsTheList();
+    void qml_aKeptLibraryDraftNamesNoEmptyFile();
+    void qml_fShowsTheLibraryImage();
+    void qml_vInTheLibraryVariesTheSelectedImage();
+    void qml_keepSetDiscardDoNothingWhileTheLibraryIsOpen();
+    void qml_escChainOrder();
 
 private:
     std::unique_ptr<Sandbox> m_global;
@@ -4709,7 +4770,7 @@ struct World {
     const ModelLevel &level(const QString &model) const { return catalogue.model(model)->levels.first(); }
 };
 
-World makeWorld() {
+World makeWorld(int steps = 1) {
     World world;
     const struct {
         const char *key, *folder, *name;
@@ -4728,14 +4789,14 @@ World makeWorld() {
                                       {"licence", "MIT"}};
         world.blobs.insert(spec.key, blob);
     }
-    auto model = [](const char *id, bool isDefault, const QJsonObject &levelFiles) {
+    auto model = [steps](const char *id, bool isDefault, const QJsonObject &levelFiles) {
         return QJsonObject{{"id", id},
                            {"name", id},
                            {"publisher", "Test"},
                            {"default", isDefault},
                            {"licence", QJsonObject{{"id", "MIT"}, {"summary", "s"}, {"url", "https://x.test/l"}}},
                            {"native", QJsonArray{64, 64}},
-                           {"steps", 1},
+                           {"steps", steps},
                            {"levels", QJsonArray{QJsonObject{{"id", "q"}, {"minFreeMiB", 1}, {"files", levelFiles}}}}};
     };
     QJsonObject root{{"engine", "x"},
@@ -7367,12 +7428,12 @@ struct QmlRig {
 
     // With `small`, the model and the upscaler come from the small test
     // catalogue (64x64 drafts), so batches and keeps are quick.
-    explicit QmlRig(bool installed = true, const QString &engineProgram = fakeEngine, bool small = false)
+    explicit QmlRig(bool installed = true, const QString &engineProgram = fakeEngine, bool small = false, int steps = 1)
         : rig(true, installed && !small) {
         qmlWarnings = &warnings;
         previousHandler = qInstallMessageHandler(collectQmlWarnings);
         if (small) {
-            const World world = makeWorld();
+            const World world = makeWorld(steps);
             const QString catalogueFile = rig.sb.fixture.root.path() + "/catalogue.json";
             writeFile(catalogueFile, world.json);
             qputenv("LIMGEN_CATALOGUE", catalogueFile.toUtf8());
@@ -9775,11 +9836,12 @@ namespace {
 // and "other" available, and a 320x180 monitor, so batches and keeps are quick.
 struct KeepBackendRig {
     Sandbox sb;
-    World world = makeWorld();
+    World world;
     std::unique_ptr<Omarchy> omarchy;
     std::unique_ptr<Backend> backend;
 
-    explicit KeepBackendRig(bool theme = true) {
+    // `steps` is the model's step count: variations need a few to run fewer of.
+    explicit KeepBackendRig(bool theme = true, int steps = 1) : world(makeWorld(steps)) {
         const QString catalogueFile = sb.fixture.root.path() + "/catalogue.json";
         writeFile(catalogueFile, world.json);
         qputenv("LIMGEN_CATALOGUE", catalogueFile.toUtf8());
@@ -9795,11 +9857,11 @@ struct KeepBackendRig {
         backend.reset();
         omarchy.reset();
     }
-    void create() {
+    void create(const QString &engine = fakeEngine) {
         settleBackend(backend.get());
         backend.reset();
         omarchy = std::make_unique<Omarchy>(sb.paths());
-        backend = std::make_unique<Backend>(omarchy.get(), fakeEngine);
+        backend = std::make_unique<Backend>(omarchy.get(), engine);
         for (int i = 0; i < 400 && !(backend->engineReady() || !backend->engineProblem().isEmpty()); ++i)
             QTest::qWait(50);
     }
@@ -10606,7 +10668,11 @@ void LimgenTests::qml_finishSettingsUnderTheFullPrompt() {
     QmlRig q(true, fakeEngine, true);
     LOAD_WINDOW(q);
     QTRY_VERIFY_WITH_TIMEOUT(q.backend().engineReady(), 20000);
-    QQuickItem *slider = q.itemInheriting("QQuickSlider");
+    // The colour pass slider; the variation strength has one too.
+    QQuickItem *slider = nullptr;
+    for (QQuickItem *item : q.items())
+        if (item->objectName() == "colorPassSlider")
+            slider = item;
     QVERIFY(slider);
     QList<QQuickItem *> combos;
     for (QQuickItem *item : q.items())
@@ -10630,6 +10696,1665 @@ void LimgenTests::qml_finishSettingsUnderTheFullPrompt() {
     NO_QML_WARNINGS(q);
     QTest::keyClick(q.window, 'p');
     QTRY_VERIFY(!slider->isVisible());
+}
+
+// ============================== L6: image to image ========================
+
+namespace {
+
+QDateTime at(int month, int day, int hour, int minute = 0) {
+    return QDateTime(QDate(2026, month, day), QTime(hour, minute), QTimeZone::UTC);
+}
+
+// A draft with a given creation time and theme, for library listings.
+LibraryEntry draftAt(Library &library, const QString &directory, const QDateTime &created,
+                     const QString &theme = "night-city", const QString &subject = "oil rig") {
+    DraftRecord record = fullRecord();
+    record.subject = subject;
+    record.themeSlug = theme;
+    if (theme.isEmpty()) {
+        record.themeMode.clear();
+        record.palette = QJsonObject();
+    }
+    return library.addDraft(makePng(directory + "/s-" + QString::number(QRandomGenerator::global()->generate()) + ".png"),
+                            record, created);
+}
+
+LibraryEntry finalAt(Library &library, const QString &directory, const QDateTime &created, const QString &from,
+                     const QString &theme = "night-city", const QString &format = "png") {
+    const QString file = directory + "/f-" + QString::number(QRandomGenerator::global()->generate()) + "." + format;
+    if (format == "png")
+        savePng(solidImage(QSize(8, 8), Qt::blue), file);
+    else
+        solidImage(QSize(8, 8), Qt::blue).save(file, "JPEG");
+    QJsonObject metadata{{"subject", "oil rig"},
+                         {"finish", QJsonObject{{"from", from}}},
+                         {"theme", theme.isEmpty() ? QJsonValue() : QJsonValue(QJsonObject{{"slug", theme}})}};
+    return library.addFinal(file, metadata, created);
+}
+
+} // namespace
+
+void LimgenTests::engine_samplingStepsFollowTheEnginesFloatMaths_data() {
+    QTest::addColumn<int>("steps");
+    QTest::addColumn<double>("strength");
+    QTest::addColumn<bool>("variation");
+    QTest::addColumn<int>("expected");
+    // (int)(steps x strength) + 1, the product in single precision, as the pinned release runs it.
+    QTest::newRow("Z-Image 8 x 0.3") << 8 << 0.3 << true << 3;
+    QTest::newRow("8 x 0.5") << 8 << 0.5 << true << 5;
+    QTest::newRow("10 x 0.7") << 10 << 0.7 << true << 8;
+    QTest::newRow("klein 4 x 0.25") << 4 << 0.25 << true << 2;
+    QTest::newRow("8 x 0.1 runs one step") << 8 << 0.1 << true << 1;
+    QTest::newRow("8 x 0.9") << 8 << 0.9 << true << 8;
+    QTest::newRow("4 x 0.1 runs one step") << 4 << 0.1 << true << 1;
+    QTest::newRow("4 x 0.5") << 4 << 0.5 << true << 3;
+    QTest::newRow("a plain batch ignores the strength") << 8 << 0.3 << false << 8;
+    QTest::newRow("a plain batch ignores 0.9") << 4 << 0.9 << false << 4;
+}
+
+void LimgenTests::engine_samplingStepsFollowTheEnginesFloatMaths() {
+    QFETCH(int, steps);
+    QFETCH(double, strength);
+    QFETCH(bool, variation);
+    QFETCH(int, expected);
+    EngineRequest request;
+    request.steps = steps;
+    request.strength = strength;
+    if (variation)
+        request.initImage = "/cache/batch-1/source.png";
+    QCOMPARE(request.samplingSteps(), expected);
+}
+
+void LimgenTests::engine_argumentsForAVariation() {
+    EngineRequest request = fullRequest();
+    QVERIFY(!SdCppEngine::arguments(request).contains("--init-img"));
+    QVERIFY(!SdCppEngine::arguments(request).contains("--strength"));
+    request.initImage = "/cache/batch-1/source.png";
+    request.strength = 0.3;
+    QStringList arguments = SdCppEngine::arguments(request);
+    QCOMPARE(valueAfter(arguments, "--init-img"), QString("/cache/batch-1/source.png"));
+    QCOMPARE(valueAfter(arguments, "--strength"), QString("0.3"));
+    // After the output option, with the rest of a batch's options unchanged.
+    QVERIFY(arguments.indexOf("--init-img") > arguments.indexOf("--output"));
+    QStringList withoutInit = arguments;
+    withoutInit.removeAt(withoutInit.indexOf("--init-img") + 1);
+    withoutInit.removeAll("--init-img");
+    withoutInit.removeAt(withoutInit.indexOf("--strength") + 1);
+    withoutInit.removeAll("--strength");
+    EngineRequest plain = request;
+    plain.initImage.clear();
+    QCOMPARE(withoutInit, SdCppEngine::arguments(plain));
+    // Both options are in the pinned engine's --help.
+    const QString help = QString::fromUtf8(dataFile("sd-cli-help.txt"));
+    for (const QString &option : QStringList{"--init-img", "--strength"}) {
+        const QRegularExpression word("(^|[\\s,])" + QRegularExpression::escape(option) + "([\\s,]|$)",
+                                      QRegularExpression::MultilineOption);
+        QVERIFY2(word.match(help).hasMatch(), qPrintable(option + " is not an option of the pinned sd-cli"));
+    }
+    request.strength = 0.55;
+    QCOMPARE(valueAfter(SdCppEngine::arguments(request), "--strength"), QString("0.55"));
+}
+
+void LimgenTests::progress_targetLineSetsTheStepsPerImage() {
+    // The engine says how many steps it runs; that wins over the count worked out before.
+    ProgressParser parser(2, 8);
+    QCOMPARE(parser.steps(), 8);
+    QVERIFY(parser.feed("[I] target t_enc is 2 steps --- image.cpp:245\n").isEmpty());
+    QCOMPARE(parser.steps(), 3);
+    // Then the engine encodes the source; with tiling its tile lines look
+    // like steps, even with the same total, and are not counted.
+    QVERIFY(parser.feed("  |=| 1/3 - 9.00it/s\n  |===| 3/3 - 9.00it/s\n").isEmpty());
+    QVERIFY(parser.feed("[I] encode_first_stage completed, taking 5.38s --- image.cpp:509\n").isEmpty());
+    QList<ProgressEvent> events = parser.feed("  |=| 1/3 - 1.00s/it\n  |==| 2/3 - 1.00s/it\n  |===| 3/3 - 1.00s/it\n"
+                                              "[I] sampling completed, taking 3s\n"
+                                              "  |=| 1/3 - 1.00s/it\n  |==| 2/3 - 1.00s/it\n  |===| 3/3 - 1.00s/it\n"
+                                              "[I] sampling completed, taking 3s\n");
+    const auto steps = ofKind(events, ProgressEvent::Step);
+    QCOMPARE(steps.size(), 6);
+    for (int k = 0; k < 6; ++k) {
+        QCOMPARE(steps[k].image, k / 3);
+        QCOMPARE(steps[k].step, k % 3 + 1);
+        QCOMPARE(steps[k].steps, 3);
+    }
+    QCOMPARE(ofKind(events, ProgressEvent::Sampled).size(), 2);
+    // A line counted for the old total is not a step any more.
+    ProgressParser again(1, 8);
+    again.feed("[I] target t_enc is 2 steps\n");
+    QVERIFY(again.feed("  |=| 1/8 - 1.00s/it\n").isEmpty());
+    // The same line in chunks of one byte.
+    ProgressParser bytes(1, 8);
+    QList<ProgressEvent> byteEvents;
+    for (const char c : QByteArray("[I] target t_enc is 4 steps\n[I] encode_first_stage completed\n"
+                                   "  |=| 1/5 - 1.00s/it\n"))
+        byteEvents += bytes.feed(QByteArray(1, c));
+    QCOMPARE(bytes.steps(), 5);
+    QCOMPARE(byteEvents.size(), 1);
+    // An upscale counts tiles of any total and keeps doing so.
+    ProgressParser tiles(1, 0);
+    tiles.feed("[I] target t_enc is 2 steps\n");
+    QCOMPARE(tiles.steps(), 0);
+    QCOMPARE(tiles.feed("  |=| 7/112 - 1.00s/it\n").size(), 1);
+}
+
+void LimgenTests::progress_vaeTileLinesAreNotStepsInAVariation() {
+    ProgressParser parser(1, 5);
+    // Encoding the source with --vae-tiling prints tile progress in the same format.
+    QList<ProgressEvent> events = parser.feed("  |==| 3/9 - 0.50s/it\n  |====| 9/9 - 0.50s/it\n"
+                                              "[I] target t_enc is 2 steps --- image.cpp:245\n"
+                                              "[I] encode_first_stage completed, taking 0.40s\n"
+                                              "  |=| 1/3 - 1.00s/it\n  |==| 2/3 - 1.00s/it\n  |===| 3/3 - 1.00s/it\n"
+                                              "[I] sampling completed, taking 3s\n");
+    const auto steps = ofKind(events, ProgressEvent::Step);
+    QCOMPARE(steps.size(), 3); // only the sampling steps
+    QCOMPARE(steps.last().steps, 3);
+    QCOMPARE(ofKind(events, ProgressEvent::Sampled).size(), 1);
+}
+
+void LimgenTests::engine_imageToImageRunWithTheFake() {
+    Sandbox sb;
+    EngineRequest request = runnableRequest(sb.fixture.root.path(), 2, 8);
+    request.initImage = sb.fixture.root.path() + "/init.png";
+    QVERIFY(savePng(solidImage(QSize(128, 96), QColor(10, 120, 200)), request.initImage));
+    request.strength = 0.3;
+    QCOMPARE(request.samplingSteps(), 3);
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    QVERIFY2(run.finished, qPrintable(run.error.message + run.error.detail));
+    QCOMPARE(run.drafts.size(), 2);
+    for (const QString &draft : run.drafts)
+        QCOMPARE(QImageReader(draft).size(), QSize(128, 96));
+    // The engine ran 3 steps per draft, not 8, and said so for the progress.
+    QCOMPARE(run.progress.size(), 6);
+    for (int k = 0; k < 6; ++k) {
+        QCOMPARE(run.progress[k].image, k / 3);
+        QCOMPARE(run.progress[k].step, k % 3 + 1);
+        QCOMPARE(run.progress[k].steps, 3);
+    }
+    QCOMPARE(run.sampled, (QList<int>{0, 1}));
+    const QStringList arguments = imageCalls(sb.fakeLog()).first();
+    QCOMPARE(valueAfter(arguments, "--init-img"), request.initImage);
+    QCOMPARE(valueAfter(arguments, "--strength"), QString("0.3"));
+    QCOMPARE(arguments, SdCppEngine::arguments(request));
+}
+
+void LimgenTests::engine_imageToImagePreviewsFollowTheShortRun() {
+    Sandbox sb;
+    EngineRequest request = runnableRequest(sb.fixture.root.path(), 2, 8);
+    request.initImage = sb.fixture.root.path() + "/init.png";
+    QVERIFY(savePng(solidImage(QSize(128, 96), Qt::red), request.initImage));
+    request.strength = 0.3;
+    request.previews = true;
+    request.previewInterval = 1;
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    QVERIFY2(run.finished, qPrintable(run.error.message + run.error.detail));
+    // 3 steps and a preview at each: 3 per draft, so the first three belong to draft 0.
+    QCOMPARE(run.previews.size(), 6);
+    QList<int> images;
+    for (const auto &preview : run.previews)
+        images << preview.first;
+    QCOMPARE(images, (QList<int>{0, 0, 0, 1, 1, 1}));
+}
+
+void LimgenTests::engine_imageToImageNeedsAReadableSource() {
+    Sandbox sb;
+    for (const QString &kind : QStringList{"missing", "not an image"}) {
+        EngineRequest request = runnableRequest(sb.fixture.root.path(), 1, 4);
+        request.initImage = sb.fixture.root.path() + "/init-" + kind.left(3) + ".png";
+        if (kind != "missing")
+            QVERIFY(writeFile(request.initImage, "this is not a PNG"));
+        request.strength = 0.5;
+        SdCppEngine engine(fakeEngine);
+        EngineRun run;
+        RUN_ENGINE(engine, run, request, 20000);
+        QVERIFY2(run.failed, qPrintable(kind));
+        QVERIFY(!run.finished);
+        QCOMPARE(int(run.error.kind), int(EngineError::Failed));
+        QVERIFY2(run.error.detail.contains("load image"), qPrintable(run.error.detail));
+    }
+}
+
+// ============================== L6: Library list ==========================
+
+void LimgenTests::library_listIsNewestFirstAcrossMonths() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    Library library(fixture.data + "/library");
+    const QString dir = fixture.root.path();
+    // Created out of order, across two months, two of them in the same second.
+    const LibraryEntry oct = draftAt(library, dir, at(10, 31, 23));
+    const LibraryEntry newer = draftAt(library, dir, at(11, 2, 10));
+    const LibraryEntry tie = draftAt(library, dir, at(11, 2, 10));
+    const LibraryEntry final = finalAt(library, dir, at(11, 15, 9), newer.id);
+    const LibraryEntry latest = draftAt(library, dir, at(11, 20, 8));
+    QVERIFY(oct.isValid() && newer.isValid() && tie.isValid() && final.isValid() && latest.isValid());
+    const QList<LibraryEntry> list = library.list();
+    QStringList ids;
+    for (const LibraryEntry &entry : list)
+        ids << entry.id;
+    // Same second: the larger id comes first.
+    const QString first = newer.id > tie.id ? newer.id : tie.id, second = newer.id > tie.id ? tie.id : newer.id;
+    QCOMPARE(ids, (QStringList{latest.id, final.id, first, second, oct.id}));
+    // Each entry is complete: image, sidecar and metadata, whichever its kind.
+    for (const LibraryEntry &entry : list) {
+        QVERIFY(QFileInfo(entry.image).isFile());
+        QVERIFY(QFileInfo(entry.sidecar).isFile());
+        QCOMPARE(entry.metadata["id"].toString(), entry.id);
+    }
+    QCOMPARE(list[1].metadata["kind"].toString(), QString("final"));
+    QCOMPARE(list[0].metadata["kind"].toString(), QString("draft"));
+    // The same, listed again, with an entry added later at the top.
+    const LibraryEntry newest = draftAt(library, dir, at(11, 21, 1));
+    QCOMPARE(library.list().first().id, newest.id);
+    QCOMPARE(library.list().size(), 6);
+}
+
+void LimgenTests::library_listSkipsWhatIsNotAnEntry() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const QString root = fixture.data + "/library", dir = fixture.root.path();
+    Library library(root);
+    const LibraryEntry good = draftAt(library, dir, at(11, 2, 10));
+    const LibraryEntry jpg = finalAt(library, dir, at(11, 3, 10), good.id, "night-city", "jpg");
+    const LibraryEntry discarded = draftAt(library, dir, at(11, 4, 10));
+    QVERIFY(library.discard(discarded.id));
+    // An image whose sidecar was never written, and a sidecar whose image is gone.
+    const QString month = root + "/2026-11";
+    QVERIFY(QFile::copy(good.image, month + "/2026-11-05-aaaaaa.png"));
+    QVERIFY(writeFile(month + "/2026-11-06-bbbbbb.json", R"({"id": "2026-11-06-bbbbbb", "kind": "draft"})"));
+    // A sidecar that names another id, one that is not JSON, and stray files.
+    QVERIFY(QFile::copy(good.image, month + "/2026-11-07-cccccc.png"));
+    QVERIFY(writeFile(month + "/2026-11-07-cccccc.json", R"({"id": "2026-11-07-dddddd"})"));
+    QVERIFY(QFile::copy(good.image, month + "/2026-11-08-eeeeee.png"));
+    QVERIFY(writeFile(month + "/2026-11-08-eeeeee.json", "not json"));
+    QVERIFY(writeFile(month + "/2026-11-09-ffffff.png.part", "partial"));
+    QVERIFY(writeFile(month + "/notes.json", R"({"id": "notes"})"));
+    // Folders that are not months: with a perfectly good entry inside.
+    for (const QString &folder : QStringList{"notes", "2026-1", "2026-11-extra", ".hidden"}) {
+        QVERIFY(QDir().mkpath(root + "/" + folder));
+        QVERIFY(QFile::copy(good.image, root + "/" + folder + "/" + good.id + ".png"));
+        QVERIFY(QFile::copy(good.sidecar, root + "/" + folder + "/" + good.id + ".json"));
+    }
+    QVERIFY(writeFile(root + "/stray-file.json", "{}"));
+    QStringList ids;
+    for (const LibraryEntry &entry : library.list())
+        ids << entry.id;
+    QCOMPARE(ids, (QStringList{jpg.id, good.id})); // the jpg final and the draft, newest first
+    QVERIFY(jpg.image.endsWith(".jpg"));
+    QCOMPARE(library.list()[0].image, jpg.image);
+    // Nothing there at all.
+    QCOMPARE(Library(fixture.root.path() + "/nowhere").list().size(), 0);
+    QCOMPARE(Library(fixture.root.path() + "/empty").list().size(), 0);
+}
+
+void LimgenTests::library_sidecarRecordsTheSource() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    Library library(fixture.data + "/library");
+    DraftRecord record = fullRecord();
+    const QString png = makePng(fixture.root.path() + "/a.png");
+    const LibraryEntry plain = library.addDraft(png, record, fixedTime);
+    QVERIFY(plain.metadata.contains("source"));
+    QVERIFY(plain.metadata["source"].isNull());
+    record.source = QJsonObject{{"id", "2026-11-20-abcdef"}, {"strength", 0.5}};
+    const LibraryEntry fromId = library.addDraft(png, record, fixedTime);
+    record.source = QJsonObject{{"path", "/themes/x/1.png"}, {"strength", 0.3}};
+    const LibraryEntry fromPath = library.addDraft(png, record, fixedTime);
+    // As written to disk, not only as returned.
+    const QJsonObject a = QJsonDocument::fromJson(readFile(fromId.sidecar)).object()["source"].toObject();
+    QCOMPARE(a["id"].toString(), QString("2026-11-20-abcdef"));
+    QCOMPARE(a["strength"].toDouble(), 0.5);
+    QVERIFY(!a.contains("path"));
+    const QJsonObject b = QJsonDocument::fromJson(readFile(fromPath.sidecar)).object()["source"].toObject();
+    QCOMPARE(b["path"].toString(), QString("/themes/x/1.png"));
+    QCOMPARE(b["strength"].toDouble(), 0.3);
+    QVERIFY(QJsonDocument::fromJson(readFile(plain.sidecar)).object()["source"].isNull());
+}
+
+// ============================== L6: Batch variations ======================
+
+void LimgenTests::batch_variationFromAFileRecordsItsSource() {
+    BatchRig rig;
+    const QString source = rig.sb.fixture.root.path() + "/themes-bg/night.png";
+    QVERIFY(savePng(solidImage(QSize(100, 50), QColor(30, 80, 160)), source));
+    BatchSettings settings = BatchRig::settings();
+    settings.source = source;
+    settings.strength = 0.5;
+    settings.seed = 9;
+    QString message;
+    QVERIFY2(rig.prepare(settings, &message) == Batch::Outcome::Ok, qPrintable(message));
+    QCOMPARE(rig.batch->source(), (QJsonObject{{"path", source}, {"strength", 0.5}}));
+    const EngineRequest &request = rig.batch->request();
+    QCOMPARE(request.initImage, request.outputDirectory + "/source.png");
+    QCOMPARE(request.strength, 0.5);
+    QCOMPARE(request.samplingSteps(), 5);
+    QVERIFY(!QFileInfo::exists(request.initImage)); // made at start
+    const QString folder = request.outputDirectory;
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.run.entries.size(), 4);
+    QCOMPARE(rig.run.progress, 20); // 4 drafts x 5 steps, not 8
+    for (const LibraryEntry &entry : rig.run.entries) {
+        const QJsonObject recorded = entry.metadata["source"].toObject();
+        QCOMPARE(recorded["path"].toString(), source);
+        QCOMPARE(recorded["strength"].toDouble(), 0.5);
+        QVERIFY(!recorded.contains("id"));
+    }
+    const QStringList arguments = imageCalls(rig.sb.fakeLog()).first();
+    QCOMPARE(valueAfter(arguments, "--init-img"), folder + "/source.png");
+    QCOMPARE(valueAfter(arguments, "--strength"), QString("0.5"));
+    QVERIFY(!QFileInfo::exists(folder)); // the prepared source goes with the batch folder
+    // The source file is not touched.
+    QCOMPARE(QImageReader(source).size(), QSize(100, 50));
+    // A plain batch has neither.
+    rig.remake();
+    QVERIFY(rig.prepare(BatchRig::settings()) == Batch::Outcome::Ok);
+    QVERIFY(rig.batch->source().isEmpty());
+    QVERIFY(rig.batch->request().initImage.isEmpty());
+    QCOMPARE(rig.batch->request().samplingSteps(), 8);
+}
+
+void LimgenTests::batch_retriedVariationCountsOnlySamplingSteps() {
+    BatchRig rig;
+    qputenv("FAKE_SD_CLI_MODE", "oom-once");
+    const QString source = rig.sb.fixture.root.path() + "/source.png";
+    QVERIFY(savePng(solidImage(QSize(100, 50), QColor(30, 80, 160)), source));
+    BatchSettings settings = BatchRig::settings();
+    settings.source = source;
+    settings.strength = 0.5;
+    QCOMPARE(int(rig.prepare(settings)), int(Batch::Outcome::Ok));
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    // The retry tiles the source's encoding, whose tile lines look like
+    // steps (here with the same total); only the sampling counts.
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 2);
+    QCOMPARE(rig.run.progress, 20);
+}
+
+void LimgenTests::batch_variationFromALibraryIdAndWhenItsPromptIsReused() {
+    BatchRig rig;
+    Library library(rig.sb.library());
+    const LibraryEntry draft = addTestDraft(library, rig.sb.fixture.root.path(), "oil rig at dusk");
+    const QString reused = fullRecord().prompt; // what the draft was made from
+    QVERIFY(!reused.isEmpty());
+    BatchSettings settings = BatchRig::settings();
+    settings.source = draft.id;
+    // Nothing typed: the image's prompt again.
+    settings.subject.clear();
+    QVERIFY(rig.prepare(settings) == Batch::Outcome::Ok);
+    QCOMPARE(rig.batch->request().prompt, reused);
+    QCOMPARE(rig.batch->source(), (QJsonObject{{"id", draft.id}, {"strength", 0.5}}));
+    QCOMPARE(rig.batch->request().strength, 0.5);
+    settings.subject = "   ";
+    QVERIFY(rig.prepare(settings) == Batch::Outcome::Ok);
+    QCOMPARE(rig.batch->request().prompt, reused);
+    // A subject typed: the prompt follows it.
+    settings.subject = "a lighthouse";
+    QVERIFY(rig.prepare(settings) == Batch::Outcome::Ok);
+    QVERIFY2(rig.batch->request().prompt.startsWith("a lighthouse, cinematic wide shot"), qPrintable(rig.batch->request().prompt));
+    // A full prompt wins over both.
+    settings.subject.clear();
+    settings.fullPrompt = "only this";
+    QVERIFY(rig.prepare(settings) == Batch::Outcome::Ok);
+    QCOMPARE(rig.batch->request().prompt, QString("only this"));
+    // A file has no prompt to reuse: nothing typed gives the built prompt of no subject.
+    const QString file = rig.sb.fixture.root.path() + "/bg.png";
+    QVERIFY(savePng(solidImage(QSize(32, 18), Qt::green), file));
+    BatchSettings fromFile = BatchRig::settings();
+    fromFile.subject.clear();
+    fromFile.source = file;
+    QVERIFY(rig.prepare(fromFile) == Batch::Outcome::Ok);
+    QVERIFY2(rig.batch->request().prompt.startsWith("cinematic wide shot"), qPrintable(rig.batch->request().prompt));
+    // And it files with the source, then the draft's sidecar says which draft it came from.
+    settings.fullPrompt.clear();
+    settings.subject.clear();
+    QVERIFY(rig.prepare(settings) == Batch::Outcome::Ok);
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.run.entries.first().metadata["source"].toObject()["id"].toString(), draft.id);
+    QCOMPARE(rig.run.entries.first().metadata["prompt"].toString(), reused);
+}
+
+void LimgenTests::batch_variationStrengthIsClampedAndRaised() {
+    BatchRig rig;
+    const QString source = rig.sb.fixture.root.path() + "/bg.png";
+    QVERIFY(savePng(solidImage(QSize(32, 18), Qt::green), source));
+    QVERIFY(installModel(rig.catalogue, "flux2-klein-4b", rig.sb.fixture.models));
+    struct Row { QString model; double asked; double used; };
+    const double raised8 = 1.0001 / 8, raised4 = 1.0001 / 4;
+    const QList<Row> rows{{"z-image-turbo", 0.5, 0.5},    {"z-image-turbo", 0.95, 0.9},    {"z-image-turbo", 1.5, 0.9},
+                          {"z-image-turbo", 0.2, 0.2},    {"z-image-turbo", 0.13, 0.13},   // 8 x 0.13 = 1.04: runs 2 steps
+                          {"z-image-turbo", 0.1, raised8}, {"z-image-turbo", 0.05, raised8}, {"z-image-turbo", 0.12, raised8},
+                          {"flux2-klein-4b", 0.25, 0.25},  {"flux2-klein-4b", 0.1, raised4},  {"flux2-klein-4b", 0.2, raised4}};
+    for (const Row &row : rows) {
+        BatchSettings settings = BatchRig::settings();
+        settings.modelId = row.model;
+        settings.source = source;
+        settings.strength = row.asked;
+        QString message;
+        QVERIFY2(rig.prepare(settings, &message) == Batch::Outcome::Ok, qPrintable(message));
+        const QString what = QString("%1 at %2").arg(row.model).arg(row.asked);
+        QVERIFY2(qAbs(rig.batch->request().strength - row.used) < 1e-9, qPrintable(what + ": " + QString::number(rig.batch->request().strength)));
+        QVERIFY2(rig.batch->request().samplingSteps() >= 2, qPrintable(what));
+        // The sidecar records the strength that was used.
+        QVERIFY2(qAbs(rig.batch->source()["strength"].toDouble() - row.used) < 1e-9, qPrintable(what));
+    }
+}
+
+void LimgenTests::batch_variationSourceProblemsComeInOrder() {
+    EngineProbe bad;
+    bad.error = {EngineError::NoGpu, "the engine says no", {}};
+    {
+        BatchRig rig;
+        BatchSettings settings = BatchRig::settings();
+        QString message;
+        settings.source = "2026-11-20-ffffff"; // looks like an id, and is not in the library
+        QCOMPARE(int(rig.prepare(settings, &message)), int(Batch::Outcome::UnknownSource));
+        QVERIFY2(message.contains("2026-11-20-ffffff"), qPrintable(message));
+        QVERIFY(!rig.batch->isRunning());
+        settings.source = rig.sb.fixture.root.path() + "/no-such.png";
+        QCOMPARE(int(rig.prepare(settings, &message)), int(Batch::Outcome::UnknownSource));
+        QVERIFY2(message.contains("no-such.png"), qPrintable(message));
+        QVERIFY(writeFile(rig.sb.fixture.root.path() + "/text.png", "this is not an image"));
+        settings.source = rig.sb.fixture.root.path() + "/text.png";
+        QCOMPARE(int(rig.prepare(settings, &message)), int(Batch::Outcome::UnknownSource));
+        // Before the engine is asked about: a bad source is reported even when the engine is broken.
+        rig.probe = bad;
+        QCOMPARE(int(rig.prepare(settings, &message)), int(Batch::Outcome::UnknownSource));
+        QVERIFY(!message.contains("the engine says no"));
+        // And the other way: with a good source the engine's problem is what is said.
+        const QString good = rig.sb.fixture.root.path() + "/good.png";
+        QVERIFY(savePng(solidImage(QSize(8, 8), Qt::red), good));
+        settings.source = good;
+        QCOMPARE(int(rig.prepare(settings, &message)), int(Batch::Outcome::NotRunnable));
+        QCOMPARE(message, QString("the engine says no"));
+    }
+    {
+        // The model and its files come first.
+        BatchRig rig(false);
+        BatchSettings settings = BatchRig::settings();
+        settings.source = "2026-11-20-ffffff";
+        QCOMPARE(int(rig.prepare(settings)), int(Batch::Outcome::NotRunnable));
+        settings.modelId = "nope";
+        QCOMPARE(int(rig.prepare(settings)), int(Batch::Outcome::UnknownModel));
+    }
+}
+
+void LimgenTests::batch_variationSourceIsCoveredToTheDraftSize() {
+    // A wide source (2:1) for 16:9 drafts crops the sides; a tall one crops top and bottom.
+    // In both the centre band is green, so the centre of the prepared image must be green.
+    for (const bool wide : {true, false}) {
+        BatchRig rig;
+        qputenv("FAKE_SD_CLI_MODE", "hang");
+        QImage image(wide ? QSize(100, 50) : QSize(50, 100), QImage::Format_RGB32);
+        image.fill(QColor(220, 30, 30));
+        QPainter painter(&image);
+        painter.fillRect(wide ? QRect(40, 0, 20, 50) : QRect(0, 40, 50, 20), QColor(30, 220, 30));
+        painter.end();
+        const QString source = rig.sb.fixture.root.path() + "/source.png";
+        QVERIFY(savePng(image, source));
+        BatchSettings settings = BatchRig::settings();
+        settings.source = source;
+        QVERIFY(rig.prepare(settings) == Batch::Outcome::Ok);
+        const QString initImage = rig.batch->request().initImage;
+        rig.batch->start();
+        QTRY_VERIFY_WITH_TIMEOUT(!imageCalls(rig.sb.fakeLog()).isEmpty(), 15000);
+        // The engine takes it at the drafts' size, with the centre kept.
+        const QImage prepared(initImage);
+        QCOMPARE(prepared.size(), QSize(1344, 768));
+        const QColor centre = prepared.pixelColor(672, 384), corner = prepared.pixelColor(3, 3);
+        QVERIFY2(centre.green() > 180 && centre.red() < 80, qPrintable(centre.name()));
+        QVERIFY2(corner.red() > 180 && corner.green() < 80, qPrintable(corner.name()));
+        // Cropped, not squeezed: the band keeps its size, so a point 145 (or 200) pixels out is still inside it.
+        const QColor out = prepared.pixelColor(672 + (wide ? 145 : 0), 384 + (wide ? 0 : 200));
+        QVERIFY2(out.green() > 180 && out.red() < 80, qPrintable(out.name()));
+        rig.batch->cancel();
+        WAIT_FOR_BATCH(rig);
+        QCOMPARE(int(rig.run.outcome), int(Batch::Outcome::Cancelled));
+        QVERIFY(!QFileInfo::exists(initImage)); // gone with the folder
+        QCOMPARE(QImageReader(source).size(), image.size());
+    }
+}
+
+void LimgenTests::batch_variationRecordsNoTimingAndEstimatesItsSteps() {
+    BatchRig rig;
+    QVERIFY(rig.prepare(BatchRig::settings()) == Batch::Outcome::Ok);
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    const Timing timing = Timings(rig.sb.benchFile()).get("z-image-turbo/q4_k/vulkan");
+    QVERIFY(timing.isKnown());
+    const QByteArray bench = readFile(rig.sb.benchFile());
+    // A variation of 5 steps is estimated from the same timing, with 5 steps.
+    const QString source = rig.sb.fixture.root.path() + "/bg.png";
+    QVERIFY(savePng(solidImage(QSize(32, 18), Qt::green), source));
+    BatchSettings settings = BatchRig::settings();
+    settings.source = source;
+    rig.remake();
+    QVERIFY(rig.prepare(settings) == Batch::Outcome::Ok);
+    QCOMPARE(rig.batch->estimate(), timing.estimate(4, 5));
+    QVERIFY(rig.batch->estimate() < timing.estimate(4, 8));
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    // It is not a measure of a batch: the timings are as they were.
+    QCOMPARE(readFile(rig.sb.benchFile()), bench);
+}
+
+void LimgenTests::batch_variationSourceThatCannotBePrepared() {
+    BatchRig rig;
+    // A PNG that is cut off after its header: it looks like an image until it is read.
+    QImage image(40, 30, QImage::Format_RGB32);
+    image.fill(Qt::red);
+    const QString whole = rig.sb.fixture.root.path() + "/whole.png", cut = rig.sb.fixture.root.path() + "/cut.png";
+    QVERIFY(savePng(image, whole));
+    QVERIFY(writeFile(cut, readFile(whole).left(33)));
+    BatchSettings settings = BatchRig::settings();
+    settings.source = cut;
+    QString message;
+    QVERIFY2(rig.prepare(settings, &message) == Batch::Outcome::Ok, qPrintable(message));
+    const QString folder = rig.batch->request().outputDirectory;
+    QSignalSpy failed(rig.batch.get(), &Batch::failed);
+    rig.batch->start();
+    QCOMPARE(failed.count(), 0); // reported from the event loop, like an engine failure
+    WAIT_FOR_BATCH(rig);
+    QVERIFY(rig.run.failed);
+    QCOMPARE(int(rig.run.outcome), int(Batch::Outcome::Failed));
+    QVERIFY2(rig.run.message.contains("cut.png"), qPrintable(rig.run.message));
+    QVERIFY(!rig.batch->isRunning());
+    QVERIFY(!QFileInfo::exists(folder));
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 0); // the engine was never asked
+    QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+    QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+}
+
+// ============================== L6: CLI ===================================
+
+void LimgenTests::cli_generateFromAFileAndALibraryImage() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    QVERIFY(installModel(Catalogue::builtIn(), "z-image-turbo", fixture.models));
+    const QHash<QString, QString> env = engineEnvironment(fixture);
+    const QString file = fixture.root.path() + "/themes/night.png";
+    QVERIFY(savePng(solidImage(QSize(160, 90), QColor(30, 80, 160)), file));
+    const QString library = fixture.data + "/limgen/library";
+    // From a file, with no subject at all.
+    CliResult result = runCli(fixture, {"generate", "--from", file, "--count", "2", "--seed", "5", "--json"}, env);
+    QVERIFY2(result.exitCode == 0, qPrintable(result.err));
+    QJsonObject json = jsonObject(result.out);
+    QCOMPARE(json["source"].toObject(), (QJsonObject{{"path", file}, {"strength", 0.5}}));
+    QVERIFY2(json["prompt"].toString().startsWith("cinematic wide shot"), qPrintable(json["prompt"].toString()));
+    QCOMPARE(json["drafts"].toArray().size(), 2);
+    QStringList call = imageCalls(fixture.root.path() + "/fake.log").last();
+    QVERIFY(call.contains("--init-img"));
+    QCOMPARE(valueAfter(call, "--strength"), QString("0.5"));
+    const QString id = json["drafts"].toArray()[0].toObject()["id"].toString();
+    QCOMPARE(Library(library).find(id).metadata["source"].toObject()["path"].toString(), file);
+    // A strength of its own.
+    result = runCli(fixture, {"generate", "--from", file, "--strength", "0.3", "--count", "1", "--json"}, env);
+    QCOMPARE(result.exitCode, 0);
+    json = jsonObject(result.out);
+    QCOMPARE(json["source"].toObject()["strength"].toDouble(), 0.3);
+    call = imageCalls(fixture.root.path() + "/fake.log").last();
+    QCOMPARE(valueAfter(call, "--strength"), QString("0.3"));
+    // From a library image: its prompt when nothing is typed, the subject's when something is.
+    Library lib(library);
+    const LibraryEntry draft = addTestDraft(lib, fixture.root.path(), "oil rig at dusk");
+    result = runCli(fixture, {"generate", "--from", draft.id, "--count", "1", "--json"}, env);
+    QCOMPARE(result.exitCode, 0);
+    json = jsonObject(result.out);
+    QCOMPARE(json["prompt"].toString(), fullRecord().prompt);
+    QCOMPARE(json["source"].toObject(), (QJsonObject{{"id", draft.id}, {"strength", 0.5}}));
+    result = runCli(fixture, {"generate", "a lighthouse", "--from", draft.id, "--count", "1", "--json"}, env);
+    QCOMPARE(result.exitCode, 0);
+    QVERIFY(jsonObject(result.out)["prompt"].toString().startsWith("a lighthouse, cinematic"));
+    // A plain batch says it has no source.
+    result = runCli(fixture, {"generate", "a fox", "--count", "1", "--json"}, env);
+    QCOMPARE(result.exitCode, 0);
+    json = jsonObject(result.out);
+    QVERIFY(json.contains("source"));
+    QVERIFY(json["source"].isNull());
+    QVERIFY(!imageCalls(fixture.root.path() + "/fake.log").last().contains("--init-img"));
+    // Text mode prints the drafts as before.
+    result = runCli(fixture, {"generate", "--from", file, "--count", "1"}, env);
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(result.out.split('\n', Qt::SkipEmptyParts).size(), 1);
+}
+
+void LimgenTests::cli_generateFromArgumentErrors_data() {
+    QTest::addColumn<QStringList>("arguments");
+    QTest::newRow("strength without a source") << QStringList{"generate", "a fox", "--strength", "0.5"};
+    QTest::newRow("strength below 0.1") << QStringList{"generate", "--from", "@FILE@", "--strength", "0.05"};
+    QTest::newRow("strength above 0.9") << QStringList{"generate", "--from", "@FILE@", "--strength", "0.95"};
+    QTest::newRow("strength 1") << QStringList{"generate", "--from", "@FILE@", "--strength", "1"};
+    QTest::newRow("strength not a number") << QStringList{"generate", "--from", "@FILE@", "--strength", "x"};
+    QTest::newRow("strength missing its value") << QStringList{"generate", "--from", "@FILE@", "--strength"};
+    QTest::newRow("a file that is not there") << QStringList{"generate", "--from", "@DIR@/nope.png"};
+    QTest::newRow("an id that is not in the library") << QStringList{"generate", "--from", "2026-11-20-ffffff"};
+    QTest::newRow("a file that is not an image") << QStringList{"generate", "--from", "@TEXT@"};
+    QTest::newRow("nothing to go on") << QStringList{"generate"};
+    QTest::newRow("a blank subject and no source") << QStringList{"generate", "   "};
+}
+
+void LimgenTests::cli_generateFromArgumentErrors() {
+    REQUIRE_BINARY();
+    QFETCH(QStringList, arguments);
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    QVERIFY(installModel(Catalogue::builtIn(), "z-image-turbo", fixture.models));
+    const QString file = fixture.root.path() + "/ok.png", text = fixture.root.path() + "/text.png";
+    QVERIFY(savePng(solidImage(QSize(32, 18), Qt::green), file));
+    QVERIFY(writeFile(text, "this is not an image"));
+    for (QString &argument : arguments)
+        argument.replace("@FILE@", file).replace("@TEXT@", text).replace("@DIR@", fixture.root.path());
+    const CliResult result = runCli(fixture, arguments, engineEnvironment(fixture));
+    QVERIFY(result.started);
+    QCOMPARE(result.exitCode, 2);
+    QCOMPARE(result.out, QString());
+    QVERIFY(!result.err.isEmpty());
+    QCOMPARE(imageCalls(fixture.root.path() + "/fake.log").size(), 0);
+    QCOMPARE(filesUnder(fixture.data), QStringList());
+}
+
+namespace {
+struct LibraryFixture {
+    Fixture fixture;
+    LibraryEntry d1, d2, d3, f1;
+    QString dir() const { return fixture.data + "/limgen/library"; }
+    LibraryFixture() {
+        Library library(dir());
+        d1 = draftAt(library, fixture.root.path(), at(11, 2, 10), "night-city", "first rig");
+        d2 = draftAt(library, fixture.root.path(), at(11, 4, 10), "other", "second rig");
+        d3 = draftAt(library, fixture.root.path(), at(11, 6, 10), QString(), "third rig");
+        f1 = finalAt(library, fixture.root.path(), at(11, 8, 10), d1.id, "night-city");
+    }
+};
+} // namespace
+
+void LimgenTests::cli_libraryListsNewestFirst() {
+    REQUIRE_BINARY();
+    LibraryFixture rig;
+    const CliResult result = runCli(rig.fixture, {"library"}, engineEnvironment(rig.fixture));
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(result.err, QString());
+    const QStringList lines = result.out.split('\n', Qt::SkipEmptyParts);
+    QCOMPARE(lines.size(), 4);
+    // id, kind, the theme it was made for ("-" for none), and the path.
+    QCOMPARE(lines[0], (QStringList{rig.f1.id, "final", "night-city", rig.f1.image}.join("  ")));
+    QCOMPARE(lines[1], (QStringList{rig.d3.id, "draft", "-", rig.d3.image}.join("  ")));
+    QCOMPARE(lines[2], (QStringList{rig.d2.id, "draft", "other", rig.d2.image}.join("  ")));
+    QCOMPARE(lines[3], (QStringList{rig.d1.id, "draft", "night-city", rig.d1.image}.join("  ")));
+    // Reading changes nothing.
+    QCOMPARE(filesUnder(rig.dir()).size(), 8);
+}
+
+void LimgenTests::cli_libraryJsonAndTheme() {
+    REQUIRE_BINARY();
+    LibraryFixture rig;
+    CliResult result = runCli(rig.fixture, {"library", "--json"}, engineEnvironment(rig.fixture));
+    QCOMPARE(result.exitCode, 0);
+    QJsonParseError parseError;
+    QJsonArray list = QJsonDocument::fromJson(result.out.toUtf8(), &parseError).array();
+    QVERIFY2(parseError.error == QJsonParseError::NoError, qPrintable(result.out));
+    QCOMPARE(list.size(), 4);
+    QJsonObject final = list[0].toObject(), noTheme = list[1].toObject(), draft = list[3].toObject();
+    QCOMPARE(final.keys(), (QStringList{"created", "from", "id", "kind", "path", "subject", "theme"}));
+    QCOMPARE(final["from"].toString(), rig.d1.id);
+    QCOMPARE(final["kind"].toString(), QString("final"));
+    QCOMPARE(final["theme"].toString(), QString("night-city"));
+    QCOMPARE(final["path"].toString(), rig.f1.image);
+    // A draft has no "from"; one made for no theme has a null theme; the subject and time are there.
+    QCOMPARE(draft.keys(), (QStringList{"created", "id", "kind", "path", "subject", "theme"}));
+    QCOMPARE(draft["subject"].toString(), QString("first rig"));
+    QCOMPARE(draft["created"].toString(), QString("2026-11-02T10:00:00Z"));
+    QVERIFY(noTheme["theme"].isNull());
+    QCOMPARE(noTheme["subject"].toString(), QString("third rig"));
+    // --theme keeps what was made for that theme, finals included, and drops the rest, drafts for no theme too.
+    result = runCli(rig.fixture, {"library", "--theme", "night-city", "--json"}, engineEnvironment(rig.fixture));
+    QCOMPARE(result.exitCode, 0);
+    list = QJsonDocument::fromJson(result.out.toUtf8()).array();
+    QCOMPARE(list.size(), 2);
+    QCOMPARE(list[0].toObject()["id"].toString(), rig.f1.id);
+    QCOMPARE(list[1].toObject()["id"].toString(), rig.d1.id);
+    result = runCli(rig.fixture, {"library", "--theme", "other"}, engineEnvironment(rig.fixture));
+    QCOMPARE(result.out.split('\n', Qt::SkipEmptyParts).size(), 1);
+    QVERIFY(result.out.contains(rig.d2.id));
+    result = runCli(rig.fixture, {"library", "--theme", "nosuch"}, engineEnvironment(rig.fixture));
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(result.out, QString());
+}
+
+void LimgenTests::cli_libraryEmptyAndErrors() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    CliResult result = runCli(fixture, {"library"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(result.out, QString());
+    result = runCli(fixture, {"library", "--json"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(QJsonDocument::fromJson(result.out.toUtf8()).array().size(), 0);
+    QVERIFY(QJsonDocument::fromJson(result.out.toUtf8()).isArray());
+    // Nothing is created by looking.
+    QVERIFY(!QFileInfo::exists(fixture.data + "/limgen"));
+    for (const QStringList &arguments : {QStringList{"library", "extra"}, QStringList{"library", "--bogus"},
+                                         QStringList{"library", "--theme"}}) {
+        result = runCli(fixture, arguments, engineEnvironment(fixture));
+        QCOMPARE(result.exitCode, 2);
+        QCOMPARE(result.out, QString());
+    }
+    const CliResult summary = runCli(fixture, {"help"});
+    QVERIFY(summary.out.contains("library"));
+    const CliResult help = runCli(fixture, {"help", "library"});
+    QCOMPARE(help.exitCode, 0);
+    QVERIFY(help.out.contains("--theme") && help.out.contains("--json"));
+    const CliResult generate = runCli(fixture, {"help", "generate"});
+    QVERIFY(generate.out.contains("--from") && generate.out.contains("--strength"));
+}
+
+// ============================== L6: Backend variations ====================
+
+namespace {
+
+void addThemeBackgrounds(const Fixture &fixture, const QStringList &names, const QString &theme = "night-city") {
+    for (const QString &name : names)
+        savePng(solidImage(QSize(64, 36), QColor(30 + name.at(0).unicode() % 100, 90, 150)),
+                fixture.themes + "/" + theme + "/backgrounds/" + name);
+}
+
+void addUserBackground(const Fixture &fixture, const QString &name, const QString &theme = "night-city") {
+    savePng(solidImage(QSize(64, 36), QColor(200, 90, 40)), fixture.backgrounds + "/" + theme + "/" + name);
+}
+
+QStringList namesOf(const QVariantList &list) {
+    QStringList names;
+    for (const QVariant &value : list)
+        names << value.toMap()["name"].toString();
+    return names;
+}
+
+// The sidecar of a draft the window shows.
+QJsonObject sidecarOfDraft(const KeepBackendRig &rig, int index) {
+    return rig.library().find(rig.draft(index)["id"].toString()).metadata;
+}
+
+} // namespace
+
+void LimgenTests::backend_backgroundsAreTheThemesOwnThenTheUsers() {
+    KeepBackendRig rig;
+    addThemeBackgrounds(rig.sb.fixture, {"b.png", "a.png"});
+    addUserBackground(rig.sb.fixture, "z.png");
+    addUserBackground(rig.sb.fixture, "limgen-oil-rig-aaaaaa.png");
+    rig.create();
+    const QVariantList backgrounds = rig.backend->backgrounds();
+    // The theme's own, sorted, then the ones added to it, sorted.
+    QCOMPARE(namesOf(backgrounds), (QStringList{"a.png", "b.png", "limgen-oil-rig-aaaaaa.png", "z.png"}));
+    const QStringList user{"limgen-oil-rig-aaaaaa.png", "z.png"};
+    for (const QVariant &value : backgrounds) {
+        const QVariantMap background = value.toMap();
+        const QString name = background["name"].toString();
+        QVERIFY(QFileInfo(background["path"].toString()).isFile());
+        QCOMPARE(QUrl(background["url"].toString()).toLocalFile(), background["path"].toString());
+        QCOMPARE(background["user"].toBool(), user.contains(name));
+        QCOMPARE(background["limgen"].toBool(), name.startsWith("limgen-"));
+    }
+    QVERIFY(backgrounds[2].toMap()["path"].toString().startsWith(rig.sb.fixture.backgrounds + "/night-city/"));
+    // No theme, no backgrounds.
+    KeepBackendRig none(false);
+    none.create();
+    QVERIFY(none.backend->backgrounds().isEmpty());
+}
+
+void LimgenTests::backend_backgroundsRefreshAfterAKeepAndAThemeSwitch() {
+    KeepBackendRig rig(true, 8);
+    addThemeBackgrounds(rig.sb.fixture, {"a.png"});
+    rig.create();
+    QCOMPARE(namesOf(rig.backend->backgrounds()), QStringList{"a.png"});
+    QVERIFY(rig.makeBatch());
+    rig.backend->keep(0);
+    WAIT_KEPT(rig, 0);
+    // The kept image joined the theme's backgrounds, as one of limgen's own.
+    QTRY_COMPARE_WITH_TIMEOUT(rig.backend->backgrounds().size(), 2, 5000);
+    const QVariantMap added = rig.backend->backgrounds().last().toMap();
+    QVERIFY(added["user"].toBool() && added["limgen"].toBool());
+    QCOMPARE(added["path"].toString(), rig.draft(0)["keptPath"].toString());
+    // Undoing the keep takes it away again.
+    rig.backend->undo();
+    QTRY_COMPARE_WITH_TIMEOUT(rig.backend->backgrounds().size(), 1, 5000);
+    // Another theme has backgrounds of its own.
+    addThemeBackgrounds(rig.sb.fixture, {"c.png", "d.png"}, "other");
+    QVERIFY(rig.sb.fixture.switchTo("other"));
+    QTRY_COMPARE_WITH_TIMEOUT(rig.backend->themeName(), QString("other"), 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(namesOf(rig.backend->backgrounds()), (QStringList{"c.png", "d.png"}), 5000);
+}
+
+void LimgenTests::backend_useBackgroundTogglesTheSource() {
+    KeepBackendRig rig;
+    addThemeBackgrounds(rig.sb.fixture, {"a.png", "b.png"});
+    rig.create();
+    QSignalSpy changed(rig.backend.get(), &Backend::sourceChanged);
+    QVERIFY(rig.backend->source().isEmpty());
+    const QString a = rig.backend->backgrounds()[0].toMap()["path"].toString(), b = rig.backend->backgrounds()[1].toMap()["path"].toString();
+    rig.backend->useBackground(0);
+    QCOMPARE(rig.backend->source()["kind"].toString(), QString("background"));
+    QCOMPARE(rig.backend->source()["key"].toString(), a);
+    QCOMPARE(rig.backend->source()["path"].toString(), a);
+    QCOMPARE(rig.backend->source()["name"].toString(), QString("a.png"));
+    QCOMPARE(QUrl(rig.backend->source()["url"].toString()).toLocalFile(), a);
+    QCOMPARE(changed.count(), 1);
+    // Another one replaces it; the same one again clears it.
+    rig.backend->useBackground(1);
+    QCOMPARE(rig.backend->source()["path"].toString(), b);
+    QCOMPARE(changed.count(), 2);
+    rig.backend->useBackground(1);
+    QVERIFY(rig.backend->source().isEmpty());
+    QCOMPARE(changed.count(), 3);
+    // Out of range: nothing. Clearing an empty source: nothing either.
+    rig.backend->useBackground(-1);
+    rig.backend->useBackground(2);
+    rig.backend->useBackground(99);
+    rig.backend->clearSource();
+    QVERIFY(rig.backend->source().isEmpty());
+    QCOMPARE(changed.count(), 3);
+    rig.backend->useBackground(0);
+    rig.backend->clearSource();
+    QVERIFY(rig.backend->source().isEmpty());
+    QCOMPARE(changed.count(), 5);
+}
+
+void LimgenTests::backend_cycleBackgroundBothWaysAndWraps() {
+    KeepBackendRig rig;
+    addThemeBackgrounds(rig.sb.fixture, {"a.png", "b.png", "c.png"});
+    rig.create();
+    auto current = [&] { return rig.backend->source()["name"].toString(); };
+    // B from nothing starts at the first; Shift+B at the last.
+    rig.backend->cycleBackground(1);
+    QCOMPARE(current(), QString("a.png"));
+    rig.backend->cycleBackground(1);
+    QCOMPARE(current(), QString("b.png"));
+    rig.backend->cycleBackground(1);
+    QCOMPARE(current(), QString("c.png"));
+    rig.backend->cycleBackground(1); // wraps
+    QCOMPARE(current(), QString("a.png"));
+    rig.backend->cycleBackground(-1); // wraps the other way
+    QCOMPARE(current(), QString("c.png"));
+    rig.backend->cycleBackground(-1);
+    QCOMPARE(current(), QString("b.png"));
+    rig.backend->clearSource();
+    rig.backend->cycleBackground(-1); // nothing chosen: the last
+    QCOMPARE(current(), QString("c.png"));
+    // One background only: it is chosen, and cycling does not clear it.
+    KeepBackendRig single;
+    addThemeBackgrounds(single.sb.fixture, {"only.png"});
+    single.create();
+    single.backend->cycleBackground(1);
+    QCOMPARE(single.backend->source()["name"].toString(), QString("only.png"));
+    single.backend->cycleBackground(1);
+    QCOMPARE(single.backend->source()["name"].toString(), QString("only.png"));
+    single.backend->cycleBackground(-1);
+    QCOMPARE(single.backend->source()["name"].toString(), QString("only.png"));
+    // None: nothing happens.
+    KeepBackendRig none;
+    none.create();
+    none.backend->cycleBackground(1);
+    none.backend->cycleBackground(-1);
+    QVERIFY(none.backend->source().isEmpty());
+}
+
+void LimgenTests::backend_aBackgroundSourceGoesWithItsFile() {
+    KeepBackendRig rig(true, 8);
+    addThemeBackgrounds(rig.sb.fixture, {"a.png"});
+    addThemeBackgrounds(rig.sb.fixture, {"c.png"}, "other");
+    rig.create();
+    rig.backend->useBackground(0);
+    QCOMPARE(rig.backend->source()["name"].toString(), QString("a.png"));
+    // Another theme: its backgrounds replace the old ones, and so does the
+    // source, which belonged to the old theme.
+    QVERIFY(rig.sb.fixture.switchTo("other"));
+    QTRY_COMPARE_WITH_TIMEOUT(rig.backend->themeName(), QString("other"), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(rig.backend->source().isEmpty(), 5000);
+    // A kept image used as the source goes when its keep is undone.
+    QVERIFY(rig.makeBatch());
+    rig.backend->keep(0);
+    WAIT_KEPT(rig, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(rig.backend->backgrounds().size(), 2, 5000);
+    rig.backend->useBackground(1);
+    QVERIFY(rig.backend->source()["name"].toString().startsWith("limgen-"));
+    rig.backend->undo();
+    QVERIFY(rig.backend->source().isEmpty());
+    // A library source is not a background and stays.
+    rig.backend->useLibrary(rig.draft(1)["id"].toString());
+    QVERIFY(rig.sb.fixture.switchTo("night-city"));
+    QTRY_COMPARE_WITH_TIMEOUT(rig.backend->themeName(), QString("night-city"), 5000);
+    QCOMPARE(rig.backend->source()["kind"].toString(), QString("library"));
+}
+
+void LimgenTests::backend_libraryFollowsDiscardUndoAndRedo() {
+    KeepBackendRig rig(true, 8);
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    rig.backend->loadLibrary();
+    const QString id = rig.draft(0)["id"].toString();
+    auto listed = [&] {
+        for (const QVariant &item : rig.backend->library())
+            if (item.toMap()["id"].toString() == id)
+                return true;
+        return false;
+    };
+    QVERIFY(listed());
+    rig.backend->discard(0);
+    QVERIFY(!listed());
+    rig.backend->undo();
+    QVERIFY(listed());
+    rig.backend->redo();
+    QVERIFY(!listed());
+}
+
+void LimgenTests::backend_varyDoesNothingWhenNoBatchCanStart() {
+    KeepBackendRig rig(true, 8);
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    // A keep runs, and a batch already waits for it: V cannot start one.
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.backend->keep(0);
+    QTRY_VERIFY_WITH_TIMEOUT(rig.upscalesDone() > 0, 15000);
+    rig.backend->generate();
+    QVERIFY(rig.backend->batchWaiting());
+    rig.backend->vary(1);
+    QVERIFY(rig.backend->source().isEmpty());
+    rig.backend->varyLibrary(rig.draft(2)["id"].toString());
+    QVERIFY(rig.backend->source().isEmpty());
+    rig.backend->stopAll();
+    WAIT_NOT_KEEPING(rig);
+}
+
+void LimgenTests::backend_fullPromptShowsTheReusedPrompt() {
+    KeepBackendRig rig(true, 8);
+    rig.create();
+    QVERIFY(rig.makeBatch("a lighthouse in fog"));
+    const QString used = rig.library().find(rig.draft(0)["id"].toString()).metadata["prompt"].toString();
+    QVERIFY(used.startsWith("a lighthouse in fog"));
+    // Nothing typed: the prompt shown is the one the variation will use.
+    rig.backend->setSubject("");
+    rig.backend->useLibrary(rig.draft(0)["id"].toString());
+    QCOMPARE(rig.backend->fullPrompt(), used);
+    // Typing a subject builds the prompt again.
+    rig.backend->setSubject("a harbour at night");
+    QVERIFY(rig.backend->fullPrompt().startsWith("a harbour at night"));
+    rig.backend->setSubject("");
+    QCOMPARE(rig.backend->fullPrompt(), used);
+    rig.backend->clearSource();
+    QVERIFY(!rig.backend->fullPrompt().startsWith("a lighthouse"));
+}
+
+void LimgenTests::batch_strengthForRaisesAndClamps() {
+    QCOMPARE(Batch::strengthFor(8, 0.5), 0.5);
+    // Below the minimum is the minimum, then raised for eight steps.
+    QVERIFY(Batch::strengthFor(8, 0.05) > 0.125 && Batch::strengthFor(8, 0.05) < 0.126);
+    QCOMPARE(Batch::strengthFor(8, 1.5), 0.9);
+    // Four steps: 0.1 and 0.2 would run no step, so they are raised.
+    QVERIFY(Batch::strengthFor(4, 0.1) > 0.25 && Batch::strengthFor(4, 0.1) < 0.26);
+    QVERIFY(Batch::strengthFor(4, 0.2) > 0.25 && Batch::strengthFor(4, 0.2) < 0.26);
+    QCOMPARE(Batch::strengthFor(4, 0.3), 0.3);
+    // Never past the maximum, even for a single step.
+    QCOMPARE(Batch::strengthFor(1, 0.5), 0.9);
+}
+
+void LimgenTests::backend_estimateUsesTheRaisedStrength() {
+    KeepBackendRig rig(true, 4);
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    // The first batch measured this machine; the next estimate follows it.
+    const CatalogueModel *model = rig.world.catalogue.defaultModel();
+    const Timing timing =
+        Timings(rig.sb.benchFile()).get(Timings::key(model->id, model->levels.first().id, "vulkan"));
+    QVERIFY(timing.isKnown());
+    rig.backend->setStrength(0.1);
+    rig.backend->useLibrary(rig.draft(0)["id"].toString());
+    // At 0.1 a four-step model runs no step, so the batch raises it to run
+    // one, plus the one the engine adds: two steps, as the estimate says.
+    EngineRequest request;
+    request.steps = 4;
+    request.initImage = "x";
+    request.strength = Batch::strengthFor(4, 0.1);
+    QCOMPARE(request.samplingSteps(), 2);
+    const QString expected = Backend::tr("About %1 for %n drafts", "", 4).arg(Backend::durationText(timing.estimate(4, 2)));
+    QTRY_COMPARE(rig.backend->estimate(), expected);
+}
+
+void LimgenTests::backend_varyAndVaryLibrary() {
+    KeepBackendRig rig(true, 8);
+    rig.create();
+    QVERIFY(rig.makeBatch("oil rig"));
+    const QString firstId = rig.draft(1)["id"].toString();
+    const QString firstPrompt = sidecarOfDraft(rig, 1)["prompt"].toString();
+    QVERIFY(!firstPrompt.isEmpty());
+    // V on a draft: the batch is a variation of it, at the saved strength, following the typed subject.
+    rig.backend->setSubject("a lighthouse");
+    rig.backend->vary(1);
+    QVERIFY(rig.backend->running());
+    QCOMPARE(rig.backend->source()["kind"].toString(), QString("library"));
+    QCOMPARE(rig.backend->source()["key"].toString(), firstId);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running() && rig.draft(0)["state"].toString() == "done", 40000);
+    QJsonObject sidecar = sidecarOfDraft(rig, 0);
+    QCOMPARE(sidecar["source"].toObject(), (QJsonObject{{"id", firstId}, {"strength", 0.5}}));
+    QVERIFY(sidecar["prompt"].toString().startsWith("a lighthouse"));
+    QVERIFY(rig.draft(0)["id"].toString() != firstId);
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).last().contains("--init-img"), true);
+    // The source stays for the next batch until it is cleared.
+    QCOMPARE(rig.backend->source()["key"].toString(), firstId);
+    // With nothing typed, the source's prompt is used again, at a strength of its own.
+    rig.backend->setSubject("");
+    rig.backend->setStrength(0.3);
+    rig.backend->vary(2);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running() && rig.draft(0)["state"].toString() == "done", 40000);
+    sidecar = sidecarOfDraft(rig, 0);
+    QCOMPARE(sidecar["source"].toObject()["strength"].toDouble(), 0.3);
+    QCOMPARE(valueAfter(imageCalls(rig.sb.fakeLog()).last(), "--strength"), QString("0.3"));
+    // varyLibrary starts from any image in the library, such as the first batch's draft.
+    rig.backend->varyLibrary(firstId);
+    QVERIFY(rig.backend->running());
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running() && rig.draft(0)["state"].toString() == "done", 40000);
+    QCOMPARE(sidecarOfDraft(rig, 0)["source"].toObject()["id"].toString(), firstId);
+    QCOMPARE(sidecarOfDraft(rig, 0)["prompt"].toString(), firstPrompt);
+    // An id that is not there: said, and no batch.
+    rig.backend->clearSource();
+    const int calls = imageCalls(rig.sb.fakeLog()).size();
+    rig.backend->varyLibrary("2026-11-20-ffffff");
+    QVERIFY(!rig.backend->running());
+    QVERIFY(rig.backend->statusIsError());
+    QVERIFY(rig.backend->source().isEmpty());
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), calls);
+    // A discarded draft, or an index out of range, is not varied.
+    rig.backend->discard(3);
+    rig.backend->vary(3);
+    rig.backend->vary(-1);
+    rig.backend->vary(9);
+    QVERIFY(!rig.backend->running());
+    QVERIFY(rig.backend->source().isEmpty());
+}
+
+void LimgenTests::backend_rerunAndTheWaitingBatchKeepTheSource() {
+    KeepBackendRig rig(true, 8);
+    addThemeBackgrounds(rig.sb.fixture, {"a.png", "b.png"});
+    rig.create();
+    const QString a = rig.backend->backgrounds()[0].toMap()["path"].toString();
+    rig.backend->useBackground(0);
+    QVERIFY(rig.makeBatch("oil rig"));
+    QCOMPARE(sidecarOfDraft(rig, 0)["source"].toObject(), (QJsonObject{{"path", a}, {"strength", 0.5}}));
+    const QString firstSeed = QString::number(rig.draft(0)["seed"].toDouble());
+    // Rerun after the source was cleared and the strength changed: the same variation, new seeds.
+    rig.backend->clearSource();
+    rig.backend->setStrength(0.7);
+    QVERIFY(rig.backend->canRerun());
+    rig.backend->rerun();
+    QVERIFY(rig.backend->running());
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running() && rig.draft(0)["state"].toString() == "done", 40000);
+    QCOMPARE(sidecarOfDraft(rig, 0)["source"].toObject(), (QJsonObject{{"path", a}, {"strength", 0.5}}));
+    QVERIFY(QString::number(rig.draft(0)["seed"].toDouble()) != firstSeed);
+    QVERIFY(rig.backend->source().isEmpty()); // rerun does not bring the source back
+    // A batch that waits for a keep carries the source it was asked with.
+    rig.backend->setStrength(0.5);
+    rig.backend->useBackground(1);
+    const QString b = rig.backend->source()["path"].toString();
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.backend->keep(0);
+    QTRY_VERIFY_WITH_TIMEOUT(rig.upscalesDone() > 0, 15000);
+    rig.backend->generate();
+    QVERIFY(rig.backend->batchWaiting());
+    rig.backend->clearSource();
+    rig.backend->setStrength(0.8);
+    qunsetenv("FAKE_SD_CLI_MODE");
+    rig.backend->undo(); // the keep ends and the batch starts
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running() && !rig.backend->batchWaiting() && imageCalls(rig.sb.fakeLog()).size() == 3, 40000);
+    QTRY_COMPARE_WITH_TIMEOUT(rig.draft(0)["state"].toString(), QString("done"), 40000);
+    QCOMPARE(sidecarOfDraft(rig, 0)["source"].toObject(), (QJsonObject{{"path", b}, {"strength", 0.5}}));
+}
+
+void LimgenTests::backend_canGenerateWithAnEmptySubjectOnlyWithASource() {
+    KeepBackendRig rig(true, 8);
+    addThemeBackgrounds(rig.sb.fixture, {"a.png"});
+    rig.create();
+    QVERIFY(!rig.backend->canGenerate()); // nothing typed, no source
+    rig.backend->setSubject("   ");
+    QVERIFY(!rig.backend->canGenerate());
+    rig.backend->useBackground(0);
+    QVERIFY(rig.backend->canGenerate());
+    rig.backend->generate();
+    QVERIFY(rig.backend->running());
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running() && rig.draft(0)["state"].toString() == "done", 40000);
+    // The source stayed, so the next batch can start the same way.
+    QVERIFY(!rig.backend->source().isEmpty());
+    QVERIFY(rig.backend->canGenerate());
+    QVERIFY(sidecarOfDraft(rig, 0)["prompt"].toString().startsWith("cinematic wide shot")); // a file brings no prompt
+    rig.backend->clearSource();
+    QVERIFY(!rig.backend->canGenerate());
+    rig.backend->generate(); // does nothing
+    QVERIFY(!rig.backend->running());
+    // Not while the engine or the model is not ready, source or not.
+    KeepBackendRig missing;
+    addThemeBackgrounds(missing.sb.fixture, {"a.png"});
+    missing.create(missing.sb.fixture.root.path() + "/no-such-engine");
+    missing.backend->useBackground(0);
+    QVERIFY(!missing.backend->canGenerate());
+}
+
+void LimgenTests::backend_loadLibraryFiltersByThemeAndFlagsKept() {
+    KeepBackendRig rig(true, 8);
+    rig.create();
+    QVERIFY(rig.backend->library().isEmpty()); // not read until the window asks
+    QVERIFY(rig.makeBatch("first rig"));
+    QVERIFY(rig.makeBatch("second rig"));
+    // Images made for another theme and for none.
+    Library library(rig.sb.library());
+    const LibraryEntry other = draftAt(library, rig.sb.fixture.root.path(), QDateTime::currentDateTimeUtc(), "other", "other rig");
+    const LibraryEntry none = draftAt(library, rig.sb.fixture.root.path(), QDateTime::currentDateTimeUtc(), QString(), "no theme rig");
+    QSignalSpy changed(rig.backend.get(), &Backend::libraryChanged);
+    rig.backend->loadLibrary();
+    QCOMPARE(changed.count(), 1);
+    QVariantList list = rig.backend->library();
+    QCOMPARE(list.size(), 8); // this theme's drafts only
+    QStringList ids;
+    for (const QVariant &value : list) {
+        const QVariantMap entry = value.toMap();
+        ids << entry["id"].toString();
+        QCOMPARE(entry["kind"].toString(), QString("draft"));
+        QCOMPARE(entry["state"].toString(), QString("done")); // so the full view takes it like a draft
+        QVERIFY(QUrl(entry["image"].toString()).toLocalFile().endsWith(".png"));
+        QVERIFY(QFileInfo(QUrl(entry["image"].toString()).toLocalFile()).isFile());
+        QVERIFY(!entry["kept"].toBool());
+        QVERIFY(entry["subject"].toString().endsWith("rig"));
+        QVERIFY(entry["seed"].toDouble() >= 0);
+        QVERIFY(QDateTime::fromString(entry["created"].toString(), Qt::ISODate).isValid());
+    }
+    QVERIFY(!ids.contains(other.id) && !ids.contains(none.id));
+    // Newest first.
+    for (int i = 1; i < list.size(); ++i)
+        QVERIFY(list[i - 1].toMap()["created"].toString() >= list[i].toMap()["created"].toString());
+    // Once read, it follows a keep by itself: the draft is kept, and its final is listed.
+    const QString keptId = rig.draft(0)["id"].toString();
+    changed.clear();
+    rig.backend->keep(0);
+    WAIT_KEPT(rig, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(rig.backend->library().size(), 9, 5000);
+    int finals = 0, keptFlags = 0;
+    for (const QVariant &value : rig.backend->library()) {
+        const QVariantMap entry = value.toMap();
+        finals += entry["kind"].toString() == "final";
+        keptFlags += entry["kept"].toBool();
+        if (entry["id"].toString() == keptId)
+            QVERIFY(entry["kept"].toBool());
+    }
+    QCOMPARE(finals, 1);
+    QCOMPARE(keptFlags, 1);
+    QVERIFY(changed.count() >= 1);
+    // ... and a new batch.
+    QVERIFY(rig.makeBatch("third rig"));
+    QTRY_COMPARE_WITH_TIMEOUT(rig.backend->library().size(), 13, 5000);
+    // A discarded draft is not listed.
+    rig.backend->discard(2);
+    rig.backend->loadLibrary();
+    QCOMPARE(rig.backend->library().size(), 12);
+    // Without an Omarchy theme, everything is.
+    KeepBackendRig noTheme(false, 8);
+    noTheme.create();
+    Library all(noTheme.sb.library());
+    draftAt(all, noTheme.sb.fixture.root.path(), QDateTime::currentDateTimeUtc(), "other");
+    draftAt(all, noTheme.sb.fixture.root.path(), QDateTime::currentDateTimeUtc(), QString());
+    noTheme.backend->loadLibrary();
+    QCOMPARE(noTheme.backend->library().size(), 2);
+}
+
+void LimgenTests::backend_strengthIsSavedToConfig() {
+    KeepBackendRig rig;
+    QVERIFY(writeFile(rig.sb.configFile(), R"({"future": {"x": 1}})"));
+    rig.create();
+    QCOMPARE(rig.backend->strength(), 0.5);
+    QSignalSpy changed(rig.backend.get(), &Backend::settingsChanged);
+    rig.backend->setStrength(0.7);
+    QCOMPARE(rig.backend->strength(), 0.7);
+    QCOMPARE(changed.count(), 1);
+    rig.backend->setStrength(0.7); // the same: nothing
+    QCOMPARE(changed.count(), 1);
+    QJsonObject config = QJsonDocument::fromJson(readFile(rig.sb.configFile())).object();
+    QCOMPARE(config["strength"].toDouble(), 0.7);
+    QCOMPARE(config["future"].toObject()["x"].toInt(), 1);
+    // The range is 0.1 to 0.9.
+    rig.backend->setStrength(0.95);
+    QCOMPARE(rig.backend->strength(), 0.9);
+    rig.backend->setStrength(0.01);
+    QCOMPARE(rig.backend->strength(), 0.1);
+    QCOMPARE(QJsonDocument::fromJson(readFile(rig.sb.configFile())).object()["strength"].toDouble(), 0.1);
+    rig.backend->setStrength(0.35);
+    // A new window starts with it; a value out of range in the file is the default.
+    rig.create();
+    QCOMPARE(rig.backend->strength(), 0.35);
+    QVERIFY(writeFile(rig.sb.configFile(), R"({"strength": 2})"));
+    rig.create();
+    QCOMPARE(rig.backend->strength(), 0.5);
+    QVERIFY(writeFile(rig.sb.configFile(), R"({"strength": "strong"})"));
+    rig.create();
+    QCOMPARE(rig.backend->strength(), 0.5);
+    QCOMPARE(Config::defaultStrength, 0.5);
+}
+
+// ============================== L6: the window ============================
+
+namespace {
+
+QQuickItem *abstractButton(const QmlRig &q, const QString &text) {
+    for (QQuickItem *item : q.items())
+        if (item->inherits("QQuickAbstractButton") && item->isVisible() && item->property("text").toString() == text)
+            return item;
+    return nullptr;
+}
+
+QQuickItem *itemByObjectName(const QmlRig &q, const QString &name) {
+    for (QQuickItem *item : q.items())
+        if (item->objectName() == name)
+            return item;
+    return nullptr;
+}
+
+// The point at the middle of an item, in the window.
+QPoint centreOf(QQuickItem *item) { return item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint(); }
+
+// Theme backgrounds for the window to list, then a reload so it does.
+void giveTheWindowBackgrounds(QmlRig &q, const QStringList &names) {
+    addThemeBackgrounds(q.rig.sb.fixture, names);
+    q.backend().reload();
+}
+
+} // namespace
+
+void LimgenTests::qml_keysBAndShiftBCycleTheBackgrounds() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    giveTheWindowBackgrounds(q, {"a.png", "b.png", "c.png"});
+    QTRY_COMPARE(q.backend().backgrounds().size(), 3);
+    auto current = [&] { return q.backend().source()["name"].toString(); };
+    QTest::keyClick(q.window, 'b');
+    QTRY_COMPARE(current(), QString("a.png"));
+    QTest::keyClick(q.window, 'b');
+    QTRY_COMPARE(current(), QString("b.png"));
+    QTest::keyClick(q.window, Qt::Key_B, Qt::ShiftModifier);
+    QTRY_COMPARE(current(), QString("a.png"));
+    QTest::keyClick(q.window, Qt::Key_B, Qt::ShiftModifier); // wraps to the last
+    QTRY_COMPARE(current(), QString("c.png"));
+    // Esc, with nothing else open, goes back to plain batches.
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_VERIFY(q.backend().source().isEmpty());
+    // In the subject field B is a letter.
+    q.focusSubject();
+    QTRY_VERIFY(q.typing());
+    typeText(q.window, "bb");
+    QTest::keyClick(q.window, Qt::Key_B, Qt::ShiftModifier);
+    QTest::qWait(100);
+    QVERIFY(q.backend().source().isEmpty());
+    QVERIFY(q.backend().subject().contains("bb"));
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_clickInTheLeftColumnChoosesAndClears() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    giveTheWindowBackgrounds(q, {"a.png", "b.png"});
+    QTRY_COMPARE(q.backend().backgrounds().size(), 2);
+    QQuickItem *column = q.itemNamed("BackgroundColumn");
+    QVERIFY(column);
+    QList<QQuickItem *> areas;
+    QTRY_VERIFY_WITH_TIMEOUT(([&] {
+        areas.clear();
+        for (QQuickItem *item : q.items())
+            if (item->inherits("QQuickMouseArea") && item->isVisible() && item->width() > 0) {
+                for (QQuickItem *parent = item->parentItem(); parent; parent = parent->parentItem())
+                    if (parent == column) {
+                        areas << item;
+                        break;
+                    }
+            }
+        return areas.size() == 2;
+    })(), 5000);
+    QTest::mouseClick(q.window, Qt::LeftButton, Qt::NoModifier, centreOf(areas[0]));
+    QTRY_COMPARE(q.backend().source()["name"].toString(), QString("a.png"));
+    QTest::mouseClick(q.window, Qt::LeftButton, Qt::NoModifier, centreOf(areas[1]));
+    QTRY_COMPARE(q.backend().source()["name"].toString(), QString("b.png"));
+    QTest::mouseClick(q.window, Qt::LeftButton, Qt::NoModifier, centreOf(areas[1])); // again: clear
+    QTRY_VERIFY(q.backend().source().isEmpty());
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_vVariesTheSelectedDraftAndTheSourceRowShows() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    QQuickItem *slider = itemByObjectName(q, "strengthSlider");
+    QVERIFY(slider);
+    QVERIFY(!slider->isVisible()); // no source, no source row
+    QVERIFY(abstractButton(q, "Generate"));
+    QVERIFY(qmlBatch(q));
+    QTest::keyClick(q.window, Qt::Key_Right);
+    QTRY_COMPARE(q.prop("selected").toInt(), 1);
+    const QString id = qmlDraft(q, 1)["id"].toString();
+    QTest::keyClick(q.window, 'v');
+    QTRY_VERIFY(q.backend().running());
+    QCOMPARE(q.backend().source()["key"].toString(), id);
+    QTRY_VERIFY_WITH_TIMEOUT(!q.backend().running(), 40000);
+    QCOMPARE(Library(q.rig.sb.library()).find(qmlDraft(q, 0)["id"].toString()).metadata["source"].toObject()["id"].toString(), id);
+    // The source row shows, the main button says what it does, and the strength follows the settings.
+    QTRY_VERIFY(slider->isVisible());
+    QTRY_VERIFY(abstractButton(q, "Make variations"));
+    QVERIFY(!abstractButton(q, "Generate"));
+    QVERIFY(qAbs(slider->property("value").toDouble() - 0.5) < 1e-6);
+    q.backend().setStrength(0.7);
+    QTRY_VERIFY(qAbs(slider->property("value").toDouble() - 0.7) < 1e-6);
+    QTest::qWait(150);
+    NO_QML_WARNINGS(q);
+    // Clear goes back to plain batches.
+    QQuickItem *clear = abstractButton(q, "Clear");
+    QVERIFY(clear);
+    QTest::mouseClick(q.window, Qt::LeftButton, Qt::NoModifier, centreOf(clear));
+    QTRY_VERIFY(q.backend().source().isEmpty());
+    QTRY_VERIFY(abstractButton(q, "Generate"));
+    QTRY_VERIFY(!slider->isVisible());
+}
+
+void LimgenTests::qml_strengthSliderSavesWhenLetGo() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    giveTheWindowBackgrounds(q, {"a.png"});
+    QTRY_COMPARE(q.backend().backgrounds().size(), 1);
+    QTest::keyClick(q.window, 'b');
+    QTRY_VERIFY(!q.backend().source().isEmpty());
+    QQuickItem *slider = itemByObjectName(q, "strengthSlider");
+    QVERIFY(slider);
+    QTRY_VERIFY(slider->isVisible());
+    // A click a quarter of the way in from the right end, on the track.
+    const QPoint where = slider->mapToScene(QPointF(slider->width() * 0.75, slider->height() / 2)).toPoint();
+    QTest::mousePress(q.window, Qt::LeftButton, Qt::NoModifier, where);
+    QTest::mouseRelease(q.window, Qt::LeftButton, Qt::NoModifier, where);
+    QTRY_VERIFY2(q.backend().strength() > 0.6 && q.backend().strength() < 0.85, qPrintable(QString::number(q.backend().strength())));
+    QCOMPARE(QJsonDocument::fromJson(readFile(q.rig.sb.configFile())).object()["strength"].toDouble(), q.backend().strength());
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_libraryOpensAndClosesWithL() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    QQuickItem *view = q.itemNamed("LibraryView");
+    QVERIFY(view);
+    QVERIFY(!view->isVisible());
+    QVERIFY(q.backend().library().isEmpty());
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), true);
+    QTRY_VERIFY(view->isVisible());
+    QCOMPARE(q.backend().library().size(), 4); // read when it opened
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), false);
+    QTRY_VERIFY(!view->isVisible());
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), true);
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), false);
+    // In the subject field L is a letter.
+    q.focusSubject();
+    QTRY_VERIFY(q.typing());
+    typeText(q.window, "ll");
+    QTest::qWait(100);
+    QCOMPARE(q.prop("libraryVisible").toBool(), false);
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_arrowsMoveByRowInTheLibrary() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q, "first rig"));
+    QVERIFY(qmlBatch(q, "second rig"));
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), true);
+    QQuickItem *view = q.itemNamed("LibraryView");
+    QTRY_VERIFY(view->property("columns").toInt() >= 2);
+    const int columns = view->property("columns").toInt();
+    const int count = q.backend().library().size();
+    QCOMPARE(count, 8);
+    QVERIFY2(columns < count, "the test needs more than one row");
+    auto selected = [&] { return q.prop("librarySelected").toInt(); };
+    QCOMPARE(selected(), 0);
+    QTest::keyClick(q.window, Qt::Key_Right);
+    QTRY_COMPARE(selected(), 1);
+    QTest::keyClick(q.window, Qt::Key_Down); // a whole row down
+    QTRY_COMPARE(selected(), 1 + columns);
+    QTest::keyClick(q.window, Qt::Key_Up);
+    QTRY_COMPARE(selected(), 1);
+    QTest::keyClick(q.window, Qt::Key_Left);
+    QTRY_COMPARE(selected(), 0);
+    QTest::keyClick(q.window, Qt::Key_Left); // the left end
+    QTest::keyClick(q.window, Qt::Key_Up);   // the top
+    QTest::qWait(60);
+    QCOMPARE(selected(), 0);
+    // Down to the last row and no further.
+    for (int i = 0; i < 5; ++i)
+        QTest::keyClick(q.window, Qt::Key_Down);
+    QTest::qWait(60);
+    QVERIFY(selected() + columns >= count); // the last row
+    QVERIFY(selected() < count);
+    // The grid of batch drafts is not what moved.
+    QCOMPARE(q.prop("selected").toInt(), 0);
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_theLibraryTakesTheClicks() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), true);
+    // Beside the library's title, where the grid's second tile is hidden
+    // underneath, a click and a double-click reach nothing.
+    QQuickItem *library = q.itemNamed("LibraryView");
+    QVERIFY(library);
+    const QPoint besideTitle = library->mapToScene(QPointF(library->width() - 60, 26)).toPoint();
+    QTest::mouseClick(q.window, Qt::LeftButton, Qt::NoModifier, besideTitle);
+    QTest::mouseDClick(q.window, Qt::LeftButton, Qt::NoModifier, besideTitle);
+    QTest::qWait(100);
+    QCOMPARE(q.prop("selected").toInt(), 0);
+    QCOMPARE(q.prop("fullView").toBool(), false);
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_closingTheLibraryClosesItsFullView() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), true);
+    QTest::keyClick(q.window, 'f');
+    QTRY_COMPARE(q.prop("fullView").toBool(), true);
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), false);
+    QCOMPARE(q.prop("fullView").toBool(), false);
+    // The arrows work in the grid again.
+    QTest::keyClick(q.window, Qt::Key_Right);
+    QTRY_COMPARE(q.prop("selected").toInt(), 1);
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_librarySelectionFollowsTheList() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), true);
+    QTest::keyClick(q.window, Qt::Key_Right);
+    QTest::keyClick(q.window, Qt::Key_Right);
+    QTRY_COMPARE(q.prop("librarySelected").toInt(), 2);
+    const QString id = q.backend().library()[2].toMap()["id"].toString();
+    // An image ahead of it in the list goes: the selection stays on the
+    // same image, now one place earlier.
+    const QString first = q.backend().library()[0].toMap()["id"].toString();
+    int tile = -1;
+    for (int i = 0; i < q.backend().drafts().size(); ++i)
+        if (qmlDraft(q, i)["id"].toString() == first)
+            tile = i;
+    QVERIFY(tile >= 0);
+    q.backend().discard(tile);
+    QTRY_COMPARE(q.prop("librarySelected").toInt(), 1);
+    QCOMPARE(q.backend().library()[1].toMap()["id"].toString(), id);
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_aKeptLibraryDraftNamesNoEmptyFile() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    q.backend().keep(0);
+    QTRY_VERIFY_WITH_TIMEOUT(qmlDraft(q, 0)["kept"].toBool(), 30000);
+    const QString id = qmlDraft(q, 0)["id"].toString();
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), true);
+    int index = -1;
+    for (int i = 0; i < q.backend().library().size(); ++i)
+        if (q.backend().library()[i].toMap()["id"].toString() == id)
+            index = i;
+    QVERIFY(index >= 0);
+    q.window->setProperty("librarySelected", index);
+    QTest::keyClick(q.window, 'f');
+    QTRY_COMPARE(q.prop("fullView").toBool(), true);
+    QTest::qWait(100);
+    for (QQuickItem *item : q.items())
+        if (item->inherits("QQuickLabel") && item->isVisible())
+            QVERIFY2(!item->property("text").toString().trimmed().endsWith("kept as"),
+                     qPrintable(item->property("text").toString()));
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_fShowsTheLibraryImage() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), true);
+    QTest::keyClick(q.window, Qt::Key_Right);
+    QTRY_COMPARE(q.prop("librarySelected").toInt(), 1);
+    const QString id = q.backend().library()[1].toMap()["id"].toString();
+    QTest::keyClick(q.window, 'f');
+    QTRY_COMPARE(q.prop("fullView").toBool(), true);
+    QQuickItem *full = q.itemNamed("FullView");
+    QVERIFY(full);
+    QTRY_VERIFY(full->isVisible());
+    QCOMPARE(full->property("draft").toMap()["id"].toString(), id);
+    // Esc closes the full view first, then the library.
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_COMPARE(q.prop("fullView").toBool(), false);
+    QCOMPARE(q.prop("libraryVisible").toBool(), true);
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), false);
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_vInTheLibraryVariesTheSelectedImage() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), true);
+    QTest::keyClick(q.window, Qt::Key_Right);
+    QTRY_COMPARE(q.prop("librarySelected").toInt(), 1);
+    const QString id = q.backend().library()[1].toMap()["id"].toString();
+    QTest::keyClick(q.window, 'v');
+    // The library closes and the batch of variations starts, from that image.
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), false);
+    QTRY_VERIFY(q.backend().running());
+    QCOMPARE(q.backend().source()["key"].toString(), id);
+    QTRY_VERIFY_WITH_TIMEOUT(!q.backend().running(), 40000);
+    QCOMPARE(Library(q.rig.sb.library()).find(qmlDraft(q, 0)["id"].toString()).metadata["source"].toObject()["id"].toString(), id);
+    // V in an empty library does nothing.
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_keepSetDiscardDoNothingWhileTheLibraryIsOpen() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), true);
+    for (const char key : {'k', 's', 'd'})
+        QTest::keyClick(q.window, key);
+    QTest::qWait(200);
+    // Checked before Ctrl+Z: that would undo (cancel) a keep that had started, and hide it.
+    QVERIFY(!q.backend().keeping());
+    QVERIFY(!q.backend().canUndo());
+    QTest::keyClick(q.window, Qt::Key_Z, Qt::ControlModifier);
+    QTest::qWait(100);
+    QVERIFY(!q.backend().canRedo());
+    for (int i = 0; i < 4; ++i)
+        QVERIFY(!qmlDraft(q, i)["kept"].toBool() && !qmlDraft(q, i)["discarded"].toBool());
+    QVERIFY(q.rig.sb.fixture.omarchyCalls().isEmpty());
+    QCOMPARE(upscaleCalls(q.rig.sb.fakeLog()).size(), 0);
+    // Closed, the same keys act on the grid.
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), false);
+    QTest::keyClick(q.window, 'd');
+    QTRY_VERIFY(qmlDraft(q, 0)["discarded"].toBool());
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::qml_escChainOrder() {
+    QmlRig q(true, fakeEngine, true, 8);
+    LOAD_WINDOW(q);
+    QVERIFY(qmlBatch(q));
+    giveTheWindowBackgrounds(q, {"a.png"});
+    QTRY_COMPARE(q.backend().backgrounds().size(), 1);
+    // A variation running (it hangs), the library open with an image full size, and the help over it all.
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    QTest::keyClick(q.window, 'b');
+    QTRY_VERIFY(!q.backend().source().isEmpty());
+    QTest::keyClick(q.window, Qt::Key_Space);
+    QTRY_VERIFY(q.backend().running());
+    QTRY_VERIFY_WITH_TIMEOUT(imageCalls(q.rig.sb.fakeLog()).size() >= 2, 15000);
+    QTest::keyClick(q.window, 'l');
+    QTRY_COMPARE(q.prop("libraryVisible").toBool(), true);
+    QTest::keyClick(q.window, 'f');
+    QTRY_COMPARE(q.prop("fullView").toBool(), true);
+    QTest::keyClick(q.window, '?');
+    QTRY_COMPARE(q.prop("helpVisible").toBool(), true);
+    auto state = [&] {
+        return QString("help=%1 full=%2 library=%3 typing=%4 running=%5 source=%6")
+            .arg(q.prop("helpVisible").toBool()).arg(q.prop("fullView").toBool()).arg(q.prop("libraryVisible").toBool())
+            .arg(q.typing()).arg(q.backend().running()).arg(!q.backend().source().isEmpty());
+    };
+    // 1: the help.
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_COMPARE_WITH_TIMEOUT(state(), QString("help=0 full=1 library=1 typing=0 running=1 source=1"), 3000);
+    // 2: the full view.
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_COMPARE_WITH_TIMEOUT(state(), QString("help=0 full=0 library=1 typing=0 running=1 source=1"), 3000);
+    // 3: the library.
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_COMPARE_WITH_TIMEOUT(state(), QString("help=0 full=0 library=0 typing=0 running=1 source=1"), 3000);
+    // 4: a text field.
+    q.focusSubject();
+    QTRY_VERIFY(q.typing());
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_COMPARE_WITH_TIMEOUT(state(), QString("help=0 full=0 library=0 typing=0 running=1 source=1"), 3000);
+    // 5: the running batch.
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_COMPARE_WITH_TIMEOUT(state(), QString("help=0 full=0 library=0 typing=0 running=0 source=1"), 15000);
+    // 6: the source, last.
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTRY_COMPARE_WITH_TIMEOUT(state(), QString("help=0 full=0 library=0 typing=0 running=0 source=0"), 3000);
+    // Nothing left: Esc does nothing.
+    QTest::keyClick(q.window, Qt::Key_Escape);
+    QTest::qWait(100);
+    QCOMPARE(state(), QString("help=0 full=0 library=0 typing=0 running=0 source=0"));
+    NO_QML_WARNINGS(q);
 }
 
 // The child of backend_destroyingWhileABatchRunsIsSafe: a Backend on the

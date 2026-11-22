@@ -10,6 +10,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <algorithm>
 
 namespace {
 
@@ -88,7 +89,7 @@ QJsonObject Library::metadata(const QString &id, const QDateTime &created, const
         {"cfg", record.cfg},
         {"sampler", record.sampler},
         {"size", QJsonArray{record.width, record.height}},
-        {"source", QJsonValue()},
+        {"source", record.source.isEmpty() ? QJsonValue() : QJsonValue(record.source)},
         {"finish", QJsonValue()},
     };
 }
@@ -152,6 +153,27 @@ LibraryEntry Library::find(const QString &id) const {
         return {};
     entry.metadata = QJsonDocument::fromJson(sidecar.readAll()).object();
     return entry.metadata.value("id").toString() == id ? entry : LibraryEntry{};
+}
+
+QList<LibraryEntry> Library::list() const {
+    static const QRegularExpression month(QRegularExpression::anchoredPattern("\\d{4}-\\d{2}"));
+    QList<LibraryEntry> entries;
+    const QDir root(m_directory);
+    for (const QString &folder : root.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (!month.match(folder).hasMatch())
+            continue;
+        for (const QFileInfo &sidecar : QDir(root.filePath(folder)).entryInfoList({"*.json"}, QDir::Files)) {
+            const LibraryEntry entry = find(sidecar.completeBaseName());
+            if (entry.isValid())
+                entries << entry;
+        }
+    }
+    // Ids start with the date, so they sort by day; the time breaks ties.
+    std::sort(entries.begin(), entries.end(), [](const LibraryEntry &a, const LibraryEntry &b) {
+        const QString first = a.metadata.value("created").toString(), second = b.metadata.value("created").toString();
+        return first != second ? first > second : a.id > b.id;
+    });
+    return entries;
 }
 
 bool Library::discard(const QString &id, QString *error) {

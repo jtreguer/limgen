@@ -140,6 +140,8 @@ QStringList SdCppEngine::arguments(const EngineRequest &request) {
         arguments << "--sampling-method" << request.sampler;
     arguments << "--seed" << QString::number(request.seed) << "--batch-count" << QString::number(request.count)
               << "--output" << request.outputDirectory + "/draft-%d.png";
+    if (!request.initImage.isEmpty())
+        arguments << "--init-img" << request.initImage << "--strength" << QString::number(request.strength);
     // The tiny decoder draws previews only; without --taesd-preview-only the
     // engine would also decode the drafts with it, at lower quality.
     if (request.previews && request.files.contains("tae"))
@@ -205,7 +207,7 @@ void SdCppEngine::launch() {
     if (m_request.previews)
         QDir().mkpath(m_request.outputDirectory + "/preview");
     m_parser = m_request.mode == EngineRequest::Mode::Upscale ? std::make_unique<ProgressParser>(1, 0)
-                                                                : std::make_unique<ProgressParser>(m_request.count, m_request.steps);
+                                                                : std::make_unique<ProgressParser>(m_request.count, m_request.samplingSteps());
     m_output.clear();
     m_previewsReported = 0;
     m_process.start(m_program, arguments(m_request));
@@ -248,7 +250,8 @@ void SdCppEngine::reportPreviews(bool all) {
     const QStringList files =
         QDir(m_request.outputDirectory + "/preview").entryList({"*.png"}, QDir::Files, QDir::Name);
     const int complete = all ? files.size() : files.size() - 1;
-    const int perImage = qMax(1, m_request.steps / qMax(1, m_request.previewInterval));
+    const int steps = m_parser ? m_parser->steps() : m_request.samplingSteps();
+    const int perImage = qMax(1, steps / qMax(1, m_request.previewInterval));
     for (int i = m_previewsReported; i < complete; ++i)
         emit preview(qMin(i / perImage, m_request.count - 1),
                      m_request.outputDirectory + "/preview/" + files.at(i));

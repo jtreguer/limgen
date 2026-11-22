@@ -48,7 +48,7 @@ Rectangle {
 
             Button {
                 readonly property bool stops: backend.running || backend.batchWaiting
-                text: stops ? qsTr("Cancel") : qsTr("Generate")
+                text: stops ? qsTr("Cancel") : backend.source.path ? qsTr("Make variations") : qsTr("Generate")
                 // The main action is filled with the theme accent, with text
                 // in whichever of black or white reads on it.
                 Material.elevation: 0
@@ -57,6 +57,54 @@ Rectangle {
                 enabled: stops || backend.canGenerate
                 focusPolicy: Qt.NoFocus
                 onClicked: stops ? backend.cancel() : bar.submitted()
+            }
+        }
+
+        // The source of a variation and how far the drafts may move from it.
+        RowLayout {
+            Layout.fillWidth: true
+            visible: backend.source.path !== undefined
+            spacing: 12
+
+            Image {
+                Layout.preferredWidth: 64
+                Layout.preferredHeight: 36
+                source: backend.source.url || ""
+                sourceSize.width: 128
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+            }
+            Label {
+                Layout.fillWidth: true
+                elide: Text.ElideMiddle
+                text: qsTr("Variations of %1").arg(backend.source.name || "")
+            }
+            Label { text: qsTr("Strength"); color: "#9a9aa0" }
+            Slider {
+                id: strength
+                objectName: "strengthSlider"
+                Layout.preferredWidth: 180
+                from: 0.1
+                to: 0.9
+                stepSize: 0.05
+                focusPolicy: Qt.NoFocus
+                value: backend.strength
+                // Saved once the handle is let go, not at every step of a drag.
+                onPressedChanged: if (!pressed) backend.strength = value
+            }
+            Label {
+                Layout.preferredWidth: 40
+                color: "#9a9aa0"
+                text: {
+                    translator.language
+                    return qsTr("%1%").arg(Math.round(strength.value * 100).toLocaleString(Qt.locale(), 'f', 0))
+                }
+            }
+            Button {
+                text: qsTr("Clear")
+                flat: true
+                focusPolicy: Qt.NoFocus
+                onClicked: backend.clearSource()
             }
         }
 
@@ -91,6 +139,7 @@ Rectangle {
             Label { text: qsTr("Colour pass"); color: "#9a9aa0" }
             Slider {
                 id: colorPass
+                objectName: "colorPassSlider"
                 Layout.preferredWidth: 180
                 from: 0
                 to: 1

@@ -21,6 +21,8 @@ ApplicationWindow {
     property bool fullView: false
     property bool promptVisible: false
     property int selected: 0
+    property bool libraryVisible: false
+    property int librarySelected: 0
     property bool quitting: false
     // Single-letter shortcuts are off while the user types, or a dialog is
     // up. Under the help only ? and Q act, so nothing changes out of sight.
@@ -29,11 +31,43 @@ ApplicationWindow {
     readonly property bool keysFree: !typing && !dialogOpen
     readonly property bool actionKeysFree: keysFree && !helpVisible
     readonly property var selectedDraft: backend.drafts.length > selected ? backend.drafts[selected] : null
+    readonly property var libraryItem: backend.library.length > librarySelected ? backend.library[librarySelected] : null
+    // The selection follows its image when the list changes (a discard, a
+    // keep, a new batch), and stays in range when the image is gone.
+    property string librarySelectedId: ""
+    // Read from the list itself: libraryItem may not have caught up yet.
+    onLibrarySelectedChanged: {
+        const item = backend.library[librarySelected]
+        librarySelectedId = item ? item.id : ""
+    }
+    Connections {
+        target: backend
+        function onLibraryChanged() {
+            const items = backend.library
+            for (let i = 0; i < items.length; ++i) {
+                if (items[i].id === win.librarySelectedId) {
+                    win.librarySelected = i
+                    return
+                }
+            }
+            win.librarySelected = Math.max(0, Math.min(win.librarySelected, items.length - 1))
+            const item = items[win.librarySelected]
+            win.librarySelectedId = item ? item.id : ""
+        }
+    }
+    // What F shows and V varies: the library's selection while it is open.
+    readonly property var shownDraft: libraryVisible ? libraryItem : selectedDraft
     readonly property bool setupNeeded: !backend.engineReady || !backend.modelInstalled
 
     // The drafts sit in a 2x2 grid: left and right move along a row, up and
     // down between the rows.
     function move(dx, dy) {
+        if (libraryVisible) {
+            const next = librarySelected + dx + dy * libraryView.columns
+            if (next >= 0 && next < backend.library.length)
+                librarySelected = next
+            return
+        }
         const count = backend.drafts.length
         if (count === 0)
             return
@@ -56,6 +90,29 @@ ApplicationWindow {
     }
 
     function leaveFields() { grid.forceActiveFocus() }
+
+    // Opening or closing the library also closes a full view, which shows
+    // whichever of the two is open.
+    function toggleLibrary() {
+        if (!libraryVisible) {
+            backend.loadLibrary()
+            librarySelected = 0
+        }
+        fullView = false
+        libraryVisible = !libraryVisible
+    }
+
+    function vary() {
+        fullView = false
+        if (libraryVisible) {
+            if (libraryItem) {
+                backend.varyLibrary(libraryItem.id)
+                libraryVisible = false
+            }
+        } else {
+            backend.vary(selected)
+        }
+    }
 
     onClosing: (close) => {
         if (backend.busy && !quitting) {
@@ -83,6 +140,7 @@ ApplicationWindow {
     onBatchRunningChanged: {
         if (batchRunning) {
             fullView = false
+            libraryVisible = false
             selected = 0
         }
     }
@@ -100,13 +158,18 @@ ApplicationWindow {
         onActivated: {
             if (win.fullView)
                 win.fullView = false
-            else if (win.selectedDraft && win.selectedDraft.state === "done")
+            else if (win.shownDraft && win.shownDraft.state === "done")
                 win.fullView = true
         }
     }
-    Shortcut { sequence: "K"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.keep(win.selected) }
-    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.keepAndSet(win.selected) }
-    Shortcut { sequence: "D"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.discard(win.selected) }
+    // K, S and D act on the batch's drafts, so not while the library is open.
+    Shortcut { sequence: "K"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.libraryVisible; onActivated: backend.keep(win.selected) }
+    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.libraryVisible; onActivated: backend.keepAndSet(win.selected) }
+    Shortcut { sequence: "D"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.libraryVisible; onActivated: backend.discard(win.selected) }
+    Shortcut { sequence: "V"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: win.vary() }
+    Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.cycleBackground(1) }
+    Shortcut { sequence: "Shift+B"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.cycleBackground(-1) }
+    Shortcut { sequence: "L"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: win.toggleLibrary() }
     // Off while typing, so a text field keeps its own undo.
     Shortcut { sequences: [StandardKey.Undo]; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.undo() }
     Shortcut { sequences: [StandardKey.Redo]; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.redo() }
@@ -114,8 +177,9 @@ ApplicationWindow {
     Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(1, 0) }
     Shortcut { sequence: "Up"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(0, -1) }
     Shortcut { sequence: "Down"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(0, 1) }
-    // Esc closes what is open, leaves a text field, or cancels the batch,
-    // in that order. Dialogs handle their own Esc.
+    // Esc closes what is open, leaves a text field, cancels the batch, or
+    // goes back from variations to plain batches, in that order. Dialogs
+    // handle their own Esc.
     Shortcut {
         sequence: "Esc"
         context: Qt.ApplicationShortcut
@@ -125,10 +189,14 @@ ApplicationWindow {
                 win.helpVisible = false
             else if (win.fullView)
                 win.fullView = false
+            else if (win.libraryVisible)
+                win.libraryVisible = false
             else if (win.typing)
                 win.leaveFields()
             else if (backend.running || backend.batchWaiting)
                 backend.cancel()
+            else
+                backend.clearSource()
         }
     }
 
@@ -148,28 +216,51 @@ ApplicationWindow {
                 onModelClicked: if (!backend.busy) modelPicker.open()
             }
 
-            Item {
+            RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                spacing: 0
 
-                SetupPanel {
-                    anchors.fill: parent
-                    visible: win.setupNeeded
-                    onChooseModel: modelPicker.open()
+                BackgroundColumn {
+                    Layout.preferredWidth: 196
+                    Layout.fillHeight: true
                 }
 
-                DraftGrid {
-                    id: grid
-                    anchors.fill: parent
-                    anchors.margins: 16
-                    visible: !win.setupNeeded
-                    focus: true
-                    selected: win.selected
-                    onSelect: (index) => win.selected = index
-                    onOpen: (index) => {
-                        win.selected = index
-                        if (backend.drafts[index].state === "done")
+                Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    SetupPanel {
+                        anchors.fill: parent
+                        visible: win.setupNeeded
+                        onChooseModel: modelPicker.open()
+                    }
+
+                    DraftGrid {
+                        id: grid
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        visible: !win.setupNeeded
+                        focus: true
+                        selected: win.selected
+                        onSelect: (index) => win.selected = index
+                        onOpen: (index) => {
+                            win.selected = index
+                            if (backend.drafts[index].state === "done")
+                                win.fullView = true
+                        }
+                    }
+
+                    LibraryView {
+                        id: libraryView
+                        anchors.fill: parent
+                        visible: win.libraryVisible
+                        selected: win.librarySelected
+                        onSelect: (index) => win.librarySelected = index
+                        onOpen: (index) => {
+                            win.librarySelected = index
                             win.fullView = true
+                        }
                     }
                 }
             }
@@ -209,8 +300,8 @@ ApplicationWindow {
 
         FullView {
             anchors.fill: parent
-            visible: win.fullView && win.selectedDraft !== null && win.selectedDraft.state === "done"
-            draft: win.selectedDraft
+            visible: win.fullView && win.shownDraft !== null && win.shownDraft.state === "done"
+            draft: win.shownDraft
             onClosed: win.fullView = false
         }
 

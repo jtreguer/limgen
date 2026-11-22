@@ -36,10 +36,25 @@ void ProgressParser::parseLine(const QString &raw, QList<ProgressEvent> &events)
     static const QRegularExpression step(R"(\|\s*(\d+)/(\d+)\s*-\s*([0-9.]+)\s*(s/it|it/s))");
     static const QRegularExpression decoded(R"(\[I\] latent (\d+) decoded)");
     static const QRegularExpression saved(R"(\[I\] save result image (\d+) to '(.*)' \(success\))");
+    static const QRegularExpression target(R"(\[I\] target t_enc is (\d+) steps)");
+
+    // Image to image runs t_enc + 1 sampling steps; the engine's own count
+    // wins over the one worked out beforehand.
+    if (const auto m = target.match(line); m.hasMatch()) {
+        if (m_steps > 0) {
+            m_steps = m.captured(1).toInt() + 1;
+            m_encoding = true;
+        }
+        return;
+    }
+    if (line.startsWith("[I] encode_first_stage completed")) {
+        m_encoding = false;
+        return;
+    }
 
     if (const auto m = step.match(line); m.hasMatch()) {
         const int n = m.captured(1).toInt(), total = m.captured(2).toInt();
-        if (m_sampled >= m_images || (m_steps > 0 && total != m_steps) || n < 1 || n > total)
+        if (m_encoding || m_sampled >= m_images || (m_steps > 0 && total != m_steps) || n < 1 || n > total)
             return;
         double seconds = m.captured(3).toDouble();
         if (m.captured(4) == "it/s" && seconds > 0)

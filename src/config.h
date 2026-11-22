@@ -31,6 +31,11 @@ public:
     // 1 to 100; 92 by default.
     static constexpr int defaultJpegQuality = 92;
     int jpegQuality() const;
+    // How far the window's variations move from their source, 0.1 to 0.9;
+    // 0.5 by default.
+    static constexpr double defaultStrength = 0.5;
+    double strength() const;
+    void setStrength(double strength);
 
     // Written beside the file and renamed into place.
     bool save(QString *error = nullptr) const;

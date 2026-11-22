@@ -280,13 +280,26 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
     command.parser.addOption({"seed", tr("The first draft's seed; the others count up from it"), "n"});
     command.parser.addOption({"prompt", tr("The full prompt, used as given instead of the one built from the "
                                            "subject and the theme"), "text"});
+    command.parser.addOption({"from", tr("Make variations of this image: a library id or an image file"),
+                              "image"});
+    command.parser.addOption({"strength", tr("How far variations move from the image, 0.1 to 0.9 (default 0.5)"),
+                              "n", "0.5"});
     if (!command.parse(arguments, 0, 1))
         return command.status;
 
     const QString subject = command.argument(0).trimmed();
     const QString fullPrompt = command.parser.value("prompt").trimmed();
-    if (subject.isEmpty() && fullPrompt.isEmpty())
-        return fail(tr("Give a subject, or a full prompt with --prompt."), Usage);
+    const QString from = command.parser.value("from");
+    // A variation needs nothing typed: it keeps the image's look, and a
+    // library image brings its own prompt.
+    if (subject.isEmpty() && fullPrompt.isEmpty() && from.isEmpty())
+        return fail(tr("Give a subject, a full prompt with --prompt, or an image with --from."), Usage);
+    if (command.parser.isSet("strength") && from.isEmpty())
+        return fail(tr("--strength goes with --from."), Usage);
+    bool strengthOk = false;
+    const double strength = command.parser.value("strength").toDouble(&strengthOk);
+    if (!strengthOk || !(strength >= Batch::minStrength && strength <= Batch::maxStrength))
+        return fail(tr("--strength takes a number from 0.1 to 0.9."), Usage);
     bool numberOk = false;
     const int count = command.parser.value("count").toInt(&numberOk);
     if (!numberOk || count < 1 || count > 8)
@@ -322,11 +335,15 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
     settings.fullPrompt = fullPrompt;
     settings.count = count;
     settings.seed = seed;
+    settings.source = from;
+    settings.strength = strength;
     Batch batch(catalogue, paths);
     QString message;
     const Batch::Outcome prepared = batch.prepare(settings, SdCppEngine().probe(), &message);
     if (prepared != Batch::Outcome::Ok)
-        return fail(message, prepared == Batch::Outcome::UnknownModel ? Usage : NotRunnable);
+        return fail(message, prepared == Batch::Outcome::UnknownModel || prepared == Batch::Outcome::UnknownSource
+                                 ? Usage
+                                 : NotRunnable);
 
     QList<LibraryEntry> entries;
     Batch::Outcome outcome = Batch::Outcome::Ok;
@@ -378,6 +395,7 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
                {"style", batch.styleId()},
                {"prompt", batch.request().prompt},
                {"seed", double(seed)},
+               {"source", batch.source().isEmpty() ? QJsonValue() : QJsonValue(batch.source())},
                {"drafts", list}});
         return Ok;
     }
@@ -557,6 +575,39 @@ int set(const QStringList &arguments, const OmarchyPaths &paths) {
         return Ok;
     }
     print(stdout, file);
+    return Ok;
+}
+
+int library(const QStringList &arguments) {
+    Command command("library", tr("List the drafts and finished images in the library, newest first."));
+    command.parser.addOption({"theme", tr("Only those made for this theme"), "slug"});
+    if (!command.parse(arguments))
+        return command.status;
+    const QString theme = command.parser.value("theme");
+    QJsonArray list;
+    QStringList lines;
+    for (const LibraryEntry &entry : Library().list()) {
+        const QString made = entry.metadata.value("theme").toObject().value("slug").toString();
+        if (command.parser.isSet("theme") && made != theme)
+            continue;
+        const QString kind = entry.metadata.value("kind").toString();
+        QJsonObject object{{"id", entry.id},
+                           {"kind", kind},
+                           {"created", entry.metadata.value("created")},
+                           {"theme", made.isEmpty() ? QJsonValue() : QJsonValue(made)},
+                           {"subject", entry.metadata.value("subject")},
+                           {"path", entry.image}};
+        if (kind == "final")
+            object.insert("from", entry.metadata.value("finish").toObject().value("from"));
+        list << object;
+        lines << QStringList{entry.id, kind, made.isEmpty() ? "-" : made, entry.image}.join("  ");
+    }
+    if (command.json()) {
+        fputs(QJsonDocument(list).toJson().constData(), stdout);
+        return Ok;
+    }
+    if (!lines.isEmpty())
+        print(stdout, lines.join('\n'));
     return Ok;
 }
 
@@ -797,6 +848,7 @@ QString summary() {
               "  doctor            The engine, the GPU, the installed models, and what is missing\n"
               "  generate          Make drafts for the current theme\n"
               "  keep <id>         Finish a draft and add it to the theme's backgrounds\n"
+              "  library           The drafts and finished images limgen made\n"
               "  set <id-or-file>  Show an image as the background now\n"
               "  models [list]     The models limgen can run, installed or not\n"
               "  models pull <id>  Download a model, after showing its licence and size\n"
@@ -805,7 +857,7 @@ QString summary() {
 }
 
 bool isCommand(const QString &word) {
-    return QStringList{"open", "palette", "doctor", "generate", "keep", "set",
+    return QStringList{"open", "palette", "doctor", "generate", "keep", "set", "library",
                        "models", "help", "--help", "-h", "--version"}
         .contains(word);
 }
@@ -824,6 +876,8 @@ int run(const QStringList &arguments, const OmarchyPaths &paths) {
         return keep(arguments, paths);
     if (command == "set")
         return set(arguments, paths);
+    if (command == "library")
+        return library(arguments);
     if (command == "models")
         return models(arguments);
     if (command == "help" || command == "--help" || command == "-h")
