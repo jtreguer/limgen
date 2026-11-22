@@ -503,8 +503,16 @@ cover the window's strings and leave the command-line ones out.
 - The CUDA package builds for Turing and newer desktop cards (`75;86;89;120`);
   development builds use `native`.
 - `LIMGEN_SD_CLI` overrides the engine path, for development and tests.
-- Later: publish through `omacom/omarchy-pkgs` as the Omarchy app
-  conventions describe, once a tagged release exists.
+- A release: bump the version everywhere it is written, together:
+  `pkgver` in the PKGBUILD (with `pkgrel=1`), `src/main.cpp`, and the
+  tests that assert it (`tests/limgen_tests.cpp`, `tests/bench-tools.sh`),
+  and set the release tarball's sum to `'SKIP'` in that commit. Tag
+  `v<version>`, publish the GitHub release, then put the tag archive's
+  SHA-256 in the PKGBUILD on master (a tagged PKGBUILD cannot hold its own
+  archive's sum). A rebuild of the same version only raises `pkgrel`. `v0.1.0` was released this
+  way on 22 November 2026, and its PKGBUILD built cleanly from the tarball.
+- Next: publish through `omacom/omarchy-pkgs` as the Omarchy app
+  conventions describe, building from the release tarball.
 
 ## 11. Testing
 

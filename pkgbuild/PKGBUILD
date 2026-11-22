@@ -55,8 +55,8 @@ if [[ " ${_engines[*]} " == *" cuda "* ]]; then
 fi
 if [[ ${LIMGEN_SOURCE:-} != local ]]; then
   source+=("limgen-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-  # The release's checksum is set when v$pkgver is tagged.
-  sha256sums+=('SKIP')
+  # Set after tagging: a tagged PKGBUILD cannot hold its own archive's sum.
+  sha256sums+=('9417ac6113097b0619b72dce01e68f667fdd06f399e61a69c6f1ee3892495ad4')
 fi
 
 _app() {

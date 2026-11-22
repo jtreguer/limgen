@@ -1116,19 +1116,14 @@ test_pkgbuild_has_one_checksum_per_source() {
   eq "$(pkgbuild_eval 'echo "${#source[@]}"' LIMGEN_SOURCE=local)" "$(($(pkgbuild_eval 'echo "${#source[@]}"') - 1))" "local drops the tarball"
 }
 
-test_pkgbuild_checksums_are_hashes_except_the_release_tarball() {
-  local line n=0 skips=0
+test_pkgbuild_checksums_are_all_hashes() {
+  # Every source is pinned, the release tarball too since v0.1.0 was tagged.
+  local line n=0
   while read -r line; do
     n=$((n + 1))
-    if [[ $line == SKIP ]]; then
-      skips=$((skips + 1))
-    else
-      [[ $line =~ ^[0-9a-f]{64}$ ]] || fail "not a SHA-256: $line"
-    fi
+    [[ $line =~ ^[0-9a-f]{64}$ ]] || fail "not a SHA-256: $line"
   done < <(pkgbuild_eval 'printf "%s\n" "${sha256sums[@]}"' LIMGEN_ENGINES="vulkan cuda")
-  eq "$skips" 1 "unpinned sources (the release tarball, until it is tagged)"
   [[ $n -ge 5 ]] || fail "only $n checksums"
-  # With the local checkout there is nothing left unpinned.
   while read -r line; do
     [[ $line =~ ^[0-9a-f]{64}$ ]] || fail "not a SHA-256 with LIMGEN_SOURCE=local: $line"
   done < <(pkgbuild_eval 'printf "%s\n" "${sha256sums[@]}"' LIMGEN_SOURCE=local)
