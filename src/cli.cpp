@@ -23,6 +23,7 @@
 #include <QLocale>
 #include <QLockFile>
 #include <QRandomGenerator>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QTimer>
 #include <atomic>
@@ -611,6 +612,60 @@ int library(const QStringList &arguments) {
     return Ok;
 }
 
+// As Hype does: one shared copy in ~/.agents/skills, which Codex and other
+// agents find there, linked into Claude Code's skills folder.
+int skill(const QStringList &arguments) {
+    Command command("skill", tr("Print the agent skill, or install it for coding agents with: limgen skill install."),
+                    false);
+    command.parser.addPositionalArgument("install", tr("Copy it to ~/.agents/skills/limgen and link it into "
+                                                       "~/.claude/skills"),
+                                         "[install]");
+    if (!command.parse(arguments, 0, 1))
+        return command.status;
+    QFile bundled(":/skill.md");
+    if (!bundled.open(QIODevice::ReadOnly))
+        return fail(tr("The skill is missing from this build."));
+    const QByteArray text = bundled.readAll();
+    if (command.argument(0).isEmpty()) {
+        fputs(text.constData(), stdout);
+        return Ok;
+    }
+    if (command.argument(0) != "install")
+        return fail(tr("Use limgen skill to print the skill, or limgen skill install."), Usage);
+
+    const QDir home = QDir::home();
+    const QString directory = home.filePath(".agents/skills/limgen");
+    QSaveFile file(directory + "/SKILL.md");
+    if (!QDir().mkpath(directory) || !file.open(QIODevice::WriteOnly) || file.write(text) < 0 || !file.commit())
+        return fail(tr("Cannot write %1").arg(directory + "/SKILL.md"));
+    print(stdout, tr("Installed %1").arg(file.fileName()));
+    // Without Claude Code there is nothing to link into.
+    if (!home.exists(".claude"))
+        return Ok;
+    const QString link = home.filePath(".claude/skills/limgen");
+    const QFileInfo existing(link);
+    // Only limgen's own link (or one to nothing) is replaced; anything else
+    // there is the person's.
+    if (existing.isSymLink()) {
+        const QString target = existing.symLinkTarget();
+        if (QFileInfo::exists(target) &&
+            QFileInfo(target).canonicalFilePath() != QFileInfo(directory).canonicalFilePath())
+            return fail(tr("%1 links to %2, not to limgen's skill; it is left alone.").arg(link, target));
+    } else if (existing.exists()) {
+        return fail(tr("%1 exists and is not a link; it is left alone.").arg(link));
+    }
+    // Made beside it and renamed over it, so a failure leaves the old link.
+    const QString part = link + ".part";
+    QFile::remove(part);
+    if (!home.mkpath(".claude/skills") || !QFile::link("../../.agents/skills/limgen", part) ||
+        std::rename(QFile::encodeName(part).constData(), QFile::encodeName(link).constData()) != 0) {
+        QFile::remove(part);
+        return fail(tr("Cannot link %1").arg(link));
+    }
+    print(stdout, tr("Linked %1").arg(link));
+    return Ok;
+}
+
 int modelsList(bool json) {
     QString catalogueError;
     const Catalogue catalogue = Catalogue::fromEnvironment(&catalogueError);
@@ -849,6 +904,7 @@ QString summary() {
               "  generate          Make drafts for the current theme\n"
               "  keep <id>         Finish a draft and add it to the theme's backgrounds\n"
               "  library           The drafts and finished images limgen made\n"
+              "  skill [install]   Print the agent skill, or install it for coding agents\n"
               "  set <id-or-file>  Show an image as the background now\n"
               "  models [list]     The models limgen can run, installed or not\n"
               "  models pull <id>  Download a model, after showing its licence and size\n"
@@ -858,7 +914,7 @@ QString summary() {
 
 bool isCommand(const QString &word) {
     return QStringList{"open", "palette", "doctor", "generate", "keep", "set", "library",
-                       "models", "help", "--help", "-h", "--version"}
+                       "skill", "models", "help", "--help", "-h", "--version"}
         .contains(word);
 }
 
@@ -878,6 +934,8 @@ int run(const QStringList &arguments, const OmarchyPaths &paths) {
         return set(arguments, paths);
     if (command == "library")
         return library(arguments);
+    if (command == "skill")
+        return skill(arguments);
     if (command == "models")
         return models(arguments);
     if (command == "help" || command == "--help" || command == "-h")

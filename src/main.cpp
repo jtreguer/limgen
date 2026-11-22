@@ -3,6 +3,7 @@
 
 #include <QGuiApplication>
 #include <QIcon>
+#include <QLocale>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -46,13 +47,18 @@ int main(int argc, char *argv[]) {
 
     const OmarchyPaths paths = OmarchyPaths::fromEnvironment();
 
+    // Commands speak English, whatever the desktop's language: scripts and
+    // agents read their output, as with Omarchy's other apps. Their numbers
+    // too, rather than the system locale's ("6.7 GB", not "6,7 GB").
+    if (!window) {
+        QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+        return Cli::run(arguments, paths);
+    }
+
     // Installed before anything is translated, and every qsTr() binding is
     // re-evaluated when the Omarchy language changes.
     Translator translator(paths.language);
     app.installTranslator(&translator);
-
-    if (!window)
-        return Cli::run(arguments, paths);
 
     QQuickStyle::setStyle("Material");
     Theme theme(paths.state, nullptr, paths.hyprctl);

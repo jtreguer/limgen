@@ -17,8 +17,10 @@ Design done, MIT licence. Milestones L0 (the engine spike, results in
 `docs/models.md` section 6), L1 (the skeleton and `limgen palette`), L2
 (the engine, `limgen doctor` and `limgen generate`), L3 (model downloads,
 `limgen models`), L4 (the window), L5 (keeping, `limgen keep` and
-`limgen set`) and L6 (variations, the library view, `limgen library`) are
-done; L7 is next (`docs/technical.md` section 12):
+`limgen set`), L6 (variations, the library view, `limgen library`) and L7
+(packaging, translations, README, `limgen skill`) are done; L8 is next
+(`docs/technical.md` section 12). The README's screenshot still waits for
+real drafts on a free GPU:
 
 | # | Deliverable |
 |---|---|
@@ -74,7 +76,8 @@ tests/bench-tools.sh [name]          # tests for the scripts above; no GPU or ne
 Until `bin/test` exists (L1), `tests/bench-tools.sh` is the suite that must
 pass before a commit; from L1 on, `bin/test` runs it too.
 
-The engine pin (tag and commit) lives in `bin/build-engine`. All builds need
+The engine pin (tag and commit) lives in `pkgbuild/PKGBUILD`; `bin/build-engine`
+reads it from there. All builds need
 `cmake` and `ninja`; Vulkan builds also need `vulkan-headers`,
 `spirv-headers` and `shaderc`; CUDA builds need `cuda`.
 
@@ -83,7 +86,8 @@ These exist from L1 on:
 ```
 bin/build      # qmake6 + make into build/limgen
 bin/test       # builds and runs tests offscreen
-bin/install    # makepkg -fsi: installs the app so it shows in the launcher
+bin/install    # makepkg -fsi from this checkout: limgen and its Vulkan engine
+               # (LIMGEN_ENGINES="vulkan cuda" adds the CUDA engine)
 build/limgen open
 ```
 

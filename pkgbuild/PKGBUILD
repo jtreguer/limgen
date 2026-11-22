@@ -1,0 +1,158 @@
+# Maintainer: jtreguer <https://github.com/jtreguer>
+#
+# limgen and its engine, stable-diffusion.cpp's sd-cli, built at the one
+# release limgen builds its arguments for (docs/technical.md sections 4 and
+# 10). Split packages: limgen, limgen-engine-vulkan (the default, for NVIDIA,
+# AMD and Intel) and, when asked for, limgen-engine-cuda:
+#
+#   makepkg -fsi                                  limgen and the Vulkan engine
+#   LIMGEN_ENGINES="vulkan cuda" makepkg -fsi     also the CUDA engine (needs cuda)
+#
+# bin/install sets LIMGEN_SOURCE=local to build limgen from the checkout this
+# file lives in; without it, limgen comes from the release tarball.
+
+pkgbase=limgen
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Backgrounds for the current Omarchy theme, made on your own GPU'
+arch=('x86_64')
+url='https://github.com/jtreguer/limgen'
+license=('MIT')
+# nvcc does not take the link-time optimisation flags makepkg would add.
+options=('!lto' '!debug')
+
+# The engine pin, written here and nowhere else: bin/build-engine reads these
+# lines, and tests/bench-tools.sh checks that src/sdcppengine.h names the same
+# release. Changing it means updating SdCppEngine::arguments(), its tests, the
+# captured help text in tests/data/ and docs/models.md.
+_sdcpp_tag=master-1106-532d2c1
+_sdcpp_commit=532d2c15c430a785a712b2d94281f04e733008a4
+# The engine's git submodules at that commit, as source archives.
+_ggml_commit=eeda9ec48fc84a3df0bb9dcc19ae9053075a2539
+_libwebp_commit=0c9546f7efc61eac7f79ae115c3f99c91c21c443
+_cutlass_commit=ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e
+# CUDA architectures for the CUDA engine: Turing and newer desktop cards.
+_cuda_archs='75;86;89;120'
+
+_engines=(${LIMGEN_ENGINES:-vulkan})
+pkgname=(limgen)
+for _engine in "${_engines[@]}"; do
+  pkgname+=("limgen-engine-$_engine")
+done
+
+makedepends=('qt6-base' 'qt6-declarative' 'cmake' 'ninja' 'vulkan-headers' 'spirv-headers' 'shaderc' 'vulkan-icd-loader')
+source=("stable-diffusion.cpp-$_sdcpp_commit.tar.gz::https://github.com/leejet/stable-diffusion.cpp/archive/$_sdcpp_commit.tar.gz"
+        "ggml-$_ggml_commit.tar.gz::https://github.com/leejet/ggml/archive/$_ggml_commit.tar.gz"
+        "libwebp-$_libwebp_commit.tar.gz::https://github.com/webmproject/libwebp/archive/$_libwebp_commit.tar.gz")
+sha256sums=('0278dc8e6e180adc4b43b3ace515eeef870dd76533a34fa1edcfa071ce7d7812'
+            '8bd7adc7eb1366d31670467951d21eb1a5f55e8f6d89b9b91909ffb0246ac5d2'
+            '6cb433070b4461179067b0901a682e4e14b220354fc35884c1b1315adedefc99')
+if [[ " ${_engines[*]} " == *" cuda "* ]]; then
+  makedepends+=('cuda')
+  source+=("cutlass-$_cutlass_commit.tar.gz::https://github.com/NVIDIA/cutlass/archive/$_cutlass_commit.tar.gz")
+  sha256sums+=('36429479df2ab1cd1c7981c2d34e786106326ccfefc8846f902f76151a65e112')
+fi
+if [[ ${LIMGEN_SOURCE:-} != local ]]; then
+  source+=("limgen-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+  # The release's checksum is set when v$pkgver is tagged.
+  sha256sums+=('SKIP')
+fi
+
+_app() {
+  if [[ ${LIMGEN_SOURCE:-} == local ]]; then
+    realpath "$startdir/.."
+  else
+    echo "$srcdir/limgen-$pkgver"
+  fi
+}
+
+_engine_source() {
+  echo "$srcdir/stable-diffusion.cpp-$_sdcpp_commit"
+}
+
+prepare() {
+  # The engine's archive leaves its submodules empty; their own archives,
+  # at the commits the engine pins, go in their place.
+  local engine
+  engine=$(_engine_source)
+  rm -rf "$engine/ggml" "$engine/thirdparty/libwebp"
+  mv "$srcdir/ggml-$_ggml_commit" "$engine/ggml"
+  mv "$srcdir/libwebp-$_libwebp_commit" "$engine/thirdparty/libwebp"
+  if [[ -d $srcdir/cutlass-$_cutlass_commit ]]; then
+    rm -rf "$engine/thirdparty/cutlass"
+    mv "$srcdir/cutlass-$_cutlass_commit" "$engine/thirdparty/cutlass"
+  fi
+}
+
+build() {
+  # The engine's sources name their own paths in messages (__FILE__); mapped,
+  # the binary carries none of the build machine's folders.
+  local map="-ffile-prefix-map=$srcdir=/usr/src/$pkgbase"
+  export CFLAGS="${CFLAGS:-} $map" CXXFLAGS="${CXXFLAGS:-} $map"
+  local engine _flags
+  for engine in "${_engines[@]}"; do
+    case $engine in
+      vulkan) _flags=(-DSD_VULKAN=ON) ;;
+      cuda) _flags=(-DSD_CUDA=ON "-DCMAKE_CUDA_ARCHITECTURES=$_cuda_archs" "-DCMAKE_CUDA_FLAGS=-Xcompiler=$map") ;;
+      *)
+        echo "PKGBUILD: unknown engine $engine; LIMGEN_ENGINES takes vulkan and cuda" >&2
+        return 1
+        ;;
+    esac
+    # Built for x86-64-v3 (Haswell, 2013, and newer) rather than the machine
+    # that builds the package. WebM is only for video, which limgen never
+    # makes; WebP stays, since many themes ship WebP backgrounds.
+    cmake -S "$(_engine_source)" -B "$srcdir/engine-$engine" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release -DSD_WEBM=OFF -DGGML_NATIVE=OFF \
+      -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_BMI2=ON -DGGML_FMA=ON -DGGML_F16C=ON \
+      "${_flags[@]}"
+    cmake --build "$srcdir/engine-$engine" --target sd-cli
+  done
+  cd "$(_app)"
+  ./bin/build
+}
+
+package_limgen() {
+  # The engine of this very release: limgen builds its arguments for it.
+  depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'qt6-imageformats' "limgen-engine=$pkgver")
+  optdepends=('omarchy: the theme it makes backgrounds for, and setting them'
+              'hyprland: the monitor size kept images are finished at')
+  local app
+  app=$(_app)
+  install -Dm755 "$app/build/limgen" "$pkgdir/usr/bin/limgen"
+  install -Dm644 "$app/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$app/pkgbuild/limgen.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/limgen.svg"
+  install -Dm644 "$app/pkgbuild/limgen.desktop" "$pkgdir/usr/share/applications/limgen.desktop"
+}
+
+# Each engine installs the same sd-cli path, so exactly one is installed.
+_package_engine() {
+  local engine=$1 _tree licences
+  _tree=$(_engine_source)
+  provides=("limgen-engine=$pkgver")
+  conflicts=('limgen-engine')
+  install -Dm755 "$srcdir/engine-$engine/bin/sd-cli" "$pkgdir/usr/lib/limgen/sd-cli"
+  licences="$pkgdir/usr/share/licenses/$pkgname"
+  install -Dm644 "$_tree/LICENSE" "$licences/LICENSE"
+  install -Dm644 "$_tree/ggml/LICENSE" "$licences/ggml-LICENSE"
+  install -Dm644 "$_tree/thirdparty/libwebp/COPYING" "$licences/libwebp-COPYING"
+  install -Dm644 "$_tree/thirdparty/oniguruma/COPYING" "$licences/oniguruma-COPYING"
+  install -Dm644 "$_tree/thirdparty/utf8proc/LICENSE.md" "$licences/utf8proc-LICENSE.md"
+  install -Dm644 "$_tree/thirdparty/LICENSE.darts_clone.txt" "$licences/darts-clone-LICENSE.txt"
+}
+
+package_limgen-engine-vulkan() {
+  pkgdesc="limgen's engine, stable-diffusion.cpp $_sdcpp_tag, for any GPU with Vulkan"
+  license=('MIT' 'BSD-3-Clause' 'BSD-2-Clause')
+  depends=('vulkan-icd-loader' 'gcc-libs' 'glibc')
+  _package_engine vulkan
+}
+
+package_limgen-engine-cuda() {
+  pkgdesc="limgen's engine, stable-diffusion.cpp $_sdcpp_tag, built for NVIDIA GPUs with CUDA"
+  license=('MIT' 'BSD-3-Clause' 'BSD-2-Clause')
+  depends=('cuda' 'gcc-libs' 'glibc')
+  _package_engine cuda
+  install -Dm644 "$(_engine_source)/thirdparty/cutlass/LICENSE.txt" \
+    "$pkgdir/usr/share/licenses/$pkgname/cutlass-LICENSE.txt"
+}

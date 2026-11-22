@@ -3,8 +3,8 @@
 # per GPU backend, into build/engine/<backend>/bin/sd-cli.
 #
 # limgen builds sd-cli arguments for this one release only (docs/technical.md
-# section 4). Change the tag and commit together with SdCppEngine::arguments(),
-# its tests, the captured help text in tests/data/ and docs/models.md.
+# section 4). The pin (tag and commit) is read from pkgbuild/PKGBUILD, the one
+# place it is written, so the package and this build use the same release.
 #
 # Usage: bin/build-engine [vulkan|cuda|all]    (default: all)
 #
@@ -18,11 +18,17 @@
 # this machine). Packages build for a list instead, such as "75;86;89;120".
 set -euo pipefail
 
-SD_CPP_TAG=master-1106-532d2c1
-SD_CPP_COMMIT=532d2c15c430a785a712b2d94281f04e733008a4
 SD_CPP_URL=https://github.com/leejet/stable-diffusion.cpp
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# The values may be quoted, as PKGBUILD values often are.
+pin() { sed -n "s/^$1=[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}\$/\1/p" "$root/pkgbuild/PKGBUILD"; }
+SD_CPP_TAG=$(pin _sdcpp_tag)
+SD_CPP_COMMIT=$(pin _sdcpp_commit)
+if [[ -z $SD_CPP_TAG || -z $SD_CPP_COMMIT ]]; then
+  echo "build-engine: no engine pin (_sdcpp_tag, _sdcpp_commit) in pkgbuild/PKGBUILD" >&2
+  exit 1
+fi
 src=$root/build/engine/src
 
 fetch() {

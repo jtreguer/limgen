@@ -3,7 +3,8 @@
 How limgen is built. Read `design.md` first for what it does and why. Model
 choices and benchmarks live in `models.md`.
 
-Status: milestones L0 to L6 done, L7 next. Section 12 lists the
+Status: milestones L0 to L7 done, L8 next. The README's screenshot waits
+for real drafts (L7 had no free GPU) and comes before L8. Section 12 lists the
 milestones.
 
 ## 1. Stack
@@ -52,7 +53,7 @@ src/Main.qml            the window
 src/*.qml               PaletteBar, BackgroundColumn, DraftGrid, DraftTile, LibraryView, PromptBar, SetupPanel, ModelPicker, FullView, HelpOverlay
 src/models.json         the model catalogue, compiled in
 src/skill.md            the agent skill installed by `limgen skill install`
-src/i18n/<code>.json    translations
+src/i18n/<code>.json    translations of the window (de, es-MX, fr, ja, pt-BR, zh-CN so far; en for plurals)
 src/resources.qrc
 tests/limgen_tests.{pro,cpp}
 tests/bench-tools.sh    tests for bench/ and bin/build-engine (no GPU, no network)
@@ -442,8 +443,9 @@ truth for both.
 
 The window is `limgen open` (and `limgen` with no command). Every other
 command runs headless (`QT_QPA_PLATFORM=offscreen` set before
-`QGuiApplication`), takes `--json`, writes errors to stderr, and exits with
-the codes below. Hype's `src/cli.cpp` is the pattern.
+`QGuiApplication`), takes `--json` (all but `skill`, which prints a file),
+writes errors to stderr, and exits with the codes below. Hype's
+`src/cli.cpp` is the pattern.
 
 | Command | Does |
 |---|---|
@@ -455,16 +457,24 @@ the codes below. Hype's `src/cli.cpp` is the pattern.
 | `limgen keep <id> [--set] [--theme <slug>] [--color-pass 0.3] [--format png\|jpeg]` | finish a draft and install it into a theme's folder; prints the path. The theme is the one the draft was made for unless `--theme` says otherwise (a script cannot be asked); strength and format default to `config.json`. A draft already there is reported, not made again. Exit 2 for an unknown draft or theme, 3 when the upscaler is missing or the engine unusable, 1 when finishing fails, 130 on Ctrl+C (nothing kept) |
 | `limgen set <id-or-file>` | `omarchy theme bg set` on it. A draft (or a final, through its draft) is kept into the current theme first; a file is set as it is |
 | `limgen library [--theme <slug>]` | the drafts and finals in the library, newest first: id, kind, the theme they were made for and the path (with `--json` also the subject, the creation time and, for a final, its draft) |
-| `limgen skill install` | install the bundled agent skill |
+| `limgen skill [install]` | print the bundled agent skill, or install it: `~/.agents/skills/limgen/SKILL.md` (written through, when it is a link to a file elsewhere), linked from `~/.claude/skills/limgen` when Claude Code is there (as Hype does). Only limgen's own link or a dangling one is replaced, through a new link renamed over it; anything else there is left alone (exit 1). It takes no `--json`, unlike the other commands |
 
 Exit codes: 0 success, 1 error, 2 usage, 3 not runnable here (no backend,
 not enough memory, model missing), 130 interrupted.
 
+Commands answer in English whatever the desktop's language, since scripts
+and agents read them, and write numbers the English way whatever the
+system locale: only the window loads translations. The catalogues
+cover the window's strings and leave the command-line ones out.
+
 ## 10. Packaging
 
-- `pkgbuild/PKGBUILD` builds the app from a release tarball, installs the
-  binary, `limgen.desktop` (with translated `Name` and `Comment`) and
-  `limgen.svg`.
+- `pkgbuild/PKGBUILD` builds the app from a release tarball, or, with
+  `LIMGEN_SOURCE=local` (what `bin/install` sets), from the checkout it lives
+  in. It installs the binary, `limgen.desktop` (with a translated `Comment`
+  for each language the window speaks) and `limgen.svg`. limgen depends on
+  `qt6-base`, `qt6-declarative`, `qt6-wayland`, `qt6-imageformats` (WebP
+  backgrounds) and `limgen-engine`; Omarchy and Hyprland are optional.
 - limgen builds its own engine (decided; `design.md` section 11). The same
   PKGBUILD builds a pinned stable-diffusion.cpp release as split packages
   that each provide `limgen-engine` and install `/usr/lib/limgen/sd-cli`:
@@ -473,11 +483,23 @@ not enough memory, model missing), 130 interrupted.
   package for cuBLAS), possibly `limgen-engine-rocm`. Pinning means limgen's argument building
   always matches the binary it calls. Each engine package installs
   stable-diffusion.cpp's MIT licence beside limgen's.
-- The pin (tag and commit) lives in `bin/build-engine`, which builds the same
-  release into `build/engine/<backend>/bin/sd-cli` for development. The
-  PKGBUILD must use the same tag and commit; L7 makes it read them from one
-  place.
-- The CUDA package builds for a list of architectures (Turing and newer);
+- The pin (tag and commit) is written once, in the PKGBUILD
+  (`_sdcpp_tag`, `_sdcpp_commit`), with the commits of the engine's ggml,
+  libwebp and CUTLASS submodules; the package takes each as a GitHub archive
+  with its SHA-256. `bin/build-engine` reads the tag and commit from there to
+  build the same release into `build/engine/<backend>/bin/sd-cli` for
+  development, and `tests/bench-tools.sh` checks that `src/sdcppengine.h` and
+  `src/models.json` name the same release.
+- A plain build makes `limgen` and `limgen-engine-vulkan`;
+  `LIMGEN_ENGINES="vulkan cuda"` adds `limgen-engine-cuda`, so `cuda` is a
+  build dependency only for those who want that engine. The engines are built
+  for x86-64-v3 (`GGML_NATIVE=OFF` with AVX2, FMA, F16C and BMI2), not for the
+  building machine, with `-ffile-prefix-map` so the binary names none of
+  the building machine's folders, and statically link ggml: `sd-cli` needs only the Vulkan
+  loader (or CUDA), OpenMP and the C++ runtime. Each engine package installs
+  the licences of stable-diffusion.cpp, ggml, libwebp, oniguruma, utf8proc and
+  darts-clone (and CUTLASS for CUDA).
+- The CUDA package builds for Turing and newer desktop cards (`75;86;89;120`);
   development builds use `native`.
 - `LIMGEN_SD_CLI` overrides the engine path, for development and tests.
 - Later: publish through `omacom/omarchy-pkgs` as the Omarchy app

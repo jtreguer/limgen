@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Limgen
+Comment=Make backgrounds for your Omarchy theme on your own GPU
+Comment[de]=Hintergründe für dein Omarchy-Theme auf deiner eigenen GPU erstellen
+Comment[es_MX]=Crea fondos para tu tema de Omarchy en tu propia GPU
+Comment[fr]=Créer des fonds d'écran pour votre thème Omarchy sur votre propre GPU
+Comment[ja]=自分の GPU で Omarchy テーマの壁紙を作成
+Comment[pt_BR]=Crie fundos para o seu tema do Omarchy na sua própria GPU
+Comment[zh_CN]=在你自己的 GPU 上为 Omarchy 主题生成壁纸
+Exec=limgen
+Icon=limgen
+Terminal=false
+Categories=Graphics;
+Keywords=wallpaper;background;image;generate;theme;
+StartupWMClass=limgen

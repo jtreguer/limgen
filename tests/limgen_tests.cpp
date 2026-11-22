@@ -838,6 +838,28 @@ private slots:
     void qml_keepSetDiscardDoNothingWhileTheLibraryIsOpen();
     void qml_escChainOrder();
 
+    // ---- L7: translations, commands in English, limgen skill ---------------
+    void translations_theExtractorFindsTheWindowStrings();
+    void translations_everyCatalogueParses_data();
+    void translations_everyCatalogueParses();
+    void translations_keysAreExactlyTheWindowStrings_data();
+    void translations_keysAreExactlyTheWindowStrings();
+    void translations_valuesKeepTheirPlaceholders_data();
+    void translations_valuesKeepTheirPlaceholders();
+    void translations_pluralFormsMatchTheTranslator_data();
+    void translations_pluralFormsMatchTheTranslator();
+    void translations_theWindowShowsAndSwitchesTranslations();
+    void commands_speakEnglishWhateverTheLanguage();
+    void cli_skillPrintsTheBundledSkill();
+    void cli_skillInstallWritesTheSharedCopy();
+    void cli_skillInstallLinksIntoClaudeCode();
+    void cli_skillInstallReplacesOnlyItsOwnOrADeadLink();
+    void cli_commandNumbersDoNotFollowTheSystemLocale();
+    void cli_skillInstallLeavesANonLinkAlone();
+    void cli_skillInstallTwiceAndOverAnEditedCopy();
+    void cli_skillArgumentErrors();
+    void cli_skillIsListedInHelp();
+
 private:
     std::unique_ptr<Sandbox> m_global;
     struct CliResult {
@@ -7428,7 +7450,8 @@ struct QmlRig {
 
     // With `small`, the model and the upscaler come from the small test
     // catalogue (64x64 drafts), so batches and keeps are quick.
-    explicit QmlRig(bool installed = true, const QString &engineProgram = fakeEngine, bool small = false, int steps = 1)
+    explicit QmlRig(bool installed = true, const QString &engineProgram = fakeEngine, bool small = false, int steps = 1,
+                    const QString &language = QString())
         : rig(true, installed && !small) {
         qmlWarnings = &warnings;
         previousHandler = qInstallMessageHandler(collectQmlWarnings);
@@ -7442,6 +7465,9 @@ struct QmlRig {
             rig.sb.fixture.addTheme("other", tomlWith("#fafafa", "#111111", "#ff0000"));
         }
         rig.create(engineProgram);
+        // The Omarchy language file, as it is when the window starts.
+        if (!language.isEmpty())
+            writeFile(rig.sb.fixture.paths().language, language.toUtf8() + "\n");
         translator = std::make_unique<Translator>(rig.sb.fixture.paths().language);
         QCoreApplication::installTranslator(translator.get());
         theme = std::make_unique<Theme>(rig.sb.fixture.state, nullptr, QString());
@@ -12355,6 +12381,465 @@ void LimgenTests::qml_escChainOrder() {
     QTest::qWait(100);
     QCOMPARE(state(), QString("help=0 full=0 library=0 typing=0 running=0 source=0"));
     NO_QML_WARNINGS(q);
+}
+
+// ============================== L7: translations ==========================
+
+namespace {
+
+QString unquoteLiterals(const QString &literals) {
+    static const QRegularExpression literal(R"re("((?:[^"\\\n]|\\.)*)")re");
+    QString text;
+    auto it = literal.globalMatch(literals);
+    while (it.hasNext()) {
+        const QString body = it.next().captured(1);
+        for (int i = 0; i < body.size(); ++i) {
+            if (body[i] != '\\' || i + 1 >= body.size()) {
+                text += body[i];
+                continue;
+            }
+            const QChar next = body[++i];
+            text += next == 'n' ? QChar('\n') : next == 't' ? QChar('\t') : next;
+        }
+    }
+    return text;
+}
+
+// Every string the window shows, from the sources: each qsTr() literal in
+// the QML files and each tr() or QCoreApplication::translate() literal in the
+// C++ files except cli.cpp, whose text is for commands, which speak English.
+// Adjacent C++ literals are one string.
+QSet<QString> windowStrings() {
+    static const QString literal = R"re("(?:[^"\\\n]|\\.)*")re";
+    static const QRegularExpression cppTr("(?<![A-Za-z0-9_])tr\\(\\s*((?:" + literal + "\\s*)+)");
+    static const QRegularExpression cppTranslate("QCoreApplication::translate\\(\\s*" + literal + "\\s*,\\s*((?:" + literal + "\\s*)+)");
+    static const QRegularExpression qml("qsTr\\(\\s*((?:" + literal + "\\s*(?:\\+\\s*)?)+)");
+    QSet<QString> strings;
+    const QDir src(repoRoot + "/src");
+    for (const QString &name : src.entryList({"*.cpp", "*.qml"}, QDir::Files)) {
+        if (name == "cli.cpp")
+            continue;
+        const QString text = QString::fromUtf8(readFile(src.filePath(name)));
+        for (const QRegularExpression &expression : name.endsWith(".qml") ? QList<QRegularExpression>{qml}
+                                                                          : QList<QRegularExpression>{cppTr, cppTranslate}) {
+            auto it = expression.globalMatch(text);
+            while (it.hasNext())
+                strings.insert(unquoteLiterals(it.next().captured(1)));
+        }
+    }
+    return strings;
+}
+
+QStringList translationLanguages() { return {"de", "fr", "es-MX", "pt-BR", "ja", "zh-CN"}; }
+
+QJsonObject catalogue(const QString &code, bool *ok = nullptr) {
+    QFile file(":/i18n/" + code + ".json");
+    QJsonParseError error;
+    const bool opened = file.open(QIODevice::ReadOnly);
+    const QJsonDocument document = opened ? QJsonDocument::fromJson(file.readAll(), &error) : QJsonDocument();
+    if (ok)
+        *ok = opened && error.error == QJsonParseError::NoError && document.isObject();
+    return document.object();
+}
+
+QMap<QString, int> placeholdersOf(const QString &text) {
+    static const QRegularExpression placeholder("%(?:[1-9]|n)");
+    QMap<QString, int> counts;
+    auto it = placeholder.globalMatch(text);
+    while (it.hasNext())
+        counts[it.next().captured(0)]++;
+    return counts;
+}
+
+// The longest run of text between a translation's placeholders: words only
+// its language has.
+QString longestPiece(const QString &text) {
+    QString best;
+    for (const QString &piece : text.split(QRegularExpression("%[1-9n]")))
+        if (piece.trimmed().size() > best.size())
+            best = piece.trimmed();
+    return best;
+}
+
+} // namespace
+
+void LimgenTests::translations_theExtractorFindsTheWindowStrings() {
+    const QSet<QString> strings = windowStrings();
+    QVERIFY2(strings.size() > 100, qPrintable(QString::number(strings.size())));
+    // From C++ (a tr() and a translate() call, one with literals run together) and from QML.
+    QVERIFY(strings.contains("Made %n drafts in %1"));
+    QVERIFY(strings.contains("colors.toml has no valid %1 colour"));
+    QVERIFY(strings.contains("Quit limgen?"));
+    QVERIFY(strings.contains("Generate"));
+    QVERIFY(strings.contains("Cannot save %1: %2"));
+    // Command text is not the window's.
+    QVERIFY(!strings.contains("Print the result as JSON"));
+    QVERIFY(!strings.contains("Usage: limgen <command> [options]"));
+    for (const QString &string : strings)
+        QVERIFY2(!string.isEmpty(), "an empty string");
+}
+
+void LimgenTests::translations_everyCatalogueParses_data() {
+    QTest::addColumn<QString>("code");
+    for (const QString &code : QStringList{"en"} + translationLanguages())
+        QTest::newRow(qPrintable(code)) << code;
+}
+
+void LimgenTests::translations_everyCatalogueParses() {
+    QFETCH(QString, code);
+    bool ok = false;
+    const QJsonObject json = catalogue(code, &ok);
+    QVERIFY2(ok, "the catalogue is compiled in and is a JSON object");
+    QVERIFY(!json.isEmpty());
+}
+
+void LimgenTests::translations_keysAreExactlyTheWindowStrings_data() {
+    QTest::addColumn<QString>("code");
+    for (const QString &code : QStringList{"en"} + translationLanguages())
+        QTest::newRow(qPrintable(code)) << code;
+}
+
+void LimgenTests::translations_keysAreExactlyTheWindowStrings() {
+    QFETCH(QString, code);
+    const QSet<QString> window = windowStrings();
+    QSet<QString> expected;
+    for (const QString &string : window)
+        if (code != "en" || string.contains("%n")) // English is the source text; only its plural forms are kept
+            expected.insert(string);
+    const QJsonObject json = catalogue(code);
+    QSet<QString> keys;
+    for (const QString &key : json.keys())
+        keys.insert(key);
+    QStringList missing = (expected - keys).values(), extra = (keys - expected).values();
+    missing.sort();
+    extra.sort();
+    QVERIFY2(missing.isEmpty(), qPrintable("missing: " + missing.join(" | ")));
+    QVERIFY2(extra.isEmpty(), qPrintable("no longer in the window: " + extra.join(" | ")));
+    // A string with a count is an object of forms, any other is a string.
+    for (auto it = json.begin(); it != json.end(); ++it) {
+        if (it.key().contains("%n"))
+            QVERIFY2(it.value().isObject(), qPrintable(it.key()));
+        else
+            QVERIFY2(it.value().isString() && !it.value().toString().trimmed().isEmpty(), qPrintable(it.key()));
+    }
+}
+
+void LimgenTests::translations_valuesKeepTheirPlaceholders_data() {
+    QTest::addColumn<QString>("code");
+    for (const QString &code : QStringList{"en"} + translationLanguages())
+        QTest::newRow(qPrintable(code)) << code;
+}
+
+void LimgenTests::translations_valuesKeepTheirPlaceholders() {
+    QFETCH(QString, code);
+    const QJsonObject json = catalogue(code);
+    QVERIFY(!json.isEmpty());
+    for (auto it = json.begin(); it != json.end(); ++it) {
+        const QString key = it.key();
+        QStringList forms;
+        if (it.value().isObject())
+            for (const QJsonValue &form : it.value().toObject())
+                forms << form.toString();
+        else
+            forms << it.value().toString();
+        for (const QString &form : forms) {
+            QVERIFY2(placeholdersOf(form) == placeholdersOf(key),
+                     qPrintable(QString("%1: \"%2\" for \"%3\"").arg(code, form, key)));
+            QVERIFY2(form.count('\n') == key.count('\n'), qPrintable("line breaks: " + key));
+            QVERIFY2(!form.trimmed().isEmpty(), qPrintable(key));
+        }
+    }
+}
+
+void LimgenTests::translations_pluralFormsMatchTheTranslator_data() {
+    QTest::addColumn<QString>("code");
+    for (const QString &code : QStringList{"en"} + translationLanguages())
+        QTest::newRow(qPrintable(code)) << code;
+}
+
+void LimgenTests::translations_pluralFormsMatchTheTranslator() {
+    QFETCH(QString, code);
+    // The categories the Translator picks over small counts, round hundreds and millions.
+    QSet<QString> categories;
+    QList<long long> counts;
+    for (long long n = 0; n <= 130; ++n)
+        counts << n;
+    counts << 1000 << 100000 << 1000000 << 2000000 << 21000000;
+    for (const long long n : counts)
+        categories.insert(Translator::pluralCategory(code, n));
+    const QJsonObject json = catalogue(code);
+    int plurals = 0;
+    for (auto it = json.begin(); it != json.end(); ++it) {
+        if (!it.key().contains("%n"))
+            continue;
+        ++plurals;
+        QVERIFY2(it.value().isObject(), qPrintable(it.key()));
+        QSet<QString> forms;
+        for (const QString &form : it.value().toObject().keys())
+            forms.insert(form);
+        QVERIFY2(forms == categories,
+                 qPrintable(QString("%1 \"%2\": forms %3, the Translator uses %4")
+                                .arg(code, it.key(), QStringList(forms.values()).join(","), QStringList(categories.values()).join(","))));
+    }
+    QVERIFY(plurals >= 2);
+    // The expected shape, said once in words.
+    const QSet<QString> expected = code == "ja" || code == "zh-CN"
+                                       ? QSet<QString>{"other"}
+                                       : (code == "de" || code == "en") ? QSet<QString>{"one", "other"}
+                                                                        : QSet<QString>{"one", "many", "other"};
+    QCOMPARE(categories, expected);
+}
+
+void LimgenTests::translations_theWindowShowsAndSwitchesTranslations() {
+    const QString key = "What should the background show? For example: oil rig at dusk";
+    const QString generate = "Generate";
+    for (const QString &code : QStringList{"de", "ja"})
+        QVERIFY2(catalogue(code)[key].toString() != key && catalogue(code)[generate].toString() != generate,
+                 "the strings under test differ from English");
+    QmlRig q(true, fakeEngine, true, 1, "en");
+    LOAD_WINDOW(q);
+    // The window follows the language the way main() wires it.
+    QObject::connect(q.translator.get(), &Translator::changed, q.engine.get(), &QQmlEngine::retranslate);
+    QTRY_VERIFY(q.subjectField());
+    QCOMPARE(q.subjectField()->property("placeholderText").toString(), key);
+    QVERIFY(abstractButton(q, generate));
+    for (const QString &code : QStringList{"de", "ja", "fr"}) {
+        QVERIFY(writeFile(q.rig.sb.fixture.paths().language, code.toUtf8() + "\n"));
+        QTRY_COMPARE_WITH_TIMEOUT(q.translator->language(), code, 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(q.subjectField()->property("placeholderText").toString(),
+                                  catalogue(code)[key].toString(), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(abstractButton(q, catalogue(code)[generate].toString()), 5000);
+        QVERIFY(!abstractButton(q, generate));
+    }
+    // And back.
+    QVERIFY(writeFile(q.rig.sb.fixture.paths().language, "en\n"));
+    QTRY_COMPARE_WITH_TIMEOUT(q.subjectField()->property("placeholderText").toString(), key, 5000);
+    NO_QML_WARNINGS(q);
+}
+
+void LimgenTests::commands_speakEnglishWhateverTheLanguage() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    QVERIFY(writeFile(fixture.root.path() + "/config/omarchy/language", "de\n"));
+    const QJsonObject german = catalogue("de");
+    // A message from a class the window translates, printed by a command.
+    const QString draftKey = "No draft %1 in the library. limgen generate prints the ids of the drafts it makes.";
+    const QString paletteKey = "colors.toml has no valid %1 colour";
+    for (const QString &key : {draftKey, paletteKey}) {
+        QVERIFY2(german[key].isString() && german[key].toString() != key, qPrintable(key)); // the window would translate it
+        QVERIFY(longestPiece(german[key].toString()).size() >= 8);
+    }
+    CliResult result = runCli(fixture, {"keep", "2026-11-20-ffffff"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 2);
+    QVERIFY2(result.err.contains("No draft 2026-11-20-ffffff in the library"), qPrintable(result.err));
+    QVERIFY2(!result.err.contains(longestPiece(german[draftKey].toString())), qPrintable(result.err));
+    // The palette's own error, from the pure Palette module.
+    QVERIFY(fixture.addTheme("broken", "background = \"#000000\"\nforeground = \"#ffffff\"\n"));
+    QVERIFY(fixture.switchTo("broken"));
+    result = runCli(fixture, {"palette"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 1);
+    QVERIFY2(result.err.contains("colors.toml has no valid accent colour"), qPrintable(result.err));
+    QVERIFY2(!result.err.contains(longestPiece(german[paletteKey].toString())), qPrintable(result.err));
+    // Help and usage errors are English too.
+    result = runCli(fixture, {"help"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 0);
+    QVERIFY(result.out.contains("Commands that need no display"));
+    result = runCli(fixture, {"generate"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 2);
+    QVERIFY2(result.err.contains("Give a subject"), qPrintable(result.err));
+    result = runCli(fixture, {"help", "keep"}, engineEnvironment(fixture));
+    QVERIFY(result.out.contains("Finish a draft"));
+    // The same with another language and with none.
+    for (const QString &code : QStringList{"ja", "fr", "xx"}) {
+        QVERIFY(writeFile(fixture.root.path() + "/config/omarchy/language", code.toUtf8() + "\n"));
+        result = runCli(fixture, {"keep", "2026-11-20-ffffff"}, engineEnvironment(fixture));
+        QVERIFY2(result.err.contains("No draft 2026-11-20-ffffff in the library"), qPrintable(code + ": " + result.err));
+    }
+}
+
+// ============================== L7: limgen skill ==========================
+
+namespace {
+
+QByteArray skillText() { return readFile(repoRoot + "/src/skill.md"); }
+
+QString rawLink(const QString &path) {
+    char buffer[1024];
+    const ssize_t length = ::readlink(QFile::encodeName(path).constData(), buffer, sizeof buffer - 1);
+    return length < 0 ? QString() : QString::fromLocal8Bit(buffer, int(length));
+}
+
+QString homeOf(const Fixture &fixture) { return fixture.root.path() + "/home"; }
+
+// Every file under a folder, hidden ones too (filesUnder skips them).
+QStringList allFilesUnder(const QString &directory) {
+    QStringList files;
+    QDirIterator it(directory, QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (it.hasNext())
+        files << it.next();
+    files.sort();
+    return files;
+}
+
+} // namespace
+
+void LimgenTests::cli_skillPrintsTheBundledSkill() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const QByteArray text = skillText();
+    QVERIFY(!text.isEmpty());
+    const CliResult result = runCli(fixture, {"skill"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(result.out.toUtf8(), text); // exactly, byte for byte
+    QCOMPARE(result.err, QString());
+    QVERIFY(!QFileInfo::exists(homeOf(fixture) + "/.agents")); // printing writes nothing
+    // What agents read first: front matter with the name and a description.
+    QVERIFY(text.startsWith("---\nname: limgen\ndescription:"));
+    QVERIFY(text.indexOf("\n---\n", 4) > 0);
+    // And the commands it teaches are the ones that exist.
+    for (const QString &command : QStringList{"doctor", "palette", "models", "generate", "keep", "set", "library"})
+        QVERIFY2(text.contains(QString("limgen %1").arg(command).toUtf8()), qPrintable(command));
+}
+
+void LimgenTests::cli_skillInstallWritesTheSharedCopy() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const CliResult result = runCli(fixture, {"skill", "install"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 0);
+    const QString file = homeOf(fixture) + "/.agents/skills/limgen/SKILL.md";
+    QCOMPARE(readFile(file), skillText());
+    QVERIFY2(result.out.contains(file), qPrintable(result.out));
+    // No Claude Code folder, so nothing to link into and nothing made there.
+    QVERIFY(!QFileInfo::exists(homeOf(fixture) + "/.claude"));
+    QCOMPARE(allFilesUnder(homeOf(fixture)), QStringList{file}); // only the one file, no temp files
+}
+
+void LimgenTests::cli_skillInstallLinksIntoClaudeCode() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    QVERIFY(QDir().mkpath(homeOf(fixture) + "/.claude"));
+    const CliResult result = runCli(fixture, {"skill", "install"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 0);
+    const QString link = homeOf(fixture) + "/.claude/skills/limgen";
+    QVERIFY(QFileInfo(link).isSymLink());
+    QCOMPARE(rawLink(link), QString("../../.agents/skills/limgen")); // relative, so the home can move
+    QCOMPARE(readFile(link + "/SKILL.md"), skillText()); // and it resolves
+    QVERIFY2(result.out.contains(link), qPrintable(result.out));
+}
+
+void LimgenTests::cli_skillInstallReplacesOnlyItsOwnOrADeadLink() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    QVERIFY(QDir().mkpath(homeOf(fixture) + "/.claude/skills"));
+    const QString link = homeOf(fixture) + "/.claude/skills/limgen";
+    // A link to the person's own skill is theirs: it stays, and the
+    // message says where it points.
+    const QString other = fixture.root.path() + "/other-skill";
+    QVERIFY(writeFile(other + "/SKILL.md", "someone else's skill"));
+    QVERIFY(QFile::link(other, link));
+    CliResult result = runCli(fixture, {"skill", "install"}, engineEnvironment(fixture));
+    QCOMPARE(result.exitCode, 1);
+    QCOMPARE(rawLink(link), other);
+    QVERIFY2(result.err.contains(link) && result.err.contains(other), qPrintable(result.err));
+    QCOMPARE(readFile(other + "/SKILL.md"), QByteArray("someone else's skill"));
+    QCOMPARE(readFile(homeOf(fixture) + "/.agents/skills/limgen/SKILL.md"), skillText()); // the shared copy is written
+    // A link to the shared copy, written another way, is limgen's own.
+    QVERIFY(QFile::remove(link));
+    QVERIFY(QFile::link(homeOf(fixture) + "/.agents/skills/limgen", link));
+    QCOMPARE(runCli(fixture, {"skill", "install"}, engineEnvironment(fixture)).exitCode, 0);
+    QCOMPARE(rawLink(link), QString("../../.agents/skills/limgen"));
+    // A dangling link goes too.
+    QVERIFY(QFile::remove(link));
+    QVERIFY(QFile::link(fixture.root.path() + "/gone", link));
+    QCOMPARE(runCli(fixture, {"skill", "install"}, engineEnvironment(fixture)).exitCode, 0);
+    QCOMPARE(rawLink(link), QString("../../.agents/skills/limgen"));
+}
+
+void LimgenTests::cli_commandNumbersDoNotFollowTheSystemLocale() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    // A German system locale writes 6,7 GB; commands answer in English, so
+    // their numbers are English too.
+    QHash<QString, QString> env = engineEnvironment(fixture);
+    env["LC_ALL"] = "de_DE.UTF-8";
+    env["LANG"] = "de_DE.UTF-8";
+    const CliResult result = runCli(fixture, {"models"}, env);
+    QCOMPARE(result.exitCode, 0);
+    static const QRegularExpression english("\\d\\.\\d GB"), german("\\d,\\d GB");
+    QVERIFY2(result.out.contains(english), qPrintable(result.out));
+    QVERIFY2(!result.out.contains(german), qPrintable(result.out));
+}
+
+void LimgenTests::cli_skillInstallLeavesANonLinkAlone() {
+    REQUIRE_BINARY();
+    for (const bool folder : {true, false}) {
+        Fixture fixture;
+        QVERIFY(fixture.ok());
+        const QString link = homeOf(fixture) + "/.claude/skills/limgen";
+        if (folder)
+            QVERIFY(writeFile(link + "/SKILL.md", "the person's own skill"));
+        else
+            QVERIFY(writeFile(link, "a plain file"));
+        const CliResult result = runCli(fixture, {"skill", "install"}, engineEnvironment(fixture));
+        QCOMPARE(result.exitCode, 1);
+        QVERIFY2(result.err.contains(link), qPrintable(result.err));
+        QVERIFY(!QFileInfo(link).isSymLink());
+        QCOMPARE(readFile(folder ? link + "/SKILL.md" : link),
+                 folder ? QByteArray("the person's own skill") : QByteArray("a plain file"));
+        // The shared copy was written before the link was tried.
+        QCOMPARE(readFile(homeOf(fixture) + "/.agents/skills/limgen/SKILL.md"), skillText());
+    }
+}
+
+void LimgenTests::cli_skillInstallTwiceAndOverAnEditedCopy() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    QVERIFY(QDir().mkpath(homeOf(fixture) + "/.claude"));
+    const QString file = homeOf(fixture) + "/.agents/skills/limgen/SKILL.md", link = homeOf(fixture) + "/.claude/skills/limgen";
+    QCOMPARE(runCli(fixture, {"skill", "install"}, engineEnvironment(fixture)).exitCode, 0);
+    QCOMPARE(runCli(fixture, {"skill", "install"}, engineEnvironment(fixture)).exitCode, 0);
+    QCOMPARE(readFile(file), skillText());
+    QCOMPARE(rawLink(link), QString("../../.agents/skills/limgen"));
+    // An older or edited copy is replaced by the bundled one.
+    QVERIFY(writeFile(file, "an old version of the skill"));
+    QCOMPARE(runCli(fixture, {"skill", "install"}, engineEnvironment(fixture)).exitCode, 0);
+    QCOMPARE(readFile(file), skillText());
+    QCOMPARE(allFilesUnder(homeOf(fixture) + "/.agents"), QStringList{file}); // no temp files left
+}
+
+void LimgenTests::cli_skillArgumentErrors() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    for (const QStringList &arguments : {QStringList{"skill", "bogus"}, QStringList{"skill", "install", "extra"},
+                                         QStringList{"skill", "--bogus"}, QStringList{"skill", "uninstall"}}) {
+        const CliResult result = runCli(fixture, arguments, engineEnvironment(fixture));
+        QVERIFY(result.started);
+        QCOMPARE(result.exitCode, 2);
+        QCOMPARE(result.out, QString());
+        QVERIFY2(!result.err.isEmpty(), qPrintable(arguments.join(' ')));
+        QVERIFY(!QFileInfo::exists(homeOf(fixture) + "/.agents")); // nothing written
+    }
+}
+
+void LimgenTests::cli_skillIsListedInHelp() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const CliResult summary = runCli(fixture, {"help"}, engineEnvironment(fixture));
+    QVERIFY2(summary.out.contains("skill [install]"), qPrintable(summary.out));
+    const CliResult help = runCli(fixture, {"help", "skill"}, engineEnvironment(fixture));
+    QCOMPARE(help.exitCode, 0);
+    QVERIFY(help.out.contains("install"));
+    QVERIFY(help.out.contains("--help"));
+    QVERIFY(!QFileInfo::exists(homeOf(fixture) + "/.agents"));
 }
 
 // The child of backend_destroyingWhileABatchRunsIsSafe: a Backend on the

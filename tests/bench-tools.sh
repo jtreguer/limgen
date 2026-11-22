@@ -673,6 +673,16 @@ test_finish_missing_engine_exits_3_and_writes_nothing() {
   absent "$LIMGEN_BENCH_OUT"
 }
 
+test_engine_pin_is_the_same_everywhere() {
+  # Written once in the PKGBUILD; the C++ probe and the catalogue must name
+  # the same release, or limgen would refuse the engine it was packaged with.
+  local tag
+  tag=$(sed -n 's/^_sdcpp_tag=//p' "$root/pkgbuild/PKGBUILD")
+  [[ -n $tag ]] || fail "no _sdcpp_tag in pkgbuild/PKGBUILD"
+  contains "$(cat "$root/src/sdcppengine.h")" "pinnedVersion = \"$tag\""
+  contains "$(cat "$root/src/models.json")" "\"engine\": \"$tag\""
+}
+
 test_build_engine_unknown_backend_is_a_usage_error() {
   # Must fail before it clones or builds anything.
   status "$root/bin/build-engine" nosuch-backend
@@ -1038,6 +1048,290 @@ test_finish_bad_tile_is_a_usage_error() {
   finish_sandbox
   finish_run --tile 0
   eq "$rc" 2 "exit code"
+}
+
+# ---- packaging -----------------------------------------------------------
+
+# pkgbuild_eval <expression> [VAR=value...]: the PKGBUILD sourced in a clean
+# shell, with the expression evaluated after it. Sourcing only defines
+# variables and functions; nothing is built or downloaded.
+pkgbuild_eval() {
+  local expr=$1
+  shift
+  env -u LIMGEN_ENGINES -u LIMGEN_SOURCE "$@" bash -c 'source "$1"; eval "$2"' _ "$root/pkgbuild/PKGBUILD" "$expr"
+}
+
+test_pkgbuild_is_valid_bash() {
+  bash -n "$root/pkgbuild/PKGBUILD"
+}
+
+test_pkgbuild_default_packages_are_limgen_and_the_vulkan_engine() {
+  eq "$(pkgbuild_eval 'echo "${pkgname[*]}"')" "limgen limgen-engine-vulkan" "pkgname"
+  local makedepends
+  makedepends=$(pkgbuild_eval 'echo "${makedepends[*]}"')
+  contains " $makedepends " " vulkan-headers "
+  lacks " $makedepends " " cuda "
+  local sources
+  sources=$(pkgbuild_eval 'echo "${source[*]}"')
+  lacks "$sources" "cutlass"
+  contains "$sources" "limgen-0.1.0.tar.gz"
+}
+
+test_pkgbuild_cuda_adds_its_package_dependency_and_cutlass() {
+  eq "$(pkgbuild_eval 'echo "${pkgname[*]}"' LIMGEN_ENGINES="vulkan cuda")" \
+    "limgen limgen-engine-vulkan limgen-engine-cuda" "pkgname"
+  local makedepends sources
+  makedepends=$(pkgbuild_eval 'echo "${makedepends[*]}"' LIMGEN_ENGINES="vulkan cuda")
+  contains " $makedepends " " cuda "
+  contains " $makedepends " " vulkan-headers "
+  sources=$(pkgbuild_eval 'echo "${source[*]}"' LIMGEN_ENGINES="vulkan cuda")
+  contains "$sources" "cutlass-"
+  # Only CUDA: no Vulkan package.
+  eq "$(pkgbuild_eval 'echo "${pkgname[*]}"' LIMGEN_ENGINES="cuda")" "limgen limgen-engine-cuda" "pkgname, cuda only"
+}
+
+test_pkgbuild_local_source_leaves_out_the_release_tarball() {
+  local sources
+  sources=$(pkgbuild_eval 'echo "${source[*]}"' LIMGEN_SOURCE=local)
+  lacks "$sources" "limgen-0.1.0.tar.gz"
+  contains "$sources" "stable-diffusion.cpp-"
+  sources=$(pkgbuild_eval 'echo "${source[*]}"')
+  contains "$sources" "limgen-0.1.0.tar.gz"
+}
+
+test_pkgbuild_has_one_checksum_per_source() {
+  count_sources_and_sums() {
+    local sources sums
+    sources=$(pkgbuild_eval 'echo "${#source[@]}"' "$@")
+    sums=$(pkgbuild_eval 'echo "${#sha256sums[@]}"' "$@")
+    [[ $sources -ge 3 ]] || fail "only $sources sources for [$*]"
+    eq "$sums" "$sources" "checksums for [$*]"
+  }
+  count_sources_and_sums
+  count_sources_and_sums LIMGEN_ENGINES="vulkan cuda"
+  count_sources_and_sums LIMGEN_SOURCE=local
+  count_sources_and_sums LIMGEN_ENGINES=cuda LIMGEN_SOURCE=local
+  # CUDA adds a source, and the local checkout removes one.
+  eq "$(pkgbuild_eval 'echo "${#source[@]}"' LIMGEN_ENGINES="vulkan cuda")" "$(($(pkgbuild_eval 'echo "${#source[@]}"') + 1))" "cuda adds cutlass"
+  eq "$(pkgbuild_eval 'echo "${#source[@]}"' LIMGEN_SOURCE=local)" "$(($(pkgbuild_eval 'echo "${#source[@]}"') - 1))" "local drops the tarball"
+}
+
+test_pkgbuild_checksums_are_hashes_except_the_release_tarball() {
+  local line n=0 skips=0
+  while read -r line; do
+    n=$((n + 1))
+    if [[ $line == SKIP ]]; then
+      skips=$((skips + 1))
+    else
+      [[ $line =~ ^[0-9a-f]{64}$ ]] || fail "not a SHA-256: $line"
+    fi
+  done < <(pkgbuild_eval 'printf "%s\n" "${sha256sums[@]}"' LIMGEN_ENGINES="vulkan cuda")
+  eq "$skips" 1 "unpinned sources (the release tarball, until it is tagged)"
+  [[ $n -ge 5 ]] || fail "only $n checksums"
+  # With the local checkout there is nothing left unpinned.
+  while read -r line; do
+    [[ $line =~ ^[0-9a-f]{64}$ ]] || fail "not a SHA-256 with LIMGEN_SOURCE=local: $line"
+  done < <(pkgbuild_eval 'printf "%s\n" "${sha256sums[@]}"' LIMGEN_SOURCE=local)
+}
+
+test_pkgbuild_needs_the_vulkan_loader_to_build() {
+  # sd-cli links libvulkan.so, which none of the Vulkan headers packages
+  # bring; a clean chroot would fail at link time without it.
+  local makedepends
+  makedepends=$(pkgbuild_eval 'echo " ${makedepends[*]} "')
+  contains "$makedepends" " vulkan-icd-loader "
+}
+
+test_pkgbuild_ties_limgen_to_its_engine_version() {
+  # limgen builds sd-cli arguments for one engine release, so a partial
+  # upgrade must not pair a new limgen with an old engine.
+  local depends provides
+  depends=$(pkgbuild_eval 'install() { :; }; pkgdir=/nonexistent startdir=/nonexistent srcdir=/nonexistent; package_limgen; echo " ${depends[*]} "')
+  contains "$depends" " limgen-engine=0.1.0 "
+  for engine in vulkan cuda; do
+    provides=$(pkgbuild_eval "install() { :; }; pkgdir=/nonexistent startdir=/nonexistent srcdir=/nonexistent; package_limgen-engine-$engine; echo \" \${provides[*]} \"")
+    contains "$provides" " limgen-engine=0.1.0 "
+  done
+}
+
+test_pkgbuild_defines_a_package_function_per_package() {
+  local pkg
+  for pkg in limgen limgen-engine-vulkan limgen-engine-cuda; do
+    pkgbuild_eval "declare -F package_$pkg >/dev/null" || fail "no package_$pkg()"
+  done
+  pkgbuild_eval 'declare -F build >/dev/null && declare -F prepare >/dev/null'
+}
+
+test_pkgbuild_refuses_an_unknown_engine_before_building() {
+  # build() must stop at the unknown name; a cmake that records any call proves nothing ran.
+  local bin=$T/fakebin-unknown calls=$T/unknown.calls
+  mkdir -p "$bin"
+  printf '#!/bin/sh\necho "$0 $*" >>"%s"\nexit 1\n' "$calls" >"$bin/cmake"
+  chmod +x "$bin/cmake"
+  status env PATH="$bin:$PATH" LIMGEN_ENGINES=rocm bash -c 'source "$1"; build' _ "$root/pkgbuild/PKGBUILD"
+  eq "$rc" 1 "exit code"
+  contains "$out" "unknown engine rocm"
+  absent "$calls"
+}
+
+test_pkgbuild_keeps_build_paths_out_of_the_engine() {
+  # The engine's sources name their own file paths in messages (__FILE__);
+  # unmapped, the binary would carry the builder's home folder.
+  local bin=$T/fakebin-prefix calls=$T/prefix.calls
+  mkdir -p "$bin"
+  printf '#!/bin/sh\necho "CFLAGS=$CFLAGS CXXFLAGS=$CXXFLAGS ARGS=$*" >>"%s"\nexit 1\n' "$calls" >"$bin/cmake"
+  chmod +x "$bin/cmake"
+  status env PATH="$bin:$PATH" CFLAGS=-O2 CXXFLAGS=-O2 srcdir=/build/src \
+    bash -c 'source "$1"; build' _ "$root/pkgbuild/PKGBUILD"
+  exists "$calls"
+  local recorded
+  recorded=$(head -1 "$calls")
+  contains "$recorded" "CFLAGS=-O2 -ffile-prefix-map=/build/src="
+  contains "$recorded" "CXXFLAGS=-O2 -ffile-prefix-map=/build/src="
+}
+
+test_pkgbuild_installs_what_the_desktop_file_names() {
+  local pkgbuild
+  pkgbuild=$(cat "$root/pkgbuild/PKGBUILD")
+  contains "$pkgbuild" "/usr/bin/limgen"
+  contains "$pkgbuild" "/usr/share/applications/limgen.desktop"
+  contains "$pkgbuild" "/usr/share/icons/hicolor/scalable/apps/limgen.svg"
+  contains "$pkgbuild" "/usr/lib/limgen/sd-cli"
+  exists "$root/pkgbuild/limgen.desktop"
+  exists "$root/pkgbuild/limgen.svg"
+  exists "$root/LICENSE"
+}
+
+# ---- bin/build-engine and the pin ---------------------------------------
+
+# A copy of the repository layout bin/build-engine needs, with fake git,
+# cmake and ninja that only record that they were called and fail: nothing
+# is cloned or built, whatever the script decides.
+engine_layout() {
+  L=$(mktemp -d "$T/layout.XXXXXX")
+  mkdir -p "$L/bin" "$L/pkgbuild" "$L/fakebin"
+  cp "$root/bin/build-engine" "$L/bin/build-engine"
+  cp "$root/pkgbuild/PKGBUILD" "$L/pkgbuild/PKGBUILD"
+  local tool
+  for tool in git cmake ninja; do
+    printf '#!/bin/sh\necho "%s $*" >>"%s"\nexit 1\n' "$tool" "$L/calls.log" >"$L/fakebin/$tool"
+    chmod +x "$L/fakebin/$tool"
+  done
+}
+
+run_build_engine() {
+  status env PATH="$L/fakebin:$PATH" "$L/bin/build-engine" "$@"
+}
+
+test_build_engine_refuses_when_the_pkgbuild_has_no_pin() {
+  engine_layout
+  grep -v '^_sdcpp_tag=\|^_sdcpp_commit=' "$root/pkgbuild/PKGBUILD" >"$L/pkgbuild/PKGBUILD"
+  run_build_engine vulkan
+  eq "$rc" 1 "exit code"
+  contains "$out" "no engine pin"
+  contains "$out" "pkgbuild/PKGBUILD"
+  absent "$L/calls.log"
+  absent "$L/build"
+}
+
+test_build_engine_refuses_when_only_part_of_the_pin_is_there() {
+  local drop
+  for drop in '^_sdcpp_tag=' '^_sdcpp_commit='; do
+    engine_layout
+    grep -v "$drop" "$root/pkgbuild/PKGBUILD" >"$L/pkgbuild/PKGBUILD"
+    run_build_engine vulkan
+    eq "$rc" 1 "exit code without $drop"
+    contains "$out" "no engine pin"
+    absent "$L/calls.log"
+  done
+  # An empty value is no pin either.
+  engine_layout
+  sed 's/^_sdcpp_tag=.*/_sdcpp_tag=/' "$root/pkgbuild/PKGBUILD" >"$L/pkgbuild/PKGBUILD"
+  run_build_engine cuda
+  eq "$rc" 1 "exit code with an empty tag"
+  contains "$out" "no engine pin"
+  absent "$L/calls.log"
+}
+
+test_build_engine_takes_the_pin_from_the_pkgbuild() {
+  engine_layout
+  sed -e 's/^_sdcpp_tag=.*/_sdcpp_tag=master-9-abcdef0/' -e 's/^_sdcpp_commit=.*/_sdcpp_commit=0123456789abcdef0123456789abcdef01234567/' \
+    "$root/pkgbuild/PKGBUILD" >"$L/pkgbuild/PKGBUILD"
+  run_build_engine vulkan
+  # The fake git fails the clone, which is all it is asked for: it must be of that tag.
+  [[ $rc -ne 0 ]] || fail "the fake git failed, so the script must too"
+  exists "$L/calls.log"
+  local calls
+  calls=$(cat "$L/calls.log")
+  contains "$calls" "git clone"
+  contains "$calls" "--branch master-9-abcdef0"
+  lacks "$calls" "$(sed -n 's/^_sdcpp_tag=//p' "$root/pkgbuild/PKGBUILD")"
+  lacks "$calls" "cmake"
+}
+
+test_build_engine_takes_a_quoted_pin() {
+  # Arch PKGBUILDs often quote values; the quotes are not part of the tag.
+  engine_layout
+  sed -e "s/^_sdcpp_tag=.*/_sdcpp_tag='master-9-abcdef0'/" \
+    -e 's/^_sdcpp_commit=.*/_sdcpp_commit="0123456789abcdef0123456789abcdef01234567"/' \
+    "$root/pkgbuild/PKGBUILD" >"$L/pkgbuild/PKGBUILD"
+  run_build_engine vulkan
+  local calls
+  calls=$(cat "$L/calls.log")
+  contains "$calls" "--branch master-9-abcdef0 "
+  lacks "$calls" "'"
+}
+
+test_engine_pin_in_the_pkgbuild_is_written_once() {
+  # The pin lines appear once, and bin/build-engine carries no copy of them.
+  eq "$(grep -c '^_sdcpp_tag=' "$root/pkgbuild/PKGBUILD")" 1 "tag lines"
+  eq "$(grep -c '^_sdcpp_commit=' "$root/pkgbuild/PKGBUILD")" 1 "commit lines"
+  local tag
+  tag=$(sed -n 's/^_sdcpp_tag=//p' "$root/pkgbuild/PKGBUILD")
+  lacks "$(cat "$root/bin/build-engine")" "$tag"
+  [[ $tag =~ ^master-[0-9]+-[0-9a-f]{7}$ ]] || fail "unexpected tag shape: $tag"
+  [[ $(sed -n 's/^_sdcpp_commit=//p' "$root/pkgbuild/PKGBUILD") =~ ^[0-9a-f]{40}$ ]] || fail "commit is not 40 hex digits"
+  # The tag ends with the commit's first seven digits.
+  [[ $(sed -n 's/^_sdcpp_commit=//p' "$root/pkgbuild/PKGBUILD") == "${tag##*-}"* ]] || fail "tag and commit disagree"
+}
+
+# ---- desktop file and icon -----------------------------------------------
+
+test_desktop_file_names_the_app() {
+  local file=$root/pkgbuild/limgen.desktop
+  grep -qx 'Type=Application' "$file" || fail "Type"
+  grep -qx 'Exec=limgen' "$file" || fail "Exec"
+  grep -qx 'Icon=limgen' "$file" || fail "Icon"
+  grep -qx 'StartupWMClass=limgen' "$file" || fail "StartupWMClass"
+  grep -qx 'Terminal=false' "$file" || fail "Terminal"
+  grep -q '^Name=Limgen$' "$file" || fail "Name"
+  # The window's app id (main.cpp) is what StartupWMClass matches.
+  contains "$(cat "$root/src/main.cpp")" 'setDesktopFileName("limgen")'
+}
+
+test_desktop_file_has_a_comment_for_every_translation() {
+  local code locale
+  for code in $(ls "$root/src/i18n" | sed -n 's/\.json$//p' | grep -v '^en$'); do
+    locale=${code//-/_}
+    grep -q "^Comment\[$locale\]=." "$root/pkgbuild/limgen.desktop" || fail "no Comment[$locale] for src/i18n/$code.json"
+  done
+}
+
+test_desktop_file_validates() {
+  command -v desktop-file-validate >/dev/null || { echo "    (desktop-file-validate is not installed; skipped)"; return 0; }
+  status desktop-file-validate "$root/pkgbuild/limgen.desktop"
+  eq "$rc" 0 "desktop-file-validate: $out"
+}
+
+test_icon_is_well_formed_xml_and_an_svg() {
+  python3 - "$root/pkgbuild/limgen.svg" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+assert root.tag == "{http://www.w3.org/2000/svg}svg", root.tag
+assert root.get("viewBox"), "no viewBox, so it does not scale"
+assert len(list(root)) >= 1, "nothing drawn"
+PY
 }
 
 # ---- go ------------------------------------------------------------------
