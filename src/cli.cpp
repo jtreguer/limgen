@@ -11,10 +11,12 @@
 #include "palette.h"
 #include "prompt.h"
 #include "sdcppengine.h"
+#include "studio.h"
 
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QJsonArray>
@@ -22,7 +24,9 @@
 #include <QJsonObject>
 #include <QLocale>
 #include <QLockFile>
+#include <QSize>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTimer>
@@ -127,12 +131,50 @@ QString memoryText(const Gpu &gpu) {
     return tr("%1, %2 of %3 MiB free").arg(gpu.name).arg(gpu.freeMiB).arg(gpu.totalMiB);
 }
 
-// Reached only when `open` has something after it; plain `limgen open` opens
-// the window in main() without coming here.
+// The engine a command runs: --engine when given, else the one chosen in
+// the window (config.json), else the first installed. LIMGEN_SD_CLI, for
+// development, wins over all of them. Sets *status on a usage error.
+void addEngineOption(Command &command) {
+    command.parser.addOption({"engine", tr("The engine build to run: vulkan, cuda or rocm, as installed (default: "
+                                           "the one chosen in the window)"),
+                              "backend"});
+}
+
+QString engineProgram(const Command &command, int *status) {
+    if (!command.parser.isSet("engine"))
+        return SdCppEngine::defaultProgram();
+    const QString backend = command.parser.value("engine");
+    QStringList backends;
+    for (const EngineInstall &engine : SdCppEngine::installed()) {
+        if (engine.backend.isEmpty() || engine.backend == backend)
+            return engine.program;
+        backends << engine.backend;
+    }
+    *status = fail(backends.isEmpty() ? tr("No engine is installed in %1.").arg(SdCppEngine::engineDirectory())
+                                      : tr("--engine takes one of: %1.").arg(backends.join(", ")),
+                   Usage);
+    return {};
+}
+
+// "2560x1440" (or with ×) to a size; an empty size for anything else.
+QSize parseSize(const QString &text) {
+    static const QRegularExpression pattern(QRegularExpression::anchoredPattern(R"((\d{1,5})\s*[x×X]\s*(\d{1,5}))"));
+    const QRegularExpressionMatch match = pattern.match(text.trimmed());
+    return match.hasMatch() ? QSize(match.captured(1).toInt(), match.captured(2).toInt()) : QSize();
+}
+
+// Reached only when `open` has something after it other than a screen;
+// `limgen open` and `limgen open generic` open the window in main() without
+// coming here.
 int open(const QStringList &arguments) {
-    Command command("open", tr("Open the window. Takes no arguments."), false);
-    if (!command.parse(arguments))
+    Command command("open", tr("Open the window, on the home screen or on the screen named."), false);
+    command.parser.addPositionalArgument("screen", tr("generic or theme, to skip the home screen"), "[screen]");
+    if (!command.parse(arguments, 0, 1))
         return command.status;
+    if (!command.argument(0).isEmpty())
+        return fail(tr("Unknown screen %1: use generic or theme.").arg(command.argument(0)) + "\n" +
+                        command.parser.helpText().trimmed(),
+                    Usage);
     return fail(tr("limgen open takes no options.") + "\n" + command.parser.helpText().trimmed(), Usage);
 }
 
@@ -175,15 +217,29 @@ int palette(const QStringList &arguments, const OmarchyPaths &paths) {
     return Ok;
 }
 
+QJsonArray installedEngines(const QString &chosen) {
+    QJsonArray list;
+    for (const EngineInstall &engine : SdCppEngine::installed())
+        list << QJsonObject{{"backend", engine.backend.isEmpty() ? QJsonValue() : QJsonValue(engine.backend)},
+                            {"path", engine.program},
+                            {"chosen", engine.program == chosen}};
+    return list;
+}
+
 int doctor(const QStringList &arguments) {
     Command command("doctor", tr("Check the engine, the GPU and the installed models, and say what is missing."));
     command.parser.addOption({"verify", tr("Also check each installed file's SHA-256 (reads several gigabytes)")});
+    addEngineOption(command);
     if (!command.parse(arguments))
         return command.status;
     const bool verify = command.parser.isSet("verify");
+    int status = Ok;
+    const QString program = engineProgram(command, &status);
+    if (program.isEmpty())
+        return status;
 
     QStringList problems;
-    const SdCppEngine engine;
+    const SdCppEngine engine(program);
     const EngineProbe probe = engine.probe();
     if (probe.error.kind != EngineError::None)
         problems << probe.error.message;
@@ -240,6 +296,7 @@ int doctor(const QStringList &arguments) {
             gpuList << QJsonObject{{"vendor", g.vendor}, {"name", g.name},
                                    {"totalMiB", double(g.totalMiB)}, {"freeMiB", double(g.freeMiB)}};
         print({{"ok", defaultRunnable},
+               {"engines", installedEngines(engine.program())},
                {"engine", QJsonObject{{"path", engine.program()},
                                       {"version", probe.version},
                                       {"pinned", SdCppEngine::pinnedVersion},
@@ -258,6 +315,12 @@ int doctor(const QStringList &arguments) {
                                                  probe.gpu().name.isEmpty() ? tr("no GPU device")
                                                                             : probe.gpu().name + " (" +
                                                                                   probe.gpu().description + ")"));
+    QStringList others;
+    for (const EngineInstall &install : SdCppEngine::installed())
+        if (install.program != engine.program() && !install.backend.isEmpty())
+            others << install.backend;
+    if (!others.isEmpty())
+        print(stdout, tr("          also installed: %1 (--engine, or choose in the window)").arg(others.join(", ")));
     print(stdout, tr("GPU:      %1").arg(gpu.name.isEmpty() ? tr("none found") : memoryText(gpu)));
     print(stdout, tr("Models:   %1").arg(modelsDirectory));
     for (const QString &line : modelLines)
@@ -268,6 +331,9 @@ int doctor(const QStringList &arguments) {
         print(stdout, "  " + problem);
     return defaultRunnable ? Ok : NotRunnable;
 }
+
+int runBatch(const BatchSettings &settings, const Catalogue &catalogue, const OmarchyPaths &paths,
+             const QString &program, bool json);
 
 int generate(const QStringList &arguments, const OmarchyPaths &paths) {
     Command command("generate", tr("Make drafts for the current theme and add them to the library. Prints "
@@ -285,8 +351,13 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
                               "image"});
     command.parser.addOption({"strength", tr("How far variations move from the image, 0.1 to 0.9 (default 0.5)"),
                               "n", "0.5"});
+    addEngineOption(command);
     if (!command.parse(arguments, 0, 1))
         return command.status;
+    int status = Ok;
+    const QString program = engineProgram(command, &status);
+    if (program.isEmpty())
+        return status;
 
     const QString subject = command.argument(0).trimmed();
     const QString fullPrompt = command.parser.value("prompt").trimmed();
@@ -338,11 +409,20 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
     settings.seed = seed;
     settings.source = from;
     settings.strength = strength;
-    Batch batch(catalogue, paths);
+    return runBatch(settings, catalogue, paths, program, command.json());
+}
+
+// Makes the drafts of a batch and reports them, for generate and image.
+int runBatch(const BatchSettings &settings, const Catalogue &catalogue, const OmarchyPaths &paths,
+             const QString &program, bool json) {
+    const int count = settings.count;
+    const quint32 seed = settings.seed.value_or(0);
+    Batch batch(catalogue, paths, program);
     QString message;
-    const Batch::Outcome prepared = batch.prepare(settings, SdCppEngine().probe(), &message);
+    const Batch::Outcome prepared = batch.prepare(settings, SdCppEngine(program).probe(), &message);
     if (prepared != Batch::Outcome::Ok)
-        return fail(message, prepared == Batch::Outcome::UnknownModel || prepared == Batch::Outcome::UnknownSource
+        return fail(message, prepared == Batch::Outcome::UnknownModel || prepared == Batch::Outcome::UnknownSource ||
+                                     prepared == Batch::Outcome::UnknownPalette
                                  ? Usage
                                  : NotRunnable);
 
@@ -350,7 +430,7 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
     Batch::Outcome outcome = Batch::Outcome::Ok;
     QEventLoop loop;
     QObject::connect(&batch, &Batch::sampled, &loop, [&](int image) {
-        if (!command.json())
+        if (!json)
             print(stderr, tr("Draft %1 of %2 sampled").arg(image + 1).arg(count));
     });
     QObject::connect(&batch, &Batch::finished, &loop, [&](const QList<LibraryEntry> &filed) {
@@ -384,20 +464,36 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
     if (outcome != Batch::Outcome::Ok)
         return fail(message, outcome == Batch::Outcome::NotRunnable ? NotRunnable : Error);
 
-    if (command.json()) {
+    if (json) {
         QJsonArray list;
-        for (int i = 0; i < entries.size(); ++i)
-            list << QJsonObject{{"id", entries.at(i).id},
-                                {"path", entries.at(i).image},
-                                {"seed", double(seed + quint32(i))}};
-        print({{"model", batch.model()->id},
-               {"level", batch.model()->levels.first().id},
-               {"theme", batch.themeSlug().isEmpty() ? QJsonValue() : QJsonValue(batch.themeSlug())},
-               {"style", batch.styleId()},
-               {"prompt", batch.request().prompt},
-               {"seed", double(seed)},
-               {"source", batch.source().isEmpty() ? QJsonValue() : QJsonValue(batch.source())},
-               {"drafts", list}});
+        for (int i = 0; i < entries.size(); ++i) {
+            QJsonObject draft{{"id", entries.at(i).id},
+                              {"path", entries.at(i).image},
+                              {"seed", double(seed + quint32(i))}};
+            // With variety each draft has its own hint, and so its own prompt.
+            if (!batch.hints().value(i).isEmpty()) {
+                draft.insert("hint", batch.hints().value(i));
+                draft.insert("prompt", batch.prompts().value(i));
+            }
+            list << draft;
+        }
+        QJsonObject object{{"model", batch.model()->id},
+                           {"level", batch.model()->levels.first().id},
+                           {"prompt", batch.request().prompt},
+                           {"seed", double(seed)},
+                           {"drafts", list}};
+        if (settings.generic) {
+            object.insert("target", QJsonArray{batch.target().width(), batch.target().height()});
+            object.insert("size", QJsonArray{batch.request().width, batch.request().height});
+            object.insert("palette", entries.isEmpty() ? QJsonValue()
+                                                       : entries.first().metadata.value("generic").toObject().value("palette"));
+            object.insert("variety", Prompt::varietyId(settings.variety));
+        } else {
+            object.insert("theme", batch.themeSlug().isEmpty() ? QJsonValue() : QJsonValue(batch.themeSlug()));
+            object.insert("style", batch.styleId());
+            object.insert("source", batch.source().isEmpty() ? QJsonValue() : QJsonValue(batch.source()));
+        }
+        print(object);
         return Ok;
     }
     for (const LibraryEntry &entry : entries)
@@ -407,14 +503,15 @@ int generate(const QStringList &arguments, const OmarchyPaths &paths) {
 
 // Finishes one draft and adds it to a theme's background folder, for keep
 // and set. Prints nothing on success; the caller reports the result.
-int runKeep(const KeepSettings &settings, const OmarchyPaths &paths, bool json, KeepResult *result) {
+int runKeep(const KeepSettings &settings, const OmarchyPaths &paths, bool json, KeepResult *result,
+            const QString &program = SdCppEngine::defaultProgram()) {
     QString catalogueError;
     const Catalogue catalogue = Catalogue::fromEnvironment(&catalogueError);
     if (!catalogue.isValid())
         return fail(catalogueError);
-    Keeper keeper(catalogue, paths);
+    Keeper keeper(catalogue, paths, program);
     QString message;
-    const Keeper::Outcome prepared = keeper.prepare(settings, SdCppEngine().probe(), &message);
+    const Keeper::Outcome prepared = keeper.prepare(settings, SdCppEngine(program).probe(), &message);
     if (prepared != Keeper::Outcome::Ok)
         return fail(message, prepared == Keeper::Outcome::UnknownDraft || prepared == Keeper::Outcome::UnknownTheme
                                  ? Usage
@@ -472,8 +569,13 @@ int keep(const QStringList &arguments, const OmarchyPaths &paths) {
                               "strength"});
     command.parser.addOption({"format", tr("png or jpeg (default from the settings, png at first)"), "format"});
     command.parser.addOption({"set", tr("Also show it as the background now")});
+    addEngineOption(command);
     if (!command.parse(arguments, 1))
         return command.status;
+    int status = Ok;
+    const QString program = engineProgram(command, &status);
+    if (program.isEmpty())
+        return status;
 
     const Config config;
     KeepSettings settings;
@@ -503,8 +605,8 @@ int keep(const QStringList &arguments, const OmarchyPaths &paths) {
         settings.theme = omarchy.slug();
 
     KeepResult kept;
-    if (const int status = runKeep(settings, paths, command.json(), &kept); status != Ok)
-        return status;
+    if (const int kept_status = runKeep(settings, paths, command.json(), &kept, program); kept_status != Ok)
+        return kept_status;
     bool set = false;
     if (command.parser.isSet("set")) {
         QString error;
@@ -521,6 +623,157 @@ int keep(const QStringList &arguments, const OmarchyPaths &paths) {
     if (kept.alreadyKept)
         print(stderr, tr("Already kept."));
     print(stdout, kept.installed);
+    return Ok;
+}
+
+int image(const QStringList &arguments, const OmarchyPaths &paths) {
+    Command command("image", tr("Make previews of anything, not tied to the theme, and add them to the library. "
+                                "Prints each preview's id and path; limgen upscale finishes one."));
+    command.parser.addPositionalArgument("prompt", tr("What the image shows, used as written"), "<prompt>");
+    command.parser.addOption({"size", tr("The final size the previews are shaped for, such as 1920x1080 "
+                                         "(default: the largest monitor's)"),
+                              "WxH"});
+    command.parser.addOption({"palette", tr("none, a theme's name, or up to five colours such as "
+                                            "\"#1a1b26,#7aa2f7\" (default none)"),
+                              "palette", "none"});
+    command.parser.addOption({"count", tr("How many previews, 1 to 9 (default 4)"), "n", "4"});
+    command.parser.addOption({"variety", tr("How much the previews differ: seeds (only the seed), framing (each its "
+                                            "own framing) or light (framing and light); default seeds"),
+                              "variety", "seeds"});
+    command.parser.addOption({"model", tr("A model id from limgen doctor (default: the default model)"), "id"});
+    command.parser.addOption({"seed", tr("The first preview's seed; the others count up from it"), "n"});
+    addEngineOption(command);
+    if (!command.parse(arguments, 1))
+        return command.status;
+    int status = Ok;
+    const QString program = engineProgram(command, &status);
+    if (program.isEmpty())
+        return status;
+
+    const QString prompt = command.argument(0).trimmed();
+    if (prompt.isEmpty())
+        return fail(tr("Give a prompt: what the image shows."), Usage);
+    bool numberOk = false;
+    const int count = command.parser.value("count").toInt(&numberOk);
+    if (!numberOk || count < 1 || count > 9)
+        return fail(tr("--count takes a number from 1 to 9."), Usage);
+    quint32 seed = QRandomGenerator::global()->bounded(1u << 31);
+    if (command.parser.isSet("seed")) {
+        seed = command.parser.value("seed").toUInt(&numberOk);
+        const quint32 highest = 4294967295u - quint32(count - 1);
+        if (!numberOk || seed > highest)
+            return fail(tr("--seed takes a whole number from 0 to %1 for %2 previews.").arg(highest).arg(count),
+                        Usage);
+    }
+    QSize target;
+    if (command.parser.isSet("size")) {
+        target = parseSize(command.parser.value("size"));
+        if (target.isEmpty())
+            return fail(tr("--size takes a width and a height such as 1920x1080."), Usage);
+    }
+
+    Prompt::Variety variety;
+    if (!Prompt::varietyFromId(command.parser.value("variety"), &variety))
+        return fail(tr("--variety takes one of: %1.").arg(Prompt::varietyIds().join(", ")), Usage);
+
+    BatchSettings settings;
+    settings.generic = true;
+    settings.variety = variety;
+    settings.subject = prompt;
+    settings.target = target.isEmpty() ? Omarchy(paths).largestMonitorSize() : target;
+    settings.count = count;
+    settings.seed = seed;
+    settings.modelId = command.parser.value("model");
+    const QString palette = command.parser.value("palette").trimmed();
+    if (palette.startsWith('#')) {
+        settings.paletteColors = palette.split(',', Qt::SkipEmptyParts);
+        for (QString &colour : settings.paletteColors)
+            colour = colour.trimmed();
+        if (const Palette chosen = Palette::fromColors(settings.paletteColors); !chosen.isValid())
+            return fail(tr("--palette: %1.").arg(chosen.error), Usage);
+    } else if (!palette.isEmpty() && palette != "none") {
+        settings.paletteTheme = palette;
+    }
+
+    QString catalogueError;
+    const Catalogue catalogue = Catalogue::fromEnvironment(&catalogueError);
+    if (!catalogue.isValid())
+        return fail(catalogueError);
+    const CatalogueModel *model =
+        settings.modelId.isEmpty() ? catalogue.defaultModel() : catalogue.model(settings.modelId);
+    if (!model) {
+        QStringList ids;
+        for (const auto &m : catalogue.models())
+            ids << m.id;
+        return fail(tr("--model takes one of: %1.").arg(ids.join(", ")), Usage);
+    }
+    const QString problem =
+        Studio::sizeProblemFor(settings.target, Batch::draftSize(settings.target, QSize(model->width, model->height)));
+    if (!problem.isEmpty())
+        return fail(tr("--size: %1").arg(problem), Usage);
+    return runBatch(settings, catalogue, paths, program, command.json());
+}
+
+int upscale(const QStringList &arguments, const OmarchyPaths &paths) {
+    Command command("upscale", tr("Upscale a preview or a draft to its final size, without adding it to any "
+                                  "theme. Prints the path of the image made."));
+    command.parser.addPositionalArgument("id", tr("A preview or draft id, as limgen image or generate prints it"),
+                                         "<id>");
+    command.parser.addOption({"size", tr("The final size, such as 1920x1080 (default: the size the preview was "
+                                         "made for, else the largest monitor's)"),
+                              "WxH"});
+    command.parser.addOption({"output", tr("Also write the image here: PNG, or JPEG for a .jpg name"), "file"});
+    addEngineOption(command);
+    if (!command.parse(arguments, 1))
+        return command.status;
+    int status = Ok;
+    const QString program = engineProgram(command, &status);
+    if (program.isEmpty())
+        return status;
+
+    KeepSettings settings;
+    settings.draftId = command.argument(0);
+    settings.install = false;
+    settings.colorPass = 0;
+    settings.format = "png";
+    if (command.parser.isSet("size")) {
+        settings.size = parseSize(command.parser.value("size"));
+        if (settings.size.isEmpty())
+            return fail(tr("--size takes a width and a height such as 1920x1080."), Usage);
+        const LibraryEntry draft = Library().find(settings.draftId);
+        const QJsonArray made = draft.metadata.value("size").toArray();
+        const QString problem =
+            Studio::sizeProblemFor(settings.size, draft.isValid() ? QSize(made.at(0).toInt(), made.at(1).toInt()) : QSize());
+        if (!problem.isEmpty())
+            return fail(tr("--size: %1").arg(problem), Usage);
+    }
+    QString output;
+    if (command.parser.isSet("output")) {
+        output = QFileInfo(command.parser.value("output")).absoluteFilePath();
+        const QString suffix = QFileInfo(output).suffix().toLower();
+        if (suffix != "png" && suffix != "jpg" && suffix != "jpeg")
+            return fail(tr("--output needs a .png, .jpg or .jpeg name."), Usage);
+        if (!QFileInfo(QFileInfo(output).absolutePath()).isDir())
+            return fail(tr("No folder %1.").arg(QFileInfo(output).absolutePath()), Usage);
+    }
+
+    KeepResult made;
+    if (const int kept = runKeep(settings, paths, command.json(), &made, program); kept != Ok)
+        return kept;
+    if (!output.isEmpty()) {
+        const QString error = Keeper::saveCopy(made.final.image, output,
+                                               Keeper::parameters(made.final.metadata), Config().jpegQuality());
+        if (!error.isEmpty())
+            return fail(error);
+    }
+    const QString path = output.isEmpty() ? made.final.image : output;
+    if (command.json()) {
+        const QJsonArray size = made.final.metadata.value("size").toArray();
+        print({{"draft", made.draft.id}, {"final", made.final.id}, {"path", path}, {"library", made.final.image},
+               {"size", size}});
+        return Ok;
+    }
+    print(stdout, path);
     return Ok;
 }
 
@@ -897,12 +1150,15 @@ int help(const QStringList &arguments, const OmarchyPaths &paths) {
 
 QString summary() {
     return tr("Window:\n"
-              "  open              Open the window (also limgen with no command)\n\n"
+              "  open [screen]     Open the window (also limgen with no command); generic or theme opens\n"
+              "                    that screen instead of the home screen\n\n"
               "Commands that need no display (limgen help <command> for options):\n"
               "  palette           The current theme's palette and the words it becomes\n"
               "  doctor            The engine, the GPU, the installed models, and what is missing\n"
               "  generate          Make drafts for the current theme\n"
               "  keep <id>         Finish a draft and add it to the theme's backgrounds\n"
+              "  image <prompt>    Make previews of anything, at any size, with an optional palette\n"
+              "  upscale <id>      Finish a preview or draft to its size, without adding it to a theme\n"
               "  library           The drafts and finished images limgen made\n"
               "  skill [install]   Print the agent skill, or install it for coding agents\n"
               "  set <id-or-file>  Show an image as the background now\n"
@@ -913,7 +1169,7 @@ QString summary() {
 }
 
 bool isCommand(const QString &word) {
-    return QStringList{"open", "palette", "doctor", "generate", "keep", "set", "library",
+    return QStringList{"open", "palette", "doctor", "generate", "keep", "image", "upscale", "set", "library",
                        "skill", "models", "help", "--help", "-h", "--version"}
         .contains(word);
 }
@@ -930,6 +1186,10 @@ int run(const QStringList &arguments, const OmarchyPaths &paths) {
         return generate(arguments, paths);
     if (command == "keep")
         return keep(arguments, paths);
+    if (command == "image")
+        return image(arguments, paths);
+    if (command == "upscale")
+        return upscale(arguments, paths);
     if (command == "set")
         return set(arguments, paths);
     if (command == "library")

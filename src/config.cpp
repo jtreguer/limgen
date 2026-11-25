@@ -1,10 +1,15 @@
 #include "config.h"
 
+#include "palette.h"
+#include "prompt.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
 
@@ -40,6 +45,60 @@ double Config::strength() const {
 }
 
 void Config::setStrength(double strength) { m_values.insert("strength", qBound(0.1, strength, 0.9)); }
+
+namespace {
+
+// One generic setting; the others under "generic" are kept as they are.
+QJsonValue generic(const QJsonObject &values, const char *key) { return values.value("generic").toObject().value(key); }
+
+void setGeneric(QJsonObject &values, const char *key, const QJsonValue &value) {
+    QJsonObject object = values.value("generic").toObject();
+    object.insert(key, value);
+    values.insert("generic", object);
+}
+
+} // namespace
+
+QSize Config::genericSize() const {
+    const QJsonArray size = generic(m_values, "size").toArray();
+    const int width = size.at(0).toInt(), height = size.at(1).toInt();
+    return width > 0 && height > 0 ? QSize(width, height) : QSize();
+}
+
+void Config::setGenericSize(const QSize &size) {
+    setGeneric(m_values, "size", size.isEmpty() ? QJsonValue() : QJsonValue(QJsonArray{size.width(), size.height()}));
+}
+
+int Config::genericCount() const {
+    const int count = generic(m_values, "count").toInt();
+    return count == 2 || count == 4 || count == 6 || count == 9 ? count : defaultGenericCount;
+}
+
+void Config::setGenericCount(int count) { setGeneric(m_values, "count", count); }
+
+QString Config::genericPalette() const { return generic(m_values, "palette").toString(); }
+
+void Config::setGenericPalette(const QString &palette) { setGeneric(m_values, "palette", palette); }
+
+QStringList Config::genericColors() const {
+    static const QRegularExpression hex(QRegularExpression::anchoredPattern("#[0-9a-f]{6}"));
+    QStringList colors;
+    for (const QJsonValue &value : generic(m_values, "colors").toArray())
+        if (const QString color = value.toString().toLower(); hex.match(color).hasMatch() && colors.size() < Palette::maxColors)
+            colors << color;
+    return colors;
+}
+
+void Config::setGenericColors(const QStringList &colors) {
+    setGeneric(m_values, "colors", QJsonArray::fromStringList(colors));
+}
+
+QString Config::genericVariety() const {
+    const QString variety = generic(m_values, "variety").toString();
+    return Prompt::varietyIds().contains(variety) ? variety : Prompt::varietyIds().first();
+}
+
+void Config::setGenericVariety(const QString &variety) { setGeneric(m_values, "variety", variety); }
 
 QString Config::defaultFile() {
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/limgen/config.json";

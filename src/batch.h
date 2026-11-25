@@ -2,6 +2,8 @@
 
 #include <QElapsedTimer>
 #include <QList>
+#include <QSize>
+#include <QStringList>
 #include <QObject>
 #include <memory>
 #include <optional>
@@ -26,6 +28,19 @@ struct BatchSettings {
     // an image file. Empty for a plain batch.
     QString source;
     double strength = 0.5; // how far the drafts may move from the source
+
+    // A generic batch (the Generic screen, limgen image): the subject is the
+    // whole prompt, used as typed with the chosen palette's words, without a
+    // style and without the current theme. The drafts take the target's
+    // shape at the model's own pixel count, and are finished to the target.
+    bool generic = false;
+    QSize target;              // empty for the largest monitor's size
+    QString paletteTheme;      // a theme whose palette the prompt uses
+    QStringList paletteColors; // or colours chosen by hand ("#rrggbb"); neither for no palette
+    // How much the previews differ beyond their seeds (Prompt::Variety).
+    // With hints, each draft has its own prompt, and the engine runs once
+    // per draft, since sd-cli takes one prompt per run.
+    Prompt::Variety variety = Prompt::Variety::Seeds;
 };
 
 // One batch of drafts, from the checks to the library: is the model
@@ -37,7 +52,7 @@ class Batch : public QObject {
     Q_OBJECT
 
 public:
-    enum class Outcome { Ok, UnknownModel, UnknownSource, NotRunnable, Failed, Cancelled };
+    enum class Outcome { Ok, UnknownModel, UnknownSource, UnknownPalette, NotRunnable, Failed, Cancelled };
     Q_ENUM(Outcome)
 
     // The strengths a variation takes. Below 0.1 it changes next to
@@ -47,6 +62,14 @@ public:
     // lowest that runs a step when the model has too few for it; never past
     // the maximum.
     static double strengthFor(int steps, double strength);
+    // The draft size for a target: the target's ratio at about the model's
+    // own pixel count (`native`), each side a multiple of 64 from 256 to
+    // 2048. 1344x768 for a 16:9 target and a 1344x768 model, 768x1344 for
+    // 9:16, 1024x1024 for a square. An empty target gives `native`.
+    static QSize draftSize(const QSize &target, const QSize &native);
+    // The largest ratio either way a generic target may have: wider than
+    // 4:1, a draft side would leave 256 to 2048.
+    static constexpr double maxRatio = 4.0;
 
     Batch(const Catalogue &catalogue, const OmarchyPaths &paths,
           const QString &engineProgram = SdCppEngine::defaultProgram(), QObject *parent = nullptr);
@@ -67,6 +90,15 @@ public:
     const EngineRequest &request() const { return m_request; }
     QString themeSlug() const { return m_record.themeSlug; }
     QString styleId() const { return m_record.style; }
+    // A generic batch's target size; empty for a theme batch.
+    QSize target() const { return m_target; }
+    // Each draft's variety hint and full prompt, in batch order. The hints
+    // are empty strings without variety, and every prompt is then the
+    // request's.
+    QStringList hints() const { return m_hints; }
+    QStringList prompts() const { return m_prompts; }
+    // Whether the engine runs once per draft (the prompts differ).
+    bool runsPerDraft() const { return m_perDraft; }
     // For a variation: the source as the sidecar records it, with the
     // strength used; empty for a plain batch.
     QJsonObject source() const { return m_record.source; }
@@ -86,13 +118,25 @@ private:
     void engineProgress(int image, int step, int steps, double secondsPerStep);
     void engineFinished(const QStringList &drafts);
     void engineFailed(const EngineError &error);
-    void recordTiming();
+    void startRun();
+    void fileDrafts(const QStringList &drafts);
+    // The engine request for one draft of a batch that runs per draft.
+    EngineRequest runRequest(int index) const;
+    // The draft an engine event is about: the run's, when runs are per draft.
+    int draftIndex(int image) const { return m_perDraft ? m_run : image; }
+    void recordTiming(int count);
     QString timingKey() const;
     void cleanUp();
 
     Catalogue m_catalogue;
     OmarchyPaths m_paths;
     QString m_sourceImage; // the file a variation starts from
+    QSize m_target;
+    QStringList m_hints, m_prompts;
+    bool m_perDraft = false;
+    int m_run = 0;                // the draft whose run is going, when runs are per draft
+    QStringList m_runDrafts;      // the drafts the runs made so far
+    bool m_stopping = false;      // cancelled between two runs
     std::unique_ptr<SdCppEngine> m_engine;
     const CatalogueModel *m_model = nullptr;
     const ModelLevel *m_level = nullptr;

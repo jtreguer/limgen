@@ -12,15 +12,12 @@
 #include <QImageWriter>
 #include <QJsonArray>
 #include <QRandomGenerator>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QtConcurrent/QtConcurrentRun>
 
 namespace {
-
-// Without a monitor to measure (no Hyprland, or a command run over SSH),
-// the final is made at the size the finish was measured at in L0.
-const QSize fallbackSize(2560, 1440);
 
 // The theme's backgrounds are read small: their colour statistics need no
 // more, and a large JPEG decodes much faster at a fraction of its size.
@@ -106,6 +103,32 @@ QString Keeper::parameters(const QJsonObject &metadata) {
     return lines.join('\n');
 }
 
+QString Keeper::saveCopy(const QString &final, const QString &path, const QString &parameters, int jpegQuality) {
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    QSaveFile output(path);
+    if (!output.open(QIODevice::WriteOnly))
+        return tr("Cannot write %1: %2").arg(path, output.errorString());
+    if (suffix == "jpg" || suffix == "jpeg") {
+        QImage image(final);
+        if (image.isNull())
+            return tr("Cannot read %1.").arg(final);
+        image.setText("parameters", parameters);
+        QImageWriter writer(&output, "jpeg");
+        writer.setQuality(jpegQuality);
+        if (!writer.write(image))
+            return tr("Cannot write %1: %2").arg(path, writer.errorString());
+    } else {
+        // The final is a PNG with its parameters already; a copy keeps it
+        // exactly.
+        QFile input(final);
+        if (!input.open(QIODevice::ReadOnly) || output.write(input.readAll()) < 0)
+            return tr("Cannot read %1.").arg(final);
+    }
+    if (!output.commit())
+        return tr("Cannot write %1: %2").arg(path, output.errorString());
+    return {};
+}
+
 Keeper::Outcome Keeper::prepare(const KeepSettings &settings, const EngineProbe &probe, QString *message) {
     auto refuse = [message](Outcome outcome, const QString &text) {
         if (message)
@@ -127,10 +150,10 @@ Keeper::Outcome Keeper::prepare(const KeepSettings &settings, const EngineProbe 
         return refuse(Outcome::UnknownDraft, tr("%1 is a finished image, not a draft.").arg(settings.draftId));
 
     const Omarchy omarchy(m_paths);
-    if (!settings.theme.isEmpty() && omarchy.themeDirectory(settings.theme).isEmpty())
+    if (settings.install && !settings.theme.isEmpty() && omarchy.themeDirectory(settings.theme).isEmpty())
         return refuse(Outcome::UnknownTheme, tr("No theme %1 in %2.").arg(settings.theme, m_paths.themes.join(", ")));
-    const QString folder = omarchy.keepDirectory(settings.theme);
-    m_result.theme = settings.theme;
+    const QString folder = settings.install ? omarchy.keepDirectory(settings.theme) : QString();
+    m_result.theme = settings.install ? settings.theme : QString();
 
     const CatalogueFile *upscaler = m_catalogue.upscaler();
     const QString modelsDirectory = Catalogue::defaultModelsDirectory();
@@ -147,18 +170,24 @@ Keeper::Outcome Keeper::prepare(const KeepSettings &settings, const EngineProbe 
         return refuse(Outcome::Failed, tr("Cannot read %1.").arg(m_result.draft.image));
     m_size = settings.size;
     if (m_size.isEmpty()) {
-        const Monitor monitor = Omarchy::largest(omarchy.monitors());
-        m_size = monitor.width > 0 ? QSize(monitor.width, monitor.height) : fallbackSize;
+        const QJsonArray target = draft.value("generic").toObject().value("target").toArray();
+        if (target.at(0).toInt() > 0 && target.at(1).toInt() > 0)
+            m_size = QSize(target.at(0).toInt(), target.at(1).toInt());
     }
+    if (m_size.isEmpty())
+        m_size = omarchy.largestMonitorSize();
 
-    // A draft kept before, in either format, is not made again.
+    // A draft kept before, in either format, is not made again. A generic
+    // image is only finished, so there is nothing to find.
     const QString subject = draft.value("subject").toString();
-    m_result.installed = folder + "/" + fileName(subject, settings.draftId, settings.format);
-    for (const char *format : {"png", "jpeg"}) {
-        const QString existing = folder + "/" + fileName(subject, settings.draftId, format);
-        if (QFileInfo::exists(existing)) {
-            m_result.installed = existing;
-            m_result.alreadyKept = true;
+    if (settings.install) {
+        m_result.installed = folder + "/" + fileName(subject, settings.draftId, settings.format);
+        for (const char *format : {"png", "jpeg"}) {
+            const QString existing = folder + "/" + fileName(subject, settings.draftId, format);
+            if (QFileInfo::exists(existing)) {
+                m_result.installed = existing;
+                m_result.alreadyKept = true;
+            }
         }
     }
 
@@ -169,7 +198,7 @@ Keeper::Outcome Keeper::prepare(const KeepSettings &settings, const EngineProbe 
     // highlights, and a bright yellow accent would otherwise tint the whole
     // image yellow (seen in the first real keeps).
     static const QStringList baseTones{"background", "foreground"};
-    if (settings.colorPass > 0 && !settings.theme.isEmpty()) {
+    if (settings.install && settings.colorPass > 0 && !settings.theme.isEmpty()) {
         m_backgrounds = omarchy.themeBackgrounds(settings.theme);
         QFile colors(omarchy.themeDirectory(settings.theme) + "/colors.toml");
         if (colors.open(QIODevice::ReadOnly)) {
@@ -331,6 +360,14 @@ void Keeper::saved() {
     m_result.final = Library().addFinal(done.file, metadata, QDateTime::currentDateTimeUtc(), &error);
     if (!m_result.final.isValid()) {
         fail(Outcome::Failed, error);
+        return;
+    }
+
+    if (!m_settings.install) {
+        cleanUp();
+        m_running = false;
+        emit progress(1);
+        emit finished(m_result);
         return;
     }
 

@@ -3,8 +3,8 @@
 How limgen is built. Read `design.md` first for what it does and why. Model
 choices and benchmarks live in `models.md`.
 
-Status: milestones L0 to L8 done; `v0.1.0` is released. Section 12 lists
-the milestones.
+Status: milestones L0 to L9 done; `v0.1.0` is released, and L9 (generic
+generation) is the first change after it. Section 12 lists the milestones.
 
 ## 1. Stack
 
@@ -30,8 +30,9 @@ bin/fake-sd-cli         test stand-in for sd-cli (section 11)
 src/main.cpp            app setup; `limgen open` starts the window
 src/cli.{h,cpp}         every headless command (section 9)
 src/backend.{h,cpp}     window state for QML: theme, engine, model and download, prompt, batch, estimate
+src/studio.{h,cpp}      the Generic screen's state: sizes, preview count, palettes, previews, upscale, save
 src/batch.{h,cpp}       one batch from the checks to the library, shared by the window and `limgen generate`
-src/config.{h,cpp}      config.json: the chosen model and style
+src/config.{h,cpp}      config.json: the chosen model, style, engine and Generic screen settings
 src/timings.{h,cpp}     bench.json: measured timings, for estimates
 src/theme.{h,cpp}       accent and corner rounding, from the Omarchy template
 src/translator.{h,cpp}  Omarchy language, from the Omarchy template
@@ -47,9 +48,11 @@ src/engine.h            abstract Engine, its request and its errors
 src/sdcppengine.{h,cpp} Engine over sd-cli: arguments, probe, cancel, errors, retry
 src/progress.{h,cpp}    sd-cli output to progress events (pure)
 src/library.{h,cpp}     stored drafts and finals with metadata
-src/keeper.{h,cpp}      finish a draft, file the final, install it into the theme folder
-src/Main.qml            the window
-src/*.qml               PaletteBar, BackgroundColumn, DraftGrid, DraftTile, LibraryView, PromptBar, SetupPanel, ModelPicker, FullView, HelpOverlay
+src/keeper.{h,cpp}      finish a draft, file the final, install it into the theme folder (or not, for a generic image)
+src/Main.qml            the window and its three screens
+src/HomeScreen.qml      the two big buttons
+src/GenericScreen.qml   the Generic screen; ColorChips.qml, its hand-picked colours
+src/*.qml               the theme screen: PaletteBar, BackgroundColumn, DraftGrid, DraftTile, LibraryView, PromptBar, SetupPanel, ModelPicker, FullView, HelpOverlay
 src/models.json         the model catalogue, compiled in
 src/skill.md            the agent skill installed by `limgen skill install`
 src/i18n/<code>.json    translations of the window (de, es-MX, fr, ja, pt-BR, zh-CN so far; en for plurals)
@@ -66,7 +69,8 @@ README.md  LICENSE  .gitignore
 
 ## 3. Components
 
-- **Omarchy** (`omarchy.cpp`). Reads `theme.name` and
+- **Omarchy** (`omarchy.cpp`). Lists every theme with a `colors.toml` for
+  the Generic screen's palettes. Reads `theme.name` and
   `theme/colors.toml` under `~/.local/state/omarchy/current/`, lists the
   theme's backgrounds (the current theme copy and
   `~/.config/omarchy/backgrounds/<slug>/`), finds another theme's folder
@@ -89,7 +93,9 @@ README.md  LICENSE  .gitignore
   to the background's lightness when missing. Output: the words, mood words
   from `mode`, and each colour's CIELAB value, from which the colour pass
   (L5) derives its target. The words are English in every UI language,
-  because they are model input.
+  because they are model input. `fromColors()` makes a palette of up to five
+  colours picked by hand (roles "colour 1" to "colour 5", no mode, no
+  mood), for generic images.
 - **Prompt** (pure). "subject, style lead, palette words colour palette,
   mood, style details, desktop wallpaper"; the style preset (Photo,
   Cinematic, Painting, Minimal) also gives the negative prompt, which only
@@ -97,7 +103,15 @@ README.md  LICENSE  .gitignore
   its results describe the default. Steps, guidance and sampler come from
   the model catalogue. Without a valid palette the palette and mood parts
   are left out. The user's edits to the full prompt win over the builder
-  (L4).
+  (L4). `buildGeneric()` is the generic image's prompt: the user's text as
+  typed, then the palette's words and its mood when it has one; no style
+  words and no "desktop wallpaper", and only the shared negative prompt.
+  `varietyHints()` gives each preview of a varied batch its own hint: a
+  framing (one of twelve: distance, angle, layout; none names a time or a
+  weather), and for the Light level also a light or atmosphere (one of
+  ten), shuffled by the batch seed with limgen's own Fisher-Yates over
+  `QRandomGenerator`, so the same seed gives the same hints everywhere. The
+  hint goes right after the user's text.
 - **Catalogue.** `src/models.json`, compiled in, has two tables. `files`
   lists every downloadable file once: folder and name under the models
   directory, size, SHA-256, a URL pinned to the publisher's revision, its
@@ -171,6 +185,11 @@ README.md  LICENSE  .gitignore
   refuses an existing name, so nothing there is overwritten. A draft
   already in that folder (by name, in either format) is reported as kept
   rather than made again. Undo is the caller's: the result names the file.
+  With `install` off (a generic image) it only files the final in the
+  library, with no colour pass, at the size given or the draft's generic
+  target. `saveCopy()` writes a final where the user chose, through
+  `QSaveFile` (beside the file, then renamed over it): the same bytes for a
+  `.png`, JPEG with the `parameters` text for a `.jpg`.
 - **Batch.** One batch from the checks to the library, used by the window
   and by `limgen generate` alike: checks the model is installed, the engine
   probe is good and free video memory is enough; reads the theme once (a
@@ -185,10 +204,23 @@ README.md  LICENSE  .gitignore
   strength from 0.1 to 0.9; a model with so few steps that the strength
   would leave none to run gets the lowest strength that runs one, and the
   sidecar records the strength used. With nothing typed and no edited
-  prompt, a variation of a library image reuses that image's prompt.
+  prompt, a variation of a library image reuses that image's prompt. A
+  generic batch reads no theme: its prompt is `Prompt::buildGeneric()` with
+  the palette chosen (a theme's, read from that theme's folder, or
+  `Palette::fromColors()`), and its drafts are `draftSize()`: the target's
+  ratio at the model's pixel count, each side a multiple of 64 from 256 to
+  2048. An unknown theme or a bad colour is `UnknownPalette`. With a
+  variety above Seeds each draft has its own prompt; `sd-cli` takes one
+  prompt per run, so the engine then runs once per draft (`count` 1, the
+  draft's seed, its own folder `run-<n>/`), one after the other, and the
+  progress and previews of each run are those of its draft. Only the first
+  run is timed (a batch of one); the estimate for such a batch is the count
+  times the estimate for one. Cancelling between two runs stops before the
+  next.
 - **Config** and **Timings.** `config.json` (the chosen model and style,
   the variation strength, the colour pass strength, the format and the
-  JPEG quality) and
+  JPEG quality, the engine, and the Generic screen's `generic` object:
+  `size`, `count`, `variety`, `palette`, `colors`) and
   `bench.json` (section 7), both written beside the file and renamed.
 - **Backend.** The QObject QML talks to. It probes the engine and the GPU in
   a worker thread at start, so the window opens at once; tracks the chosen
@@ -215,7 +247,25 @@ README.md  LICENSE  .gitignore
   theme when the library view opens (and again after each batch, keep,
   discard, undo and redo while it is loaded). V changes nothing when no
   batch can start. Holds no file logic of its own. The selection, full view,
-  library view and overlays are QML state.
+  library view and overlays are QML state. It lists the engine builds
+  installed (`SdCppEngine::installed()`) and switches between them, saving
+  the choice and checking the new one. It owns the one `Config` the window
+  writes, which Studio shares: two copies would each write back their own
+  stale view of the other's keys. While Studio holds the GPU
+  (`setStudioBusy`), its batches cannot start and its keeps wait, then go
+  when Studio lets go.
+- **Studio** (`studio.cpp`). The Generic screen's state for QML: the target
+  sizes (the largest monitor's, or 2560x1440 when none is measured; six
+  common sizes; a custom one, checked by `sizeProblemFor()`), the preview
+  count (2, 4, 6, 9), the variety (seeds only, framing, framing and light),
+  the palettes (none, every installed theme's, the user's colours), the
+  prompt and the full prompt it becomes. It runs a
+  generic `Batch` with previews, upscales the chosen preview with a `Keeper`
+  that does not install, and saves the result with `Keeper::saveCopy()` in
+  a worker thread. Its settings go into the Backend's `Config`; the engine,
+  the model, the downloads and the GPU are the Backend's too. The window
+  builds it once and keeps it, so its previews and result outlive a visit
+  to the other screens.
 
 ## 4. Engine
 
@@ -319,6 +369,18 @@ can be added if L0 shows `sd-cli` falls short.
 - An out-of-memory exit is retried once with `--vae-tiling`, since decoding
   every draft at once is the peak of a batch; a second failure is reported
   with the memory figures and exit 3.
+- The NVIDIA Vulkan driver can kill the engine as it exits: a shader
+  compiler thread of the driver (`libnvidia-gpucomp`) still runs while
+  `exit()` tears the driver down, and the process dies of SIGABRT
+  ("corrupted double-linked list") or SIGSEGV after it saved its images.
+  With 4-image batches it was never seen; with one image per run (L9's
+  variety) it hit 2 runs in about 15 on the reference card (driver
+  615.78). A run that crashes after printing `N/N images saved` for all its
+  images is therefore a success, whatever the signal (the files are on disk
+  and are checked like any others); a crash before that line is still an
+  error. The engine runs with
+  `RLIMIT_CORE` at 0, so such a crash writes no core dump (half a minute
+  and 150 MB each, and a crash notification on some desktops).
 
 ## 5. Generation pipeline
 
@@ -346,6 +408,13 @@ can be added if L0 shows `sd-cli` falls short.
 
 The drafts are never modified; every final can be remade from its draft and
 metadata.
+
+A generic batch (Studio, `limgen image`) differs in three steps: step 1
+takes the chosen palette instead of the theme; step 2 makes the drafts in
+the target's shape at about the model's pixel count (`Batch::draftSize()`);
+and the finish stops after filing the final in the library (no colour pass,
+no copy into a theme folder), at the target size the draft records. Saving
+copies it where the user chooses.
 
 ## 6. Video memory
 
@@ -377,7 +446,7 @@ metadata.
 
 | Path | Contents |
 |---|---|
-| `~/.config/limgen/config.json` | `model` and `style`, chosen in the window; `strength` for variations (0.1 to 0.9, default 0.5); `colorPass` (0 to 1, default 0.3), `format` (`png` or `jpeg`) and `jpegQuality` (default 92) for kept images. `limgen generate` takes `--model` and `--style`, `limgen keep` `--color-pass` and `--format`, instead |
+| `~/.config/limgen/config.json` | `model`, `style` and `engine` (the backend whose build runs), chosen in the window; `generic`: the Generic screen's `size` (absent for the monitor's), `count`, `variety` (`seeds`, `framing` or `light`), `palette` (empty, `custom` or a theme slug) and `colors`; `strength` for variations (0.1 to 0.9, default 0.5); `colorPass` (0 to 1, default 0.3), `format` (`png` or `jpeg`) and `jpegQuality` (default 92) for kept images. `limgen generate` takes `--model` and `--style`, `limgen keep` `--color-pass` and `--format`, instead |
 | `~/.local/share/limgen/models/<folder>/` | downloaded model files, one folder per file group as the catalogue names it (`LIMGEN_MODELS` overrides the whole path); `<file>.part` while downloading, kept when paused |
 | `~/.local/share/limgen/models/.download.lock` | held while a download runs, so two limgen processes never write the same file |
 | `~/.local/share/limgen/library/<yyyy-mm>/<id>.{png,jpg}` and `.json` | drafts (always PNG) and finals (the output format) with metadata |
@@ -387,7 +456,8 @@ metadata.
 | `~/.cache/limgen/keep-<random>/` | a keep's upscaled image and encoded final while it is finished; removed after |
 | `~/.config/omarchy/backgrounds/<slug>/limgen-*.{png,jpg}` | kept backgrounds (the only Omarchy path written) |
 | `~/Pictures/limgen/limgen-*.{png,jpg}` | kept images when there is no Omarchy theme (`LIMGEN_PICTURES` overrides) |
-| `/usr/lib/limgen/sd-cli` | the pinned engine build (section 10) |
+| `/usr/lib/limgen/<backend>/sd-cli` | the pinned engine build, one per backend (section 10) |
+| wherever the user saves | generic images, through the Save dialog or `limgen upscale --output` |
 
 All honour `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and
 `XDG_CACHE_HOME`.
@@ -416,6 +486,13 @@ A seed remakes a draft exactly only with the same engine build and
 backend: in L0, CUDA and Vulkan gave the same composition for a seed but
 not the same pixels. The `engine` field records both.
 
+`generic` is null for a theme draft. A generic draft has `theme` and
+`style` null and records what it was made for:
+`{"target": [1080, 1920], "palette": {"theme": "tokyo-night", "colors": {"background": "#1a1b26", ...}}, "variety": "framing", "hint": "low angle, looking up"}`,
+with `"theme": null` for colours picked by hand, `"palette": null` for
+none, and no `hint` for the Seeds variety. A varied draft's `prompt` is its
+own, hint included. Its final has `finish.theme` null and `colorPass` 0.
+
 `source` holds a variation's source and the strength used:
 `{"id": "2026-11-20-a3f9c1", "strength": 0.5}` for a library image,
 `{"path": "/usr/share/omarchy/themes/.../1-night.png", "strength": 0.5}`
@@ -442,7 +519,9 @@ truth for both.
 
 ## 9. CLI
 
-The window is `limgen open` (and `limgen` with no command). Every other
+The window is `limgen open` (and `limgen` with no command); `limgen open
+generic` and `limgen open theme` open on that screen instead of the home
+screen. Every other
 command runs headless (`QT_QPA_PLATFORM=offscreen` set before
 `QGuiApplication`), takes `--json` (all but `skill`, which prints a file),
 writes errors to stderr, and exits with the codes below. Hype's
@@ -456,9 +535,16 @@ writes errors to stderr, and exits with the codes below. Hype's
 | `limgen models pull <id> [--level q4_k] [--yes]` | prints the licence, each file with its size and licence, the total and the free disk space (on stderr), then asks; without a terminal it needs `--yes` (exit 2 otherwise). Downloads the level's files and the upscaler. Exit 3 when the disk is too full, 1 on a failed download or a declined prompt, 130 on Ctrl+C, which pauses: the same command resumes |
 | `limgen generate [<subject>] [--count 4] [--style ...] [--model ...] [--seed ...] [--prompt <full>] [--from <id-or-file> [--strength 0.5]]` | make drafts, add them to the library, print ids and paths. `--from` makes variations of a library image or an image file, at a strength from 0.1 to 0.9; the subject is then optional. Exit 2 for an unknown or unreadable source, 3 when the model is missing, the engine unusable or memory short, 1 when the engine fails, 130 on Ctrl+C (nothing kept) |
 | `limgen keep <id> [--set] [--theme <slug>] [--color-pass 0.3] [--format png\|jpeg]` | finish a draft and install it into a theme's folder; prints the path. The theme is the one the draft was made for unless `--theme` says otherwise (a script cannot be asked); strength and format default to `config.json`. A draft already there is reported, not made again. Exit 2 for an unknown draft or theme, 3 when the upscaler is missing or the engine unusable, 1 when finishing fails, 130 on Ctrl+C (nothing kept) |
+| `limgen image <prompt> [--size WxH] [--palette none\|<theme>\|#hex,...] [--count 4] [--variety seeds\|framing\|light] [--model ...] [--seed ...]` | make generic previews (section 5) and print their ids and paths. `--size` is the final size (default the largest monitor's), checked as the window checks a custom size; `--palette` takes a theme's slug or up to five comma-separated colours; `--count` 1 to 9; `--variety` gives each preview its own framing (and light), and the JSON then lists each draft's `hint` and `prompt`. Exit 2 for a bad size, palette, count or model, otherwise as `generate` |
+| `limgen upscale <id> [--size WxH] [--output <file>]` | finish a preview or a draft without installing it anywhere: the final goes into the library at `--size`, or the size the preview was made for, or the largest monitor's; `--output` also writes it to a `.png` (the same bytes) or `.jpg` file, replacing one there. Prints the path written. Exit 2 for an unknown id, a bad size or an output name or folder that will not do, 3 when the upscaler is missing |
 | `limgen set <id-or-file>` | `omarchy theme bg set` on it. A draft (or a final, through its draft) is kept into the current theme first; a file is set as it is |
 | `limgen library [--theme <slug>]` | the drafts and finals in the library, newest first: id, kind, the theme they were made for and the path (with `--json` also the subject, the creation time and, for a final, its draft) |
 | `limgen skill [install]` | print the bundled agent skill, or install it: `~/.agents/skills/limgen/SKILL.md` (written through, when it is a link to a file elsewhere), linked from `~/.claude/skills/limgen` when Claude Code is there (as Hype does). Only limgen's own link or a dangling one is replaced, through a new link renamed over it; anything else there is left alone (exit 1). It takes no `--json`, unlike the other commands |
+
+`doctor`, `generate`, `keep`, `image` and `upscale` take `--engine
+<backend>` to run another installed build than the one chosen in the
+window (exit 2 for one that is not installed); `doctor` lists every build
+it finds (`engines` in its JSON).
 
 Exit codes: 0 success, 1 error, 2 usage, 3 not runnable here (no backend,
 not enough memory, model missing), 130 interrupted.
@@ -478,7 +564,12 @@ cover the window's strings and leave the command-line ones out.
   backgrounds) and `limgen-engine`; Omarchy and Hyprland are optional.
 - limgen builds its own engine (decided; `design.md` section 11). The same
   PKGBUILD builds a pinned stable-diffusion.cpp release as split packages
-  that each provide `limgen-engine` and install `/usr/lib/limgen/sd-cli`:
+  that each provide `limgen-engine` and install
+  `/usr/lib/limgen/<backend>/sd-cli`, so they do not conflict and both can
+  be installed; `SdCppEngine::installed()` lists the builds it finds there
+  (`LIMGEN_ENGINE_DIR` replaces `/usr/lib/limgen`, and a development
+  `build/engine/<backend>/bin/sd-cli` layout is found as well), and the
+  user picks one:
   `limgen-engine-vulkan` (default; NVIDIA, AMD, Intel), `limgen-engine-cuda`
   (optional: 4% faster on NVIDIA in L0, but needs the 5.2 GB `cuda`
   package for cuBLAS), possibly `limgen-engine-rocm`. Pinning means limgen's argument building
@@ -511,8 +602,9 @@ cover the window's strings and leave the command-line ones out.
   SHA-256 in the PKGBUILD on master (a tagged PKGBUILD cannot hold its own
   archive's sum). A rebuild of the same version only raises `pkgrel`. `v0.1.0` was released this
   way on 22 November 2026, and its PKGBUILD built cleanly from the tarball.
-- Next: publish through `omacom/omarchy-pkgs` as the Omarchy app
-  conventions describe, building from the release tarball.
+- limgen is shared as source: the repository and `bin/install` are the
+  install route. Publishing through Omarchy's own package repository is not
+  planned.
 
 ## 11. Testing
 
@@ -540,7 +632,8 @@ cover the window's strings and leave the command-line ones out.
   PNG four times the input's size, with tile progress), and `FAKE_SD_CLI_MODE` makes it run out of memory (always
   or until `--vae-tiling`; an upscale fails the way the pinned release
   does, logging the error and exiting 0, until the tile size is 128), fail, report an error but exit 0, write the wrong
-  size, hang (for cancel tests, also ignoring SIGTERM), list no GPU or report another release.
+  size, hang (for cancel tests, also ignoring SIGTERM), list no GPU, report another release, or die of
+  SIGABRT after saving everything (as the NVIDIA driver makes the real one do) or before saving.
   Model files must exist but are not read, so sparse files of the right
   size stand in for real ones.
 - Environment overrides point every Omarchy and XDG path at temp folders:
@@ -549,7 +642,8 @@ cover the window's strings and leave the command-line ones out.
   `LIMGEN_OMARCHY_BIN` (a fake `omarchy` that logs its arguments),
   `LIMGEN_HYPRCTL`, `LIMGEN_OMARCHY_THEMES` (theme folders, separated by
   colons), `LIMGEN_PICTURES` (instead of `~/Pictures/limgen`),
-  `LIMGEN_SD_CLI`, `LIMGEN_MODELS`, `LIMGEN_NVIDIA_SMI`
+  `LIMGEN_SD_CLI`, `LIMGEN_ENGINE_DIR` (engine builds by backend),
+  `LIMGEN_MODELS`, `LIMGEN_NVIDIA_SMI`
   (a fake `nvidia-smi`), `LIMGEN_DRM_ROOT` (instead of `/sys/class/drm`)
   and the XDG variables (the Omarchy
   language file is read from `$XDG_CONFIG_HOME/omarchy/language`). Tests
@@ -561,7 +655,13 @@ cover the window's strings and leave the command-line ones out.
   screenshot was taken from the real display instead, with the harness's
   window opened on a hidden Hyprland special workspace (`hyprctl eval
   'hl.exec_cmd(cmd, { workspace = "special:x silent", float = true, size =
-  "1200 820" })'`), so it renders on the GPU without showing.
+  "1200 820" })'`), so it renders on the GPU without showing, and
+  captured with `grim -T <stableId>` (the window's `stableId` from
+  `hyprctl clients -j`). `limgen open generic` opens there on the Generic
+  screen. Keys cannot be sent to that hidden window safely (they go to the
+  focused one), so screenshots of other states come from opening the right
+  screen. A window started from `build/limgen` keeps `bin/build` from
+  replacing the binary ("Text file busy"), so close it before building.
 - Real engine runs are manual (they need a GPU and downloaded models) and are
   recorded in `models.md`.
 
@@ -578,6 +678,7 @@ cover the window's strings and leave the command-line ones out.
 | L6 | Variations from existing backgrounds and library images; library view. |
 | L7 | Package and polish: PKGBUILD with engine split packages, desktop file, icon, translations, README with screenshot, `limgen skill install`. |
 | L8 | First release `v0.1.0`. |
+| L9 | Generic generation: the home screen, the Generic screen (target size, preview count, variety, model, engine, optional palette, upscale, save), engine builds side by side, `limgen image`, `limgen upscale`, `--engine`, `limgen open <screen>`. |
 
 ## 13. Risks
 

@@ -104,6 +104,30 @@ Rectangle {
         }
     }
 
+    // A generic preview's variety hint, the words that made it differ.
+    Rectangle {
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        anchors.margins: 8
+        width: Math.min(parent.width - 16, hintLabel.implicitWidth + 12)
+        height: hintLabel.implicitHeight + 6
+        radius: Math.min(4, theme.radius)
+        color: "#c0101014"
+        visible: tile.phase === "done" && !tile.keeping && !tile.discarded && tile.draft !== null &&
+                 tile.draft !== undefined && (tile.draft.hint || "") !== ""
+
+        Label {
+            id: hintLabel
+            anchors.centerIn: parent
+            width: Math.min(implicitWidth, parent.width - 12)
+            elide: Text.ElideRight
+            font.pixelSize: 12
+            color: "#d0d0d6"
+            // Model input, kept in English.
+            text: tile.draft && tile.draft.hint ? tile.draft.hint : ""
+        }
+    }
+
     BusyIndicator {
         anchors.centerIn: parent
         running: visible

@@ -22,6 +22,10 @@ struct DraftRecord {
     // A variation's source: {"id": <library id>} or {"path": <file>}, with
     // "strength". Empty for a plain draft.
     QJsonObject source;
+    // A generic draft (the Generic screen, limgen image): {"target": [w, h],
+    // "palette": {"theme": <slug or null>, "colors": {role: hex}} or null}.
+    // Empty for a theme draft.
+    QJsonObject generic;
 };
 
 struct LibraryEntry {

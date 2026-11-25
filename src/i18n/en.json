@@ -6,5 +6,13 @@
   "About %1 for %n drafts": {
     "one": "About %1 for %n draft",
     "other": "About %1 for %n drafts"
+  },
+  "Made %n previews in %1. Pick one and upscale it.": {
+    "one": "Made %n preview in %1. Pick one and upscale it.",
+    "other": "Made %n previews in %1. Pick one and upscale it."
+  },
+  "About %1 for %n previews": {
+    "one": "About %1 for %n preview",
+    "other": "About %1 for %n previews"
   }
 }

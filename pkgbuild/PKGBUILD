@@ -14,7 +14,7 @@
 pkgbase=limgen
 pkgver=0.1.0
 pkgrel=1
-pkgdesc='Backgrounds for the current Omarchy theme, made on your own GPU'
+pkgdesc='Images and Omarchy theme backgrounds, made on your own GPU'
 arch=('x86_64')
 url='https://github.com/jtreguer/limgen'
 license=('MIT')
@@ -121,7 +121,7 @@ package_limgen() {
   # The engine of this very release: limgen builds its arguments for it.
   depends=('qt6-base>=6.8' 'qt6-declarative>=6.8' 'qt6-wayland' 'qt6-imageformats' "limgen-engine=$pkgver")
   optdepends=('omarchy: the theme it makes backgrounds for, and setting them'
-              'hyprland: the monitor size kept images are finished at')
+              'hyprland: the monitor size images are finished at by default')
   local app
   app=$(_app)
   install -Dm755 "$app/build/limgen" "$pkgdir/usr/bin/limgen"
@@ -130,13 +130,14 @@ package_limgen() {
   install -Dm644 "$app/pkgbuild/limgen.desktop" "$pkgdir/usr/share/applications/limgen.desktop"
 }
 
-# Each engine installs the same sd-cli path, so exactly one is installed.
+# Each engine installs its own sd-cli, /usr/lib/limgen/<backend>/sd-cli, so
+# the Vulkan and CUDA builds can both be installed; limgen lists the ones it
+# finds and the user picks one in the window or with --engine.
 _package_engine() {
   local engine=$1 _tree licences
   _tree=$(_engine_source)
   provides=("limgen-engine=$pkgver")
-  conflicts=('limgen-engine')
-  install -Dm755 "$srcdir/engine-$engine/bin/sd-cli" "$pkgdir/usr/lib/limgen/sd-cli"
+  install -Dm755 "$srcdir/engine-$engine/bin/sd-cli" "$pkgdir/usr/lib/limgen/$engine/sd-cli"
   licences="$pkgdir/usr/share/licenses/$pkgname"
   install -Dm644 "$_tree/LICENSE" "$licences/LICENSE"
   install -Dm644 "$_tree/ggml/LICENSE" "$licences/ggml-LICENSE"

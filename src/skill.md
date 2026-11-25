@@ -1,17 +1,19 @@
 ---
 name: limgen
 description: |
-  Make desktop backgrounds for the current Omarchy theme with limgen, which runs
-  an image model on the local GPU. Use for ANY request to generate, vary, keep,
-  set or list Omarchy backgrounds or wallpapers made to match a theme.
+  Make images with limgen, which runs an image model on the local GPU: images of
+  anything at a chosen size and palette, and desktop backgrounds for the current
+  Omarchy theme. Use for ANY request to generate an image locally, or to
+  generate, vary, keep, set or list Omarchy backgrounds made to match a theme.
 ---
 
 # limgen
 
-limgen makes backgrounds that match the current Omarchy theme, on this
-machine's GPU, and adds the ones that are kept to that theme's backgrounds
-folder (`~/.config/omarchy/backgrounds/<theme>/`). Nothing leaves the machine
-except a model download the person agreed to.
+limgen makes images on this machine's GPU: images of anything, at the size
+asked for (`limgen image`, then `limgen upscale`), and backgrounds that match
+the current Omarchy theme, added to that theme's backgrounds folder
+(`~/.config/omarchy/backgrounds/<theme>/`) when they are kept. Nothing leaves
+the machine except a model download the person agreed to.
 
 Every command below needs no display, takes `--json`, writes errors to stderr,
 and exits 0 on success, 1 on an error, 2 on bad arguments, 3 when the machine
@@ -42,6 +44,26 @@ cannot run it (no usable GPU, not enough video memory, a model missing) and
 6. Library: `limgen library --json` lists every draft and kept image, newest
    first; `--theme <slug>` narrows it to one theme.
 
+## Images of anything
+
+1. Previews: `limgen image "a red fox in fresh snow" --size 1080x1920 --json`
+   makes four previews in the shape of the final size (1920x1080, 2560x1440,
+   3840x2160, 1080x1920, 2048x2048 or any size up to four times the preview;
+   the default is the largest monitor's) and prints their ids and paths. The
+   prompt is used as written, with no style words. `--palette` takes a
+   theme's name or up to five colours (`"#1a1b26,#ff9e64"`); `--count` 1 to
+   9; `--model` and `--seed` as for generate. The previews of one prompt
+   look alike; `--variety framing` gives each its own framing and
+   `--variety light` its own light too, at about a third more time.
+2. Final: look at the previews, then `limgen upscale <id> --output
+   ~/Pictures/fox.png --json` upscales the chosen one to its size and writes
+   it (a `.jpg` name writes JPEG). Without `--output` the final stays in the
+   library and its path is printed. These images never go into a theme's
+   folder.
+
+`--engine vulkan` or `--engine cuda` runs another installed engine build;
+`limgen doctor --json` lists them under `engines`.
+
 ## Working with the person
 
 - Generating uses the GPU for a minute or more and keeping for half a minute;
@@ -51,5 +73,6 @@ cannot run it (no usable GPU, not enough video memory, a model missing) and
   before setting a background they did not ask for.
 - When a command exits 3, read stderr: it says what is missing and what to do.
   Do not work around it, for example by picking another model unasked.
-- The window (`limgen`, or `limgen open`) does the same with previews, from
-  the keyboard; it needs the person's desktop, so do not wait on it.
+- The window (`limgen`, or `limgen open`; `limgen open generic` for images of
+  anything) does the same with previews, from the keyboard; it needs the
+  person's desktop, so do not wait on it.

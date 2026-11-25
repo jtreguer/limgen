@@ -1,5 +1,5 @@
-// limgen: generates desktop backgrounds for the current Omarchy theme with an
-// image model on the local GPU.
+// limgen: generates images on the local GPU with an image model: backgrounds
+// for the current Omarchy theme, or anything else at any size.
 
 #include <QGuiApplication>
 #include <QIcon>
@@ -12,6 +12,7 @@
 #include "backend.h"
 #include "cli.h"
 #include "omarchy.h"
+#include "studio.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -28,7 +29,10 @@ int main(int argc, char *argv[]) {
     QStringList arguments;
     for (int i = 0; i < argc; ++i)
         arguments << QString::fromLocal8Bit(argv[i]);
-    const bool window = argc == 1 || (argc == 2 && first == "open");
+    // `limgen open generic` and `limgen open theme` skip the home screen,
+    // for a key binding that goes straight to one.
+    const QByteArray screen = argc == 3 && first == "open" ? QByteArray(argv[2]) : QByteArray();
+    const bool window = argc == 1 || (argc == 2 && first == "open") || screen == "generic" || screen == "theme";
     // Omarchy sessions also set QT_QPA_PLATFORMTHEME=gtk3, whose plugin opens
     // a display of its own, so a command run over SSH or from a script with no
     // display would fail; commands draw nothing and need no platform theme.
@@ -64,15 +68,20 @@ int main(int argc, char *argv[]) {
     Theme theme(paths.state, nullptr, paths.hyprctl);
     Omarchy omarchy(paths);
     Backend backend(&omarchy);
+    Studio studio(&backend);
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("backend", &backend);
+    engine.rootContext()->setContextProperty("studio", &studio);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;
+    if (!screen.isEmpty())
+        QMetaObject::invokeMethod(engine.rootObjects().first(), "openScreen",
+                                  Q_ARG(QVariant, QVariant(QString::fromLatin1(screen))));
 
     return app.exec();
 }

@@ -26,6 +26,9 @@ FAKE_SD_CLI_MODE makes it misbehave the way the real engine can:
   hang-ignore-term  the same, and ignores SIGTERM, so only SIGKILL ends it
   no-gpu       lists only a CPU device
   old-version  reports another release
+  crash-at-exit  saves everything, says so, then dies of SIGABRT, as the
+               NVIDIA Vulkan driver can make sd-cli do as it exits
+  crash-before-save  dies of SIGABRT after sampling, before saving
 FAKE_SD_CLI_LOG appends each call's arguments, one JSON list per line.
 FAKE_SD_CLI_STEP_SECONDS sets the pause per step (default 0.01).
 """
@@ -116,10 +119,24 @@ def upscale(args):
         time.sleep(STEP_SECONDS / 4)
     if MODE == "wrong-size":
         width = height = 16
+    if MODE == "crash-before-save":
+        die()
     png(output, width * 4, height * 4, (90, 110, 140))
     say(f"[I] save result image 0 to '{output}' (success) --- main.cpp:501")
     say("[I] 1/1 images saved --- main.cpp:579")
+    if MODE == "crash-at-exit":
+        die()
     return 0
+
+
+def die():
+    """Ends the way the real engine did when the driver aborted it: glibc's
+    message on stderr, then SIGABRT."""
+    sys.stdout.flush()
+    sys.stderr.write("corrupted double-linked list\n")
+    sys.stderr.flush()
+    signal.signal(signal.SIGABRT, signal.SIG_DFL)
+    os.abort()
 
 
 def main(args):
@@ -209,6 +226,8 @@ def main(args):
         say(f"[I] sampling completed, taking {steps * STEP_SECONDS:.2f}s --- image.cpp:1038")
     for image in range(count):
         say(f"[I] latent {image + 1} decoded, taking 0.01s --- image.cpp:755")
+    if MODE == "crash-before-save":
+        die()
     for image in range(count):
         path = output.replace("%d", str(image)) if "%d" in output else output
         value = (seed + image) * 2654435761 % 2**24
@@ -217,6 +236,8 @@ def main(args):
     say(f"[I] {count}/{count} images saved --- main.cpp:534")
     if MODE == "error-exit0":
         say("[E] fake error after saving --- fake.cpp:1")
+    if MODE == "crash-at-exit":
+        die()
     return 0
 
 

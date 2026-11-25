@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QLocale>
+#include <QMap>
 #include <QSet>
 #include <QUrl>
 #include <QVariantMap>
@@ -21,8 +22,15 @@ QString sizeText(qint64 bytes) { return QLocale().formattedDataSize(bytes, 1, QL
 } // namespace
 
 Backend::Backend(Omarchy *omarchy, const QString &engineProgram, QObject *parent)
-    : QObject(parent), m_omarchy(omarchy), m_engineProgram(engineProgram),
-      m_modelsDirectory(Catalogue::defaultModelsDirectory()), m_store(m_modelsDirectory) {
+    : QObject(parent), m_omarchy(omarchy), m_modelsDirectory(Catalogue::defaultModelsDirectory()),
+      m_store(m_modelsDirectory) {
+    if (engineProgram.isEmpty()) {
+        m_engines = SdCppEngine::installed();
+        m_engineProgram = SdCppEngine::programFor(m_config.engine());
+    } else {
+        m_engines = {EngineInstall{QString(), engineProgram}};
+        m_engineProgram = engineProgram;
+    }
     m_catalogue = Catalogue::fromEnvironment(&m_catalogueError);
     m_modelId = m_config.modelId();
     if (!m_catalogue.model(m_modelId))
@@ -185,6 +193,58 @@ void Backend::recheckEngine() {
     emit stateChanged();
 }
 
+QVariantList Backend::engines() const {
+    QVariantList list;
+    for (const EngineInstall &engine : m_engines) {
+        // Backend names are names, the same in every language.
+        static const QMap<QString, QString> names{{"vulkan", "Vulkan"}, {"cuda", "CUDA"}, {"rocm", "ROCm"}};
+        QString name = names.value(engine.backend, engine.backend);
+        if (name.isEmpty())
+            name = names.value(m_probe.gpu().backend(), QFileInfo(engine.program).fileName());
+        list << QVariantMap{{"backend", engine.backend}, {"name", name}};
+    }
+    return list;
+}
+
+int Backend::engineIndex() const {
+    for (int i = 0; i < m_engines.size(); ++i)
+        if (m_engines.at(i).program == m_engineProgram)
+            return i;
+    return -1;
+}
+
+void Backend::selectEngine(int index) {
+    if (busy() || m_probing.isRunning() || index < 0 || index >= m_engines.size() || index == engineIndex())
+        return;
+    m_engineProgram = m_engines.at(index).program;
+    m_config.setEngine(m_engines.at(index).backend);
+    saveConfig();
+    recheckEngine();
+}
+
+void Backend::saveConfig() {
+    QString error;
+    if (!m_config.save(&error))
+        setStatus(error, true);
+}
+
+void Backend::updateGpu(const Gpu &gpu) {
+    if (gpu.name.isEmpty())
+        return;
+    m_gpu = gpu;
+    emit engineChanged();
+}
+
+void Backend::setStudioBusy(bool busy) {
+    if (busy == m_studioBusy)
+        return;
+    m_studioBusy = busy;
+    emit stateChanged();
+    // A keep asked for meanwhile, and a batch waiting for it, go now.
+    if (!busy)
+        nextKeep();
+}
+
 QString Backend::gpuText() const {
     if (m_gpu.name.isEmpty())
         return m_probed ? tr("No GPU found") : QString();
@@ -256,9 +316,7 @@ void Backend::selectModel(const QString &id) {
         return;
     m_modelId = id;
     m_config.setModelId(id);
-    QString error;
-    if (!m_config.save(&error))
-        setStatus(error, true);
+    saveConfig();
     refreshModel();
 }
 
@@ -314,9 +372,7 @@ void Backend::setStyleIndex(int index) {
         return;
     Prompt::styleFromId(ids.at(index), &m_style);
     m_config.setStyleId(ids.at(index));
-    QString error;
-    if (!m_config.save(&error))
-        setStatus(error, true);
+    saveConfig();
     emit promptChanged();
     emit stateChanged();
 }
@@ -354,7 +410,7 @@ void Backend::resetPrompt() {
 bool Backend::canGenerateWith(const QString &prompt) const {
     // A keep does not stop a new batch; the batch waits for it.
     return !prompt.trimmed().isEmpty() && m_catalogue.isValid() && engineReady() && modelInstalled() && !running() &&
-           !m_batchWaiting && !downloading();
+           !m_batchWaiting && !downloading() && !m_studioBusy;
 }
 
 bool Backend::canGenerate() const {
@@ -365,6 +421,10 @@ bool Backend::canGenerate() const {
 }
 
 void Backend::generate() {
+    if (m_studioBusy) {
+        setStatus(tr("The Generic screen is using the GPU. Try again when its previews or upscale are done."));
+        return;
+    }
     if (!canGenerate())
         return;
     // Unedited, the prompt is built when the batch starts, from the theme as
@@ -581,9 +641,7 @@ void Backend::setColorPass(double strength) {
     if (qFuzzyCompare(1 + strength, 1 + colorPass()))
         return;
     m_config.setColorPass(strength);
-    QString error;
-    if (!m_config.save(&error))
-        setStatus(error, true);
+    saveConfig();
     emit settingsChanged();
 }
 
@@ -591,9 +649,7 @@ void Backend::setFormatIndex(int index) {
     if (index == formatIndex() || index < 0 || index > 1)
         return;
     m_config.setFormat(index == 1 ? "jpeg" : "png");
-    QString error;
-    if (!m_config.save(&error))
-        setStatus(error, true);
+    saveConfig();
     emit settingsChanged();
 }
 
@@ -663,12 +719,14 @@ void Backend::enqueueKeep(const Action &queued) {
     m_undo << action;
     m_keepQueue << KeepJob{action.serial, action.index, action.draftId, action.theme, action.set};
     setDraftFor(action.index, action.draftId, {{"keeping", true}, {"keepFraction", -1.0}});
+    if (m_studioBusy)
+        setStatus(tr("The keep starts when the Generic screen's work is done."));
     emit stateChanged();
     nextKeep();
 }
 
 void Backend::nextKeep() {
-    if (m_keeper || running())
+    if (m_keeper || running() || m_studioBusy)
         return;
     if (m_keepQueue.isEmpty()) {
         if (m_batchWaiting) {
@@ -914,9 +972,7 @@ void Backend::setStrength(double strength) {
     if (qFuzzyCompare(1 + strength, 1 + this->strength()))
         return;
     m_config.setStrength(strength);
-    QString error;
-    if (!m_config.save(&error))
-        setStatus(error, true);
+    saveConfig();
     emit settingsChanged();
 }
 

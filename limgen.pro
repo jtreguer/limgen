@@ -22,6 +22,7 @@ HEADERS += \
     src/prompt.h \
     src/resample.h \
     src/sdcppengine.h \
+    src/studio.h \
     src/timings.h \
     src/theme.h \
     src/translator.h
@@ -44,6 +45,7 @@ SOURCES += \
     src/prompt.cpp \
     src/resample.cpp \
     src/sdcppengine.cpp \
+    src/studio.cpp \
     src/timings.cpp \
     src/theme.cpp \
     src/translator.cpp

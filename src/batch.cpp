@@ -6,12 +6,15 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QImageReader>
 #include <QRandomGenerator>
 #include <QTimer>
 #include <QStandardPaths>
 #include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -32,9 +35,10 @@ Batch::Batch(const Catalogue &catalogue, const OmarchyPaths &paths, const QStrin
     connect(engine, &Engine::progress, this, &Batch::engineProgress);
     connect(engine, &Engine::sampled, this, [this](int image) {
         m_lastSampledMs = m_clock.elapsed();
-        emit sampled(image);
+        emit sampled(draftIndex(image));
     });
-    connect(engine, &Engine::preview, this, &Batch::preview);
+    connect(engine, &Engine::preview, this,
+            [this](int image, const QString &path) { emit preview(draftIndex(image), path); });
     connect(engine, &Engine::finished, this, &Batch::engineFinished);
     connect(engine, &Engine::failed, this, &Batch::engineFailed);
 }
@@ -109,16 +113,51 @@ Batch::Outcome Batch::prepare(const BatchSettings &settings, const EngineProbe &
     m_backend = probe.gpu().backend();
 
     const Omarchy omarchy(m_paths);
-    const QString themeSlug = omarchy.slug();
+    QString themeSlug;
     Palette palette;
     palette.error = tr("No Omarchy theme");
-    if (!themeSlug.isEmpty()) {
-        QString error;
-        const QString text = omarchy.readColors(&error);
-        if (error.isEmpty())
-            palette = Palette::fromToml(text);
+    QJsonObject generic;
+    m_target = QSize();
+    if (settings.generic) {
+        // The palette the user chose, if any; the current theme plays no part.
+        QJsonValue chosen;
+        if (!settings.paletteColors.isEmpty()) {
+            palette = Palette::fromColors(settings.paletteColors);
+            if (!palette.isValid())
+                return refuse(Outcome::UnknownPalette, palette.error);
+            chosen = QJsonObject{{"theme", QJsonValue()}};
+        } else if (!settings.paletteTheme.isEmpty()) {
+            const QString folder = omarchy.themeDirectory(settings.paletteTheme);
+            QFile colors(folder + "/colors.toml");
+            if (folder.isEmpty() || !colors.open(QIODevice::ReadOnly))
+                return refuse(Outcome::UnknownPalette, tr("No theme %1 with a colors.toml in %2.")
+                                                           .arg(settings.paletteTheme, m_paths.themes.join(", ")));
+            palette = Palette::fromToml(QString::fromUtf8(colors.readAll()));
+            if (!palette.isValid())
+                return refuse(Outcome::UnknownPalette, palette.error);
+            chosen = QJsonObject{{"theme", settings.paletteTheme}};
+        }
+        if (chosen.isObject()) {
+            QJsonObject object = chosen.toObject(), roles;
+            for (const auto &colour : palette.colors)
+                roles.insert(colour.role, colour.hex);
+            object.insert("colors", roles);
+            chosen = object;
+        }
+        m_target = settings.target.isEmpty() ? omarchy.largestMonitorSize() : settings.target;
+        generic = QJsonObject{{"target", QJsonArray{m_target.width(), m_target.height()}},
+                              {"palette", chosen}};
+    } else {
+        themeSlug = omarchy.slug();
+        if (!themeSlug.isEmpty()) {
+            QString error;
+            const QString text = omarchy.readColors(&error);
+            if (error.isEmpty())
+                palette = Palette::fromToml(text);
+        }
     }
-    Prompt::Text text = Prompt::build(settings.subject, palette, settings.style);
+    Prompt::Text text = settings.generic ? Prompt::buildGeneric(settings.subject, palette)
+                                         : Prompt::build(settings.subject, palette, settings.style);
     if (!settings.fullPrompt.trimmed().isEmpty())
         text.positive = settings.fullPrompt.trimmed();
     // A variation of a library image with nothing typed says again what
@@ -126,16 +165,32 @@ Batch::Outcome Batch::prepare(const BatchSettings &settings, const EngineProbe &
     else if (settings.subject.trimmed().isEmpty() && !sourcePrompt.isEmpty())
         text.positive = sourcePrompt;
     m_seed = settings.seed ? *settings.seed : QRandomGenerator::global()->bounded(1u << 31);
+    // Variety gives each draft of a generic batch its own hint, and so its
+    // own prompt. An edited full prompt is taken as it is, for every draft,
+    // so it has no hints, and the sidecar says the variety was seeds.
+    const Prompt::Variety variety = settings.generic && settings.fullPrompt.trimmed().isEmpty()
+                                        ? settings.variety
+                                        : Prompt::Variety::Seeds;
+    if (settings.generic)
+        generic.insert("variety", Prompt::varietyId(variety));
+    m_hints = Prompt::varietyHints(variety, settings.count, m_seed);
+    m_prompts.clear();
+    for (const QString &hint : std::as_const(m_hints))
+        m_prompts << (hint.isEmpty() ? text.positive : Prompt::buildGeneric(settings.subject, palette, hint).positive);
+    m_perDraft = m_prompts.size() > 1 && m_prompts.count(m_prompts.first()) != m_prompts.size();
 
     const QString cache = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/limgen";
     m_request = EngineRequest{};
     for (auto it = m_level->files.begin(); it != m_level->files.end(); ++it)
         if (it.key() != "tae" || settings.previews)
             m_request.files.insert(it.key(), Catalogue::path(*m_catalogue.file(it.value()), modelsDirectory));
-    m_request.prompt = text.positive;
+    // One run for the batch makes every draft from one prompt: the first
+    // draft's, which carries its hint when a single draft has one.
+    m_request.prompt = m_perDraft || m_prompts.isEmpty() ? text.positive : m_prompts.first();
     m_request.negative = text.negative;
-    m_request.width = m_model->width;
-    m_request.height = m_model->height;
+    const QSize size = draftSize(m_target, QSize(m_model->width, m_model->height));
+    m_request.width = size.width();
+    m_request.height = size.height();
     m_request.steps = m_model->steps;
     m_request.cfg = m_model->cfg;
     m_request.sampler = m_model->sampler;
@@ -154,14 +209,17 @@ Batch::Outcome Batch::prepare(const BatchSettings &settings, const EngineProbe &
     }
 
     m_record = DraftRecord{};
+    // A generic draft records its palette under "generic", not as a theme.
     m_record.themeSlug = palette.isValid() ? themeSlug : QString();
-    m_record.themeMode = palette.isValid() ? palette.mode : QString();
-    for (const auto &colour : palette.colors)
-        m_record.palette.insert(colour.role, colour.hex);
+    m_record.themeMode = palette.isValid() && !settings.generic ? palette.mode : QString();
+    if (!settings.generic)
+        for (const auto &colour : palette.colors)
+            m_record.palette.insert(colour.role, colour.hex);
     m_record.subject = settings.subject;
     m_record.prompt = m_request.prompt;
     m_record.negative = m_request.cfg > 1.0 ? m_request.negative : QString();
-    m_record.style = Prompt::styleId(settings.style);
+    m_record.style = settings.generic ? QString() : Prompt::styleId(settings.style);
+    m_record.generic = generic;
     m_record.modelId = m_model->id;
     m_record.level = m_level->id;
     for (auto it = m_level->files.begin(); it != m_level->files.end(); ++it)
@@ -189,6 +247,15 @@ double Batch::strengthFor(int steps, double strength) {
     return strength;
 }
 
+QSize Batch::draftSize(const QSize &target, const QSize &native) {
+    if (target.isEmpty() || native.isEmpty())
+        return native;
+    const double pixels = double(native.width()) * native.height();
+    const double ratio = double(target.width()) / target.height();
+    auto snap = [](double side) { return qBound(256, int(std::lround(side / 64.0)) * 64, 2048); };
+    return QSize(snap(std::sqrt(pixels * ratio)), snap(std::sqrt(pixels / ratio)));
+}
+
 QString Batch::timingKey() const {
     return m_model ? Timings::key(m_model->id, m_level->id, m_backend) : QString();
 }
@@ -196,13 +263,47 @@ QString Batch::timingKey() const {
 double Batch::estimate() const {
     if (!m_model)
         return -1;
-    return Timings().get(timingKey()).estimate(m_request.count, m_request.samplingSteps());
+    const Timing timing = Timings().get(timingKey());
+    // Each run pays the start, the loading and the prompt again.
+    if (m_perDraft) {
+        const double one = timing.estimate(1, m_request.samplingSteps());
+        return one > 0 ? one * m_request.count : -1;
+    }
+    return timing.estimate(m_request.count, m_request.samplingSteps());
+}
+
+EngineRequest Batch::runRequest(int index) const {
+    EngineRequest request = m_request;
+    request.count = 1;
+    request.seed = m_seed + quint32(index);
+    request.prompt = m_prompts.value(index, m_request.prompt);
+    request.outputDirectory = QString("%1/run-%2").arg(m_request.outputDirectory).arg(index);
+    return request;
+}
+
+void Batch::startRun() {
+    if (!m_running)
+        return;
+    if (m_stopping) {
+        cleanUp();
+        m_running = false;
+        emit failed(Outcome::Cancelled, tr("Cancelled."));
+        return;
+    }
+    // Each run is timed on its own: the first one is a batch of one.
+    m_stepSeconds.clear();
+    m_lastSampledMs = -1;
+    m_clock.start();
+    m_engine->start(runRequest(m_run));
 }
 
 void Batch::start() {
     if (m_running || !m_model)
         return;
     m_running = true;
+    m_stopping = false;
+    m_run = 0;
+    m_runDrafts.clear();
     m_stepSeconds.clear();
     m_lastSampledMs = -1;
     m_clock.start();
@@ -222,11 +323,18 @@ void Batch::start() {
             return;
         }
     }
-    m_engine->start(m_request);
+    if (m_perDraft)
+        startRun();
+    else
+        m_engine->start(m_request);
 }
 
 void Batch::cancel() {
-    if (m_running)
+    if (!m_running)
+        return;
+    // Between two runs no engine is running; the next run sees the flag.
+    m_stopping = true;
+    if (m_engine->isRunning())
         m_engine->cancel();
 }
 
@@ -235,16 +343,35 @@ void Batch::engineProgress(int image, int step, int steps, double secondsPerStep
     // it counts as overhead, not as the speed of a step.
     if (step > 1 && secondsPerStep > 0)
         m_stepSeconds << secondsPerStep;
-    emit progress(image, step, steps, secondsPerStep);
+    emit progress(draftIndex(image), step, steps, secondsPerStep);
 }
 
 void Batch::engineFinished(const QStringList &drafts) {
-    recordTiming();
+    if (!m_perDraft) {
+        recordTiming(m_request.count);
+        fileDrafts(drafts);
+        return;
+    }
+    if (m_run == 0)
+        recordTiming(1);
+    m_runDrafts << drafts.value(0);
+    if (++m_run < m_request.count) {
+        // From the event loop: the engine is still inside its own signal.
+        QTimer::singleShot(0, this, &Batch::startRun);
+        return;
+    }
+    fileDrafts(m_runDrafts);
+}
+
+void Batch::fileDrafts(const QStringList &drafts) {
     Library library;
     QList<LibraryEntry> entries;
     for (int i = 0; i < drafts.size(); ++i) {
         DraftRecord record = m_record;
         record.seed = m_seed + quint32(i);
+        record.prompt = m_prompts.value(i, m_record.prompt);
+        if (!record.generic.isEmpty() && !m_hints.value(i).isEmpty())
+            record.generic.insert("hint", m_hints.at(i));
         QString error;
         const LibraryEntry entry = library.addDraft(drafts.at(i), record, QDateTime::currentDateTimeUtc(), &error);
         if (!entry.isValid()) {
@@ -277,7 +404,7 @@ void Batch::engineFailed(const EngineError &error) {
     emit failed(machine ? Outcome::NotRunnable : Outcome::Failed, message);
 }
 
-void Batch::recordTiming() {
+void Batch::recordTiming(int count) {
     // After an out-of-memory retry the clock covers both attempts, which says
     // nothing about how fast a batch runs here. A variation runs fewer steps
     // and encodes its source first, so it is not a measure of a batch either.
@@ -290,8 +417,8 @@ void Batch::recordTiming() {
     const double sampledAt = m_lastSampledMs / 1000.0;
     Timing measured;
     measured.secondsPerStep = perStep;
-    measured.overheadSeconds = qMax(0.0, sampledAt - m_request.count * m_request.steps * perStep);
-    measured.decodeSecondsPerImage = qMax(0.0, (total - sampledAt) / m_request.count);
+    measured.overheadSeconds = qMax(0.0, sampledAt - count * m_request.steps * perStep);
+    measured.decodeSecondsPerImage = qMax(0.0, (total - sampledAt) / count);
     Timings().record(timingKey(), measured);
 }
 

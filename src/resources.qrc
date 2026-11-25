@@ -11,6 +11,9 @@
         <file alias="FullView.qml">FullView.qml</file>
         <file alias="BackgroundColumn.qml">BackgroundColumn.qml</file>
         <file alias="LibraryView.qml">LibraryView.qml</file>
+        <file alias="HomeScreen.qml">HomeScreen.qml</file>
+        <file alias="GenericScreen.qml">GenericScreen.qml</file>
+        <file alias="ColorChips.qml">ColorChips.qml</file>
         <file alias="i18n/de.json">i18n/de.json</file>
         <file alias="i18n/en.json">i18n/en.json</file>
         <file alias="i18n/es-MX.json">i18n/es-MX.json</file>

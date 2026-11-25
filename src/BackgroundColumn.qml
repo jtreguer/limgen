@@ -5,7 +5,7 @@ import QtQuick.Layouts
 
 // The current theme's backgrounds, its own and the user's, small. Clicking
 // one (or B) makes it the source of the next batch, which then varies it;
-// clicking it again goes back to plain batches (docs/design.md section 7.3).
+// clicking it again goes back to plain batches (docs/design.md section 7.4).
 Rectangle {
     id: column
     color: "#121215"

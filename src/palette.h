@@ -31,6 +31,14 @@ struct Palette {
     // ignored; a missing background, foreground or accent is an error.
     static Palette fromToml(const QString &text);
 
+    // A palette chosen by hand, for the Generic screen and limgen image: up
+    // to five "#rrggbb" colours, in the order given, with roles "colour 1"
+    // to "colour 5". It has no mode and no mood, since a handful of colours
+    // does not say whether the image should be dark or light. An empty list
+    // or a colour that is not "#rrggbb" is an error.
+    static constexpr int maxColors = 5;
+    static Palette fromColors(const QStringList &hexes);
+
     // The words for one colour, for example "deep muted teal". Returns an
     // empty string for anything that is not "#rrggbb".
     static QString describe(const QString &hex);

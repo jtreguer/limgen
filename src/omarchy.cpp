@@ -112,6 +112,19 @@ QString Omarchy::themeDirectory(const QString &slug) const {
     return {};
 }
 
+QStringList Omarchy::themeSlugs() const {
+    QStringList slugs;
+    for (const QString &root : m_paths.themes)
+        for (const QString &name : QDir(root).entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+            if (isSafeSlug(name) && !slugs.contains(name) && QFileInfo(root + "/" + name + "/colors.toml").isFile())
+                slugs << name;
+    const QString current = slug();
+    if (!current.isEmpty() && !slugs.contains(current) && QFileInfo(colorsPath()).isFile())
+        slugs << current;
+    slugs.sort(Qt::CaseInsensitive);
+    return slugs;
+}
+
 QStringList Omarchy::themeBackgrounds(const QString &slug) const {
     const QString directory = themeDirectory(slug);
     return directory.isEmpty() ? QStringList() : imagesIn(directory + "/backgrounds");
@@ -191,6 +204,11 @@ Monitor Omarchy::largest(const QList<Monitor> &monitors) {
         if (qint64(monitor.width) * monitor.height > qint64(best.width) * best.height)
             best = monitor;
     return best;
+}
+
+QSize Omarchy::largestMonitorSize() const {
+    const Monitor monitor = largest(monitors());
+    return monitor.width > 0 && monitor.height > 0 ? QSize(monitor.width, monitor.height) : QSize(2560, 1440);
 }
 
 void Omarchy::rearm() {

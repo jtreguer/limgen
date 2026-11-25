@@ -38,6 +38,10 @@ class Backend : public QObject {
     Q_PROPERTY(bool engineReady READ engineReady NOTIFY engineChanged)
     Q_PROPERTY(QString engineProblem READ engineProblem NOTIFY engineChanged)
     Q_PROPERTY(QString gpuText READ gpuText NOTIFY engineChanged)
+    // The engine builds installed, one per GPU backend, and the one in use:
+    // [{backend, name}]. The choice is saved and shared with the commands.
+    Q_PROPERTY(QVariantList engines READ engines NOTIFY engineChanged)
+    Q_PROPERTY(int engineIndex READ engineIndex NOTIFY engineChanged)
     // The models, the chosen one, and what installing it takes.
     Q_PROPERTY(QVariantList models READ models NOTIFY modelsChanged)
     Q_PROPERTY(QString modelId READ modelId NOTIFY modelsChanged)
@@ -85,8 +89,9 @@ class Backend : public QObject {
 public:
     static constexpr int draftCount = 4;
 
-    explicit Backend(Omarchy *omarchy, const QString &engineProgram = SdCppEngine::defaultProgram(),
-                     QObject *parent = nullptr);
+    // With an engine program, that one only (tests); without, the builds
+    // SdCppEngine::installed() finds, starting with the one in config.json.
+    explicit Backend(Omarchy *omarchy, const QString &engineProgram = QString(), QObject *parent = nullptr);
     ~Backend() override;
 
     QString themeName() const { return m_themeName; }
@@ -103,6 +108,19 @@ public:
     bool engineReady() const { return m_probed && m_probe.error.kind == EngineError::None; }
     QString engineProblem() const { return m_probed ? m_probe.error.message : QString(); }
     QString gpuText() const;
+    QVariantList engines() const;
+    int engineIndex() const;
+    QString engineProgram() const { return m_engineProgram; }
+    const EngineProbe &probe() const { return m_probe; }
+    const Catalogue &catalogue() const { return m_catalogue; }
+    Omarchy *omarchy() const { return m_omarchy; }
+    // One settings file for the whole window: two copies would each write
+    // back their own stale view of the other's keys.
+    Config &config() { return m_config; }
+    // Saves config.json, and says so in the status line when it cannot.
+    void saveConfig();
+    // The GPU as a batch measured it, for the top bar.
+    void updateGpu(const Gpu &gpu);
 
     QVariantList models() const;
     QString modelId() const { return m_modelId; }
@@ -132,7 +150,13 @@ public:
     bool running() const { return m_batch && m_batch->isRunning(); }
     // Work that quitting would stop: a batch (or one waiting), a keep, a
     // download.
-    bool busy() const { return running() || m_batchWaiting || keeping() || downloading(); }
+    // The Generic screen's work counts too: it uses the same GPU.
+    bool busy() const { return gpuBusy() || downloading() || m_studioBusy; }
+    // Work of this screen on the GPU: a batch, one waiting, or a keep.
+    bool gpuBusy() const { return running() || m_batchWaiting || keeping(); }
+    // The Generic screen holds the GPU: batches here cannot start, and keeps
+    // wait their turn until it lets go.
+    void setStudioBusy(bool busy);
     bool canGenerate() const;
     bool canRerun() const { return !m_lastPrompt.isEmpty() && canGenerateWith(m_lastPrompt); }
     // One map per draft: state ("waiting", "sampling", "sampled", "done"),
@@ -176,6 +200,8 @@ public slots:
     void pauseDownload();
     void resetPrompt();
     void recheckEngine();
+    // Switches to another installed engine build and checks it.
+    void selectEngine(int index);
     // Before quitting: stops a batch and the keeps, and pauses a download.
     void stopAll();
 
@@ -268,7 +294,9 @@ private:
     const CatalogueModel *currentModel() const { return m_catalogue.model(m_modelId); }
 
     Omarchy *m_omarchy;
+    QList<EngineInstall> m_engines;
     QString m_engineProgram;
+    bool m_studioBusy = false;
     Catalogue m_catalogue;
     QString m_catalogueError;
     Config m_config;

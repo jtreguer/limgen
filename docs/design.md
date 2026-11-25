@@ -1,11 +1,12 @@
 # limgen: design document
 
-limgen (Local IMage GENeration) makes desktop backgrounds for the current
-Omarchy theme with an image model that runs on the user's own machine. This
-document says what it does and why. `technical.md` says how, and
+limgen (Local IMage GENeration) makes images with an image model that runs
+on the user's own machine: backgrounds for the current Omarchy theme, and
+images of anything else, at the size the user picks. This document says what
+it does and why. `technical.md` says how, and
 `models.md` records which models it runs and why they were chosen.
 
-Status: milestones L0 (engine spike), L1 (skeleton), L2 (engine), L3 (downloads), L4 (the window), L5 (keeping), L6 (variations, library), L7 (packaging) and L8 (the first release, `v0.1.0`) done.
+Status: milestones L0 (engine spike), L1 (skeleton), L2 (engine), L3 (downloads), L4 (the window), L5 (keeping), L6 (variations, library), L7 (packaging), L8 (the first release, `v0.1.0`) and L9 (generic generation) done.
 
 ## 1. Purpose
 
@@ -14,9 +15,16 @@ that suit the user. Finding more that match a theme's palette and mood means
 hours on wallpaper sites, and online image generators cost money per image,
 send prompts to a third party and need an account.
 
-limgen does one job: it generates new backgrounds that match the current
-theme, on the local GPU, and adds the ones the user keeps to that theme's
-background folder, where Omarchy's background cycling picks them up.
+limgen started with one job: it generates new backgrounds that match the
+current theme, on the local GPU, and adds the ones the user keeps to that
+theme's background folder, where Omarchy's background cycling picks them up.
+
+The same engine, models and window are just as useful for images that have
+nothing to do with the theme: a portrait-format picture for a phone, a
+square image for an avatar, a wide one for a second monitor, with colours of
+the user's choosing or none at all. Since L9 limgen opens on a home screen
+with two parts: **Generic generation** for those, and **Theme backgrounds**
+for the original job.
 
 ## 2. Background
 
@@ -52,24 +60,35 @@ background folder, where Omarchy's background cycling picks them up.
    too weak, instead of failing slowly.
 7. Be scriptable: every action the window offers also exists as a command
    that needs no display, so scripts and coding agents can drive it.
-8. Follow the Omarchy app conventions: one window, one job, theme accent and
-   corner rounding, the user's language, installed as an Arch package.
+8. Follow the Omarchy app conventions: one window, keyboard first, theme
+   accent and corner rounding, the user's language, installed as an Arch
+   package.
+9. Make images of anything, not tied to the theme: the user picks the final
+   size (common sizes, the monitor's, or a custom one), how many small
+   previews come first, the model, the engine build and, if they want one, a
+   palette (a theme's or colours chosen by hand). The preview they pick is
+   upscaled to the size chosen and saved where they say.
 
 ## 4. Non-goals
 
-- A general image studio. No inpainting canvas, no node graphs, no LoRA
-  training, no video. ComfyUI and InvokeAI exist for that.
+- A full image studio. Generic generation is text to image at a chosen size
+  and nothing more: no inpainting canvas, no node graphs, no LoRA training,
+  no video, no image editing. ComfyUI and InvokeAI exist for that.
 - Editing themes. limgen never changes `colors.toml`, theme folders or any
   Omarchy config. It only adds files to the user background folder.
 - Hosting or redistributing model weights. They are downloaded from their
   publishers at the user's request, with the licence shown first.
 - Cloud generation, accounts, prompt sharing.
-- Portrait or social formats. Backgrounds only.
+- Sharing or uploading images. The user saves a file; what they do with it
+  is theirs.
 - Replacing Omarchy's background switcher or per-monitor tools.
 
 ## 5. Principles
 
-- **One job.** Every feature must serve "more backgrounds for this theme".
+- **Two jobs, one tool.** Every feature serves either "more backgrounds
+  for this theme" or "an image of this, at this size". The two share the
+  engine, the models, the downloads and the settings; neither grows studio
+  features.
 - **Local and private.** Network access only to download a model the user
   chose, and nothing else.
 - **Honest about cost.** Before a model download, show its size, licence and
@@ -110,7 +129,21 @@ background folder, where Omarchy's background cycling picks them up.
   recommended settings, described in limgen's model catalogue. The user may
   install several and pick one per batch.
 - **Engine.** The program that runs a model. The first engine is
-  stable-diffusion.cpp's `sd-cli`, run as a child process.
+  stable-diffusion.cpp's `sd-cli`, run as a child process. It comes as one
+  build per GPU backend (Vulkan, CUDA); when more than one is installed,
+  the user picks which one runs.
+- **Generic image.** An image made on the Generic screen or with
+  `limgen image`: the prompt is used as typed, with no style preset and no
+  theme. Its **target size** is the final size the user chose; its
+  **previews** are drafts in the target's shape at about the model's own
+  pixel count (1344x768 for 16:9, 768x1344 for 9:16, 1024x1024 for a
+  square), so they cost what a theme draft costs. Upscaling one makes the
+  final, which goes into the library and, when the user saves it, to the
+  file they choose. A generic image never goes into a theme's folder.
+- **Chosen palette.** For a generic image, optional: one of the installed
+  themes' palettes, or up to five colours picked by hand. Its words join
+  the prompt as a theme palette's do (section 9, layer 1); there is no
+  colour pass, since there is no theme to aim at.
 
 ## 7. User workflows
 
@@ -132,7 +165,19 @@ If no usable backend exists, the window says so, explains what is missing
 (driver, Vulkan loader, ROCm) and offers CPU mode only if a test shows it can
 finish a draft in a few minutes.
 
-### 7.2 Making backgrounds
+### 7.2 The home screen
+
+The window opens on two big square buttons: **Generic generation** on the
+left, **Theme backgrounds** on the right, which shows the current theme's
+palette. Left and Right choose, Enter or Space opens; 1 and 2 open one
+directly. Every screen has a Home button, and H goes back. `limgen open
+generic` and `limgen open theme` skip the home screen, for a key binding.
+Work goes on while another screen is shown: a batch keeps running, and the
+previews and the result are still there on return. Only one of the two
+screens uses the GPU at a time; a batch on one cannot start while the other
+works, and a keep waits its turn.
+
+### 7.3 Making backgrounds
 
 1. The window shows the current theme's name, its palette as swatches and
    its existing backgrounds as small thumbnails.
@@ -150,7 +195,7 @@ finish a draft in a few minutes.
 6. V starts a variation batch from the selected image.
 7. R reruns the same prompt with new seeds.
 
-### 7.3 Variations of an existing background
+### 7.4 Variations of an existing background
 
 The theme's existing backgrounds are listed in the window. Selecting one
 (a click, or B and Shift+B to step through them) makes it the source:
@@ -163,24 +208,75 @@ the source when the theme changes. With nothing typed, a library image's
 variations reuse its prompt, which the full prompt (P) then shows. This is the quickest way to get more
 backgrounds that clearly belong to a theme.
 
-### 7.4 Theme switch while open
+### 7.5 Theme switch while open
 
 The palette, the theme name, the existing backgrounds and the keep target all
 follow a theme switch live. A batch that is running finishes with the palette
 it started with; its images are marked with the theme they were made for, and
 keeping one asks which theme to add it to if the theme changed.
 
-### 7.5 From scripts and agents
+### 7.6 Generic generation
+
+1. The user types what the image should show, as they want the model to
+   read it.
+2. They choose the final size: the largest monitor's (the default), 1920x1080,
+   2560x1440, 3840x2160, 3440x1440 (ultrawide), 1080x1920 (portrait),
+   2048x2048 (square), or a custom width and height. A custom size is
+   refused, with the reason under the choices, when a side is under 256
+   pixels, the shape is wider or taller than 4:1, or it is more than four
+   times the preview's size (as far as the x4 upscaler goes).
+3. They choose how many previews: 2x1, 2x2, 2x3 or 3x3 (2, 4, 6 or 9). On
+   the reference card a 3x3 batch takes about two minutes with Z-Image
+   Turbo and under a minute with FLUX.2 klein.
+4. Variety: Seeds only (the default) makes every preview from the same
+   prompt, and the models used change little from seed to seed. Framing
+   gives each preview its own camera hint ("low angle, looking up", "wide
+   shot, the subject small in a vast scene"), and Framing and light also
+   its own light ("blue hour", "soft overcast light"). The hint shows on
+   the preview. Each varied preview is a run of its own, about a third
+   slower on the reference card.
+5. Optionally a palette: a dropdown lists None, every installed theme with
+   its swatches, and My colours, which shows up to five colour chips (a
+   click opens a colour dialog with a hex field; x removes a chip; + adds
+   one). The words the palette adds are shown under the choices.
+6. Optionally the model and, when more than one engine build is installed,
+   the engine (Vulkan or CUDA), in the top bar.
+7. Enter (or Space, or Generate) makes the previews, with live previews as
+   on the theme screen, laid out in the grid that shows them largest. Esc
+   cancels.
+8. The user picks one (arrows, a click; F shows it full size) and presses U
+   (or Upscale selected): the ESRGAN upscale and a Lanczos cover make it the
+   target size, shown when it is done. Previews goes back to the grid and
+   Result to the image.
+9. Save image (Ctrl+S) opens a save dialog in `~/Pictures/limgen`, with a
+   name made from the prompt. PNG keeps the final as it is; a `.jpg` name
+   writes JPEG.
+
+The settings (size, previews, variety, palette and colours) are remembered
+between sessions.
+
+### 7.7 From scripts and agents
 
 `limgen generate "oil rig at dusk" --count 4 --json` makes drafts, adds
 them to the library and prints their ids and paths. `limgen keep <id>` finishes and
 installs one. `limgen palette --json` prints the current palette and the
-words it becomes. Section 9 of `technical.md` lists every command.
+words it becomes. For generic images, `limgen image "red fox in fresh snow"
+--size 1080x1920 --palette "#1a1b26,#ff9e64" --count 4 --json` makes the
+previews and `limgen upscale <id> --output fox.png` the final. Section 9 of
+`technical.md` lists every command.
 
 ## 8. Interface
 
 One window, dark Material style, the theme accent, corners from Hyprland's
-rounding, as in Omarchy's own apps.
+rounding, as in Omarchy's own apps. It opens on the home screen (section
+7.2). The Generic screen has a top bar (Home, its name, the model, the
+engine when there is a choice, the GPU), the previews or the upscaled result
+in the centre, and below them the prompt with Generate, then Resolution
+(with width and height fields for a custom size), Previews, Variety and Palette (with
+the theme's swatches or the colour chips), then the preview and final sizes,
+the palette's words, Upscale selected and Save image, and a status line.
+
+The theme screen:
 
 - **Top:** theme name, palette swatches, the model in use, the GPU in use.
 - **Left column:** the theme's existing backgrounds (stock and user), small,
@@ -212,8 +308,23 @@ Shortcuts:
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo the last discard or keep |
 | M | Choose the model |
 | P | Show or hide the full prompt |
+| H | Back to the home screen |
 | ? | Show every shortcut |
 | Q | Quit (asks first while a batch, a keep or a download runs) |
+
+On the home screen, Left and Right choose, Enter or Space opens, 1 and 2
+open Generic generation and Theme backgrounds. On the Generic screen:
+
+| Key | Action |
+|---|---|
+| Space | Make the previews (or Enter in the prompt field) |
+| Esc | Close the full view, leave a field, stop the work, or go back from the result to the previews |
+| Arrow keys | Move between previews |
+| F | Show the selected preview full size |
+| U | Upscale the selected preview to the chosen size |
+| Ctrl+S | Save the upscaled image |
+| H | Back to the home screen |
+| ? / Q | As everywhere |
 
 ## 9. Matching the theme
 
@@ -242,7 +353,10 @@ layers, each optional after the first:
 - Reads, never writes, the theme's `backgrounds/` folder.
 - Writes kept images only to `~/.config/omarchy/backgrounds/<slug>/`, named
   `limgen-<subject-slug>-<short-id>.<ext>` so they are recognisable and never
-  collide.
+  collide. Generic images go to limgen's library and to the file the user
+  saves to, never to a theme's folder.
+- Reads every installed theme's `colors.toml` for the Generic screen's
+  palette list, and changes none of them.
 - Sets a background with `omarchy theme bg set <file>`, nothing else.
 - Reads monitor sizes from `hyprctl monitors -j` to choose the final
   resolution (the largest monitor; the ratio follows that monitor).
@@ -282,6 +396,29 @@ layers, each optional after the first:
   the image model: in L0 it was faster, used a quarter of the memory and
   kept the draft as the user saw it, where the second pass redrew details
   (`models.md` section 6).
+- The window opens on a home screen with one big button per part, Generic
+  generation and Theme backgrounds, rather than adding a mode switch to the
+  theme screen: the two screens need different controls (the theme's
+  backgrounds and variations on one; size, preview count and palette on
+  the other), and a home screen keeps each one plain (L9).
+- Generic previews are made at about the model's own pixel count in the
+  target's shape, then the chosen one is upscaled with ESRGAN x4 and a
+  Lanczos cover: the theme screen's finish, measured in L0. Smaller
+  previews would be quicker but these models lose too much below their
+  native size, and a 3x3 batch stays within two minutes on an 8 GB card.
+- The palette for a generic image is chosen from a dropdown of the
+  installed themes' palettes, with swatches, or as up to five colour chips
+  picked in a colour dialog; colour names typed as text were rejected as
+  error-prone, and taking colours from an image is left for later (L9).
+- Each engine build installs into its own folder, so Vulkan and CUDA can
+  both be installed and the user picks one (L9).
+- More varied previews come from a hint per preview in the prompt, not
+  from the sampler: on the reference card a noise-adding sampler
+  (`euler_a`) gave the same pictures as `euler` with other small details,
+  `dpm++2m_sde` broke Z-Image Turbo's images, a stronger flow shift
+  changed nothing, and a framing hint per preview gave four different
+  pictures (`models.md` section 6). There is therefore no "temperature"
+  setting; the Variety choice says what it does (L9).
 - Kept images are PNG (lossless, 4 to 9 MB at 2560x1440) or JPEG (under
   1 MB), the user's choice in settings. PNG is the default. WebP is not
   written, since Qt needs an extra plugin for it and the two formats cover

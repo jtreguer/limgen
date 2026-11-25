@@ -87,7 +87,8 @@ Turbo is the highest ranked.
   distorts compositions on these models; the usual fix is an upscale followed
   by a light second pass (about 0.3 strength). L0 found that second pass
   redraws details of the draft, so limgen's finish uses an ESRGAN upscale
-  alone (section 6).
+  alone (section 6). Generic images (L9) keep the pixel count and change
+  the shape: 768x1344 for portrait, 1024x1024 square, 1536x640 for 21:9.
 - **Turbo models ignore negative prompts** (guidance off). Style presets
   must work through positive wording alone for Z-Image and FLUX.2 klein.
 
@@ -256,6 +257,42 @@ build does not have, so the PKGBUILD now passes it in); the colour pass
 toward a palette was pulled by the theme's accents (it now uses the
 background and foreground only); and previews could blank while the next
 one loaded (the tile now keeps the last one).
+
+### Generic generation (L9)
+
+On 25 November 2026, on the reference card with about 6.8 GB free, the
+Vulkan development build made generic images through `limgen image` and
+`limgen upscale`:
+
+| Step | Time |
+|---|---|
+| FLUX.2 klein 4B, three previews at 1536x640 (for 2560x1080), with a three-colour palette | 41 s, model loading included |
+| Upscaling one to 2560x1080 (ESRGAN x4, tile 256, cover, PNG) | 25 s |
+
+The 21:9 previews kept clean compositions (a lighthouse on a cliff, the
+horizon level, no doubled subjects), and the palette's words showed in the
+colours. Shapes other than 16:9 have not been benchmarked beyond this.
+
+### Variety between previews (L9)
+
+On 25 November 2026, Z-Image Turbo Q4_K on the Vulkan build, "a lighthouse
+on a cliff at dawn, crashing waves", 1344x768, seeds 100 to 103:
+
+| Run | What the four previews looked like | Time |
+|---|---|---|
+| `euler` (limgen's sampler), one batch of four | the same picture four times over: the lighthouse right of centre on rocks, waves in front | 53 s |
+| `euler_a` (eta 1) | the same four compositions as `euler`, with other small details | 63 s |
+| `dpm++2m_sde` (eta 1) | broken, posterised images | 52 s |
+| `euler` with `--flow-shift 6` | no visible change from `euler` | 53 s |
+| FLUX.2 klein 4B, `euler`, one batch | another look (a high cliff, a small lighthouse), as alike from seed to seed | 19 s |
+| `euler`, a framing hint per preview, one run each | four different pictures: a wide sea, a low angle, an aerial view, a telephoto shot | 4 x 17 s |
+
+At 8 steps the seed sets the layout in the first steps, and the distilled
+models settle on one reading of a prompt; noise added later changes texture,
+not layout. limgen's Variety choice adds the hints (`technical.md` section
+3, Prompt). With the hints the runs are one per preview; two of about
+fifteen such runs crashed in the NVIDIA driver as `sd-cli` exited, after
+saving (`technical.md` section 4).
 
 ## 7. Sources
 

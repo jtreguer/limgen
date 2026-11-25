@@ -1,8 +1,9 @@
 # CLAUDE.md
 
 limgen (Local IMage GENeration) is an Omarchy desktop app that generates
-backgrounds for the current Omarchy theme with an image model running on the
-local GPU, and adds the ones the user keeps to that theme's background folder.
+images with an image model running on the local GPU: images of anything at a
+chosen size (the Generic screen), and backgrounds for the current Omarchy
+theme, added to that theme's background folder when the user keeps them.
 Qt 6 Quick front end in C++, stable-diffusion.cpp's `sd-cli` as the engine.
 The repository is public: write everything for the community.
 
@@ -18,8 +19,9 @@ Design done, MIT licence. Milestones L0 (the engine spike, results in
 (the engine, `limgen doctor` and `limgen generate`), L3 (model downloads,
 `limgen models`), L4 (the window), L5 (keeping, `limgen keep` and
 `limgen set`), L6 (variations, the library view, `limgen library`) and L7
-(packaging, translations, README, `limgen skill`) are done, and L8 released
-`v0.1.0` (`docs/technical.md` section 12):
+(packaging, translations, README, `limgen skill`) are done, L8 released
+`v0.1.0`, and L9 (generic generation) is done (`docs/technical.md` section
+12):
 
 | # | Deliverable |
 |---|---|
@@ -32,6 +34,7 @@ Design done, MIT licence. Milestones L0 (the engine spike, results in
 | L6 | variations, library view |
 | L7 | PKGBUILD with engine split packages, desktop file, icon, translations, README |
 | L8 | `v0.1.0` |
+| L9 | home screen, Generic screen, engines side by side; `limgen image`, `limgen upscale`, `--engine` |
 
 Do not start a milestone before the earlier ones are done and tested.
 
@@ -91,7 +94,9 @@ build/limgen open
 ```
 
 Set `LIMGEN_SD_CLI` to a local `sd-cli` build during development, or to
-`bin/fake-sd-cli` to work without a GPU.
+`bin/fake-sd-cli` to work without a GPU. `LIMGEN_ENGINE_DIR=build/engine`
+finds every engine built by `bin/build-engine`, so the window offers the
+choice between them.
 
 ## Review and tests before every commit
 
@@ -108,7 +113,8 @@ Set `LIMGEN_SD_CLI` to a local `sd-cli` build during development, or to
 - **The only Omarchy path limgen writes is
   `~/.config/omarchy/backgrounds/<slug>/`**, and only new `limgen-*` files
   there. Never modify `colors.toml`, theme folders, Omarchy config, or
-  backgrounds limgen did not create.
+  backgrounds limgen did not create. Generic images go only to the library
+  and to the file the user chose.
 - **Tests and experiments never touch the real Omarchy folders.** Use the
   `LIMGEN_*` and XDG overrides (`docs/technical.md` section 11) with temp
   folders.

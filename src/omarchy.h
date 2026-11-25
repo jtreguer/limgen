@@ -3,6 +3,7 @@
 #include <QFileSystemWatcher>
 #include <QList>
 #include <QObject>
+#include <QSize>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -68,6 +69,9 @@ public:
     // the state folder; otherwise the first theme folder that has it. Empty
     // when there is none.
     QString themeDirectory(const QString &slug) const;
+    // Every theme with a colors.toml in the theme folders, and the current
+    // one, each once, sorted by name. For the Generic screen's palettes.
+    QStringList themeSlugs() const;
     // The images in that theme's backgrounds folder, sorted by name.
     QStringList themeBackgrounds(const QString &slug) const;
     // Where kept images go: ~/.config/omarchy/backgrounds/<slug>, or the
@@ -89,6 +93,10 @@ public:
     static QList<Monitor> parseMonitors(const QByteArray &json);
     // The monitor with the most pixels; the final size and ratio follow it.
     static Monitor largest(const QList<Monitor> &monitors);
+    // That monitor's size, or 2560x1440 without a monitor to measure (no
+    // Hyprland, or a command run over SSH), the size L0 measured the finish
+    // at.
+    QSize largestMonitorSize() const;
 
     static bool isSafeSlug(const QString &slug);
 

@@ -26,6 +26,13 @@ struct EngineProbe {
     EngineDevice gpu() const; // the first GPU device, or an empty one
 };
 
+// An engine build on this machine: one per GPU backend, so the Vulkan and
+// CUDA builds can both be installed and the user picks one.
+struct EngineInstall {
+    QString backend; // "vulkan", "cuda", "rocm"; empty for LIMGEN_SD_CLI, whose backend only a probe tells
+    QString program;
+};
+
 // stable-diffusion.cpp's sd-cli, run as a child process. limgen builds its
 // arguments for one pinned release only (docs/technical.md section 4).
 class SdCppEngine : public Engine {
@@ -37,7 +44,18 @@ public:
     explicit SdCppEngine(const QString &program = defaultProgram(), QObject *parent = nullptr);
     ~SdCppEngine() override;
 
-    // LIMGEN_SD_CLI, or /usr/lib/limgen/sd-cli from the engine package.
+    // The engine builds found, in the order vulkan, cuda, rocm, then any
+    // other backend folder by name. LIMGEN_SD_CLI names the only one;
+    // otherwise each engine package installs <dir>/<backend>/sd-cli, where
+    // <dir> is LIMGEN_ENGINE_DIR or /usr/lib/limgen. A development build,
+    // <dir>/<backend>/bin/sd-cli (bin/build-engine), is found as well.
+    static QList<EngineInstall> installed();
+    static QString engineDirectory();
+    // The program for `backend` when it is installed, else the first one
+    // installed, else where the Vulkan package would put it (so the error
+    // names a real path). LIMGEN_SD_CLI wins over all of them.
+    static QString programFor(const QString &backend);
+    // programFor() the engine chosen in the settings (config.json).
     static QString defaultProgram();
     QString program() const { return m_program; }
 
@@ -52,6 +70,9 @@ public:
     static QList<EngineDevice> parseDevices(const QByteArray &output);
     // What went wrong, from how the process ended and what it printed.
     static EngineError classify(int exitCode, QProcess::ExitStatus status, const QString &output);
+    // Whether the engine said it saved all `count` images ("4/4 images
+    // saved"), which it prints after the last file is written.
+    static bool savedAll(const QString &output, int count);
     // Draft paths for a request, in batch order.
     static QStringList draftPaths(const EngineRequest &request);
 

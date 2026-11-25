@@ -1,11 +1,15 @@
 #include "sdcppengine.h"
 
+#include "config.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QRegularExpression>
+#include <algorithm>
+#include <sys/resource.h>
 
 namespace {
 
@@ -45,6 +49,14 @@ EngineDevice EngineProbe::gpu() const {
 
 SdCppEngine::SdCppEngine(const QString &program, QObject *parent) : Engine(parent), m_program(program) {
     m_process.setProcessChannelMode(QProcess::MergedChannels);
+    // The engine's crashes are the GPU driver's as it exits (see ended()).
+    // A core dump of one takes half a minute to write, fills the system's
+    // crash store and can raise a crash notification, for a run that saved
+    // its images; so the engine runs with no core dumps.
+    m_process.setChildProcessModifier([] {
+        const rlimit none{0, 0};
+        setrlimit(RLIMIT_CORE, &none);
+    });
     connect(&m_process, &QProcess::readyRead, this, &SdCppEngine::readOutput);
     connect(&m_process, &QProcess::finished, this, &SdCppEngine::ended);
     connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
@@ -64,10 +76,46 @@ SdCppEngine::~SdCppEngine() {
     }
 }
 
-QString SdCppEngine::defaultProgram() {
-    const QString overridden = qEnvironmentVariable("LIMGEN_SD_CLI");
-    return overridden.isEmpty() ? QString("/usr/lib/limgen/sd-cli") : overridden;
+QString SdCppEngine::engineDirectory() {
+    const QString overridden = qEnvironmentVariable("LIMGEN_ENGINE_DIR");
+    return overridden.isEmpty() ? QString("/usr/lib/limgen") : overridden;
 }
+
+QList<EngineInstall> SdCppEngine::installed() {
+    const QString overridden = qEnvironmentVariable("LIMGEN_SD_CLI");
+    if (!overridden.isEmpty())
+        return {EngineInstall{QString(), overridden}};
+    static const QStringList known{"vulkan", "cuda", "rocm"};
+    const QDir directory(engineDirectory());
+    QStringList backends = directory.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    std::stable_sort(backends.begin(), backends.end(), [](const QString &a, const QString &b) {
+        const int i = known.indexOf(a), j = known.indexOf(b);
+        return (i < 0 ? known.size() : i) < (j < 0 ? known.size() : j);
+    });
+    QList<EngineInstall> list;
+    for (const QString &backend : std::as_const(backends)) {
+        for (const QString &relative : {backend + "/sd-cli", backend + "/bin/sd-cli"}) {
+            const QFileInfo program(directory.filePath(relative));
+            if (program.isFile() && program.isExecutable()) {
+                list << EngineInstall{backend, program.absoluteFilePath()};
+                break;
+            }
+        }
+    }
+    return list;
+}
+
+QString SdCppEngine::programFor(const QString &backend) {
+    const QList<EngineInstall> engines = installed();
+    for (const EngineInstall &engine : engines)
+        if (engine.backend == backend)
+            return engine.program;
+    if (!engines.isEmpty())
+        return engines.first().program;
+    return engineDirectory() + "/vulkan/sd-cli";
+}
+
+QString SdCppEngine::defaultProgram() { return programFor(Config().engine()); }
 
 QString SdCppEngine::parseVersion(const QByteArray &output) {
     static const QRegularExpression version(R"(stable-diffusion\.cpp version (\S+?),? commit)");
@@ -160,6 +208,14 @@ QStringList SdCppEngine::draftPaths(const EngineRequest &request) {
     for (int i = 0; i < request.count; ++i)
         paths << QString("%1/draft-%2.png").arg(request.outputDirectory).arg(i);
     return paths;
+}
+
+bool SdCppEngine::savedAll(const QString &output, int count) {
+    static const QRegularExpression saved(R"(\[I\] (\d+)/(\d+) images saved)");
+    QRegularExpressionMatch last;
+    for (auto it = saved.globalMatch(output); it.hasNext();)
+        last = it.next();
+    return last.hasMatch() && last.captured(1).toInt() == count && last.captured(2).toInt() == count;
 }
 
 EngineError SdCppEngine::classify(int exitCode, QProcess::ExitStatus status, const QString &output) {
@@ -275,7 +331,14 @@ void SdCppEngine::ended(int exitCode, QProcess::ExitStatus status) {
         return;
     }
 
-    const EngineError error = classify(exitCode, status, m_output);
+    EngineError error = classify(exitCode, status, m_output);
+    // The NVIDIA Vulkan driver can kill the engine as it exits: a shader
+    // compiler thread of the driver still runs while exit() tears the driver
+    // down (docs/technical.md section 4). A crash of any kind after the
+    // engine said it saved every image is taken as that one; the files are
+    // still checked below, like any others.
+    if (error.kind != EngineError::None && status == QProcess::CrashExit && savedAll(m_output, drafts.size()))
+        error = EngineError{};
     // Decoding all drafts at once is the peak of a batch, so the one retry
     // decodes in tiles, which needs much less video memory. An upscale
     // retries with smaller tiles, for the same reason.

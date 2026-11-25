@@ -43,6 +43,7 @@
 #include <cstdio>
 #include <memory>
 #include <signal.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 #include "backend.h"
@@ -59,6 +60,7 @@
 #include "modelstore.h"
 #include "progress.h"
 #include "sdcppengine.h"
+#include "studio.h"
 #include "omarchy.h"
 #include "palette.h"
 #include "prompt.h"
@@ -861,6 +863,116 @@ private slots:
     void cli_skillInstallTwiceAndOverAnEditedCopy();
     void cli_skillArgumentErrors();
     void cli_skillIsListedInHelp();
+
+    // ---- Generic generation ----------------------------------------------
+    void batch_draftSizeFollowsTheTarget_data();
+    void batch_draftSizeFollowsTheTarget();
+    void batch_draftSizeStaysOnTheGridAndInRange();
+    void studio_sizeProblemFor_data();
+    void studio_sizeProblemFor();
+    void palette_fromColorsKeepsTheOrderAndNamesEachColour();
+    void palette_fromColorsRejectsBadInput_data();
+    void palette_fromColorsRejectsBadInput();
+    void prompt_buildGenericIsTheTypedPromptThenThePaletteWords();
+    void config_genericSettingsRoundTripAndKeepTheOtherKeys();
+    void config_genericInvalidValuesReadAsDefaults();
+    void omarchy_themeSlugsListThemesWithColorsOnceAndTheCurrentOne();
+    void omarchy_largestMonitorSizeFallsBackWhenThereIsNoMonitor();
+    void engine_installedFindsBothLayoutsInTheOrderVulkanCudaRocmThenByName();
+    void engine_installedIgnoresWhatCannotRun();
+    void engine_overrideAndFallbacks();
+    void keeper_saveCopyOfAPngIsTheSameBytesAndReplacesAFile();
+    void keeper_saveCopyAsJpegDecodesAndCarriesTheParameters();
+    void keeper_saveCopyFailuresSayWhatWentWrongAndLeaveTheTargetAlone();
+    void batch_genericRefusesAPaletteThatIsNotThere();
+    void batch_genericRecordsTheTargetAndThePaletteAndNotTheTheme();
+    void batch_genericWithoutATargetUsesTheLargestMonitor();
+    void keeper_withoutInstallingStaysInTheLibraryAtTheGenericTarget();
+    void keeper_withoutInstallingAThemeDraftTakesTheMonitorSize();
+    void backend_enginesListTheBuildsAndSelectingOneIsSavedAndChecked();
+    void backend_aFixedEngineProgramIsTheOnlyBuildAndHasAName();
+    void backend_selectingAnEngineIsRefusedWhileWorkRuns();
+    void backend_studioBusyBlocksThemeBatchesAndKeepsWaitForItToLetGo();
+    void studio_waitsWhileAThemeBatchOrKeepUsesTheGpu();
+    void studio_holdsTheGpuWhileItWorksAndLetsGoAfter();
+    void studio_savingItsSettingsKeepsTheModelAndEngineTheBackendSaved();
+    void studio_restoresItsChoicesFromTheSettingsFile();
+    void studio_sizesStartWithTheMonitorAndEndWithCustom();
+    void studio_aSizeThatCannotBeMadeIsReportedAndMakesNothing();
+    void studio_cannotGenerateWithoutAPromptAModelOrAnEngine();
+    void studio_palettesAreNoneThenThemesWithColorsThenCustom();
+    void studio_customColorsAreNormalisedLimitedAndSaved();
+    void studio_makesPreviewsShapedLikeTheTargetWithNoThemeInThePrompt();
+    void studio_aChosenPaletteGoesIntoThePromptAndTheSidecar();
+    void studio_upscalesThePickedPreviewToTheTargetSize();
+    void studio_upscaleGoesToTheSizeThePreviewsWereMadeFor();
+    void studio_upscaleIgnoresIndexesItCannotUse();
+    void studio_aFailedBatchSaysSoAndFreesTheGpu();
+    void studio_cancelStopsPreviewsAndKeepsNothing();
+    void studio_cancelStopsAnUpscaleAndAddsNoFinal();
+    void studio_saveImageWritesPngOrJpegByNameOrFilter();
+    void studio_saveImageFailsInTheOpenAndWithNothingToSave();
+    void studio_neverWritesToAThemeOrThePicturesFolder();
+    void cli_imageMakesPreviewsInTheTargetsShapeWithTheChosenColours();
+    void cli_imageDefaultsToTheMonitorAndNoPaletteAndPrintsIdsAndPaths();
+    void cli_imageUsageErrorsExitWithTwoAndMakeNothing_data();
+    void cli_imageUsageErrorsExitWithTwoAndMakeNothing();
+    void cli_imageWithoutTheModelIsNotRunnableHere();
+    void cli_upscaleFinishesAPreviewWithoutAThemeFolder();
+    void cli_upscaleOfAThemeDraftWithoutASizeUsesTheMonitorAndInstallsNothing();
+    void cli_upscaleUsageErrorsExitWithTwoAndMakeNothing();
+    void cli_engineOptionChoosesTheBuildAndTheSettingsFollow();
+    void cli_openWithAnUnknownScreenIsAUsageErrorAndNeedsNoDisplay();
+    void cli_openGenericAndOpenThemeStartTheWindowWithoutHyprland();
+    void cli_helpListsImageAndUpscale();
+    void qml_theWindowOpensOnTheHomeScreenWithoutWarnings();
+    void qml_homeKeysOpenTheScreensAndHGoesBack();
+    void qml_themeOnlyKeysDoNothingOnTheHomeAndGenericScreens();
+    void qml_theHelpShowsTheRowsOfTheScreenShown();
+    void qml_theGenericScreenLoadsOnFirstVisitAndIsKept();
+    void qml_enterInTheGenericPromptStartsAStudioBatchAndNotTheThemes();
+    void qml_escOnTheGenericScreenStopsARunningBatch();
+    void qml_quitAsksWhileTheGenericScreenWorks();
+    void studio_batchSizeStaysWhatThePreviewsWereMadeFor();
+    void qml_theGenericScreenSaysWhatSizeThePreviewsUpscaleTo();
+    void qml_anOpenComboBoxTakesTheKeysFromTheGenericScreen();
+    void qml_theCustomSizeFieldsShowTheValueInUse();
+    void studio_aNameWithNoSuffixIsNeverAllowedToReplaceAFile();
+    void backend_whileTheGenericScreenHoldsTheGpuTheThemeScreenSaysSo();
+    void studio_whileTheThemeScreenHoldsTheGpuTheGenericScreenSaysSo();
+    void prompt_varietyIdsRoundTrip();
+    void prompt_varietyHintsSeedsAreEmptyAndCountsAreHonoured();
+    void prompt_varietyHintsAreDistinctDeterministicAndWrap();
+    void prompt_buildGenericPutsTheHintRightAfterThePrompt();
+    void config_genericVarietyRoundTripsAndJunkReadsAsSeeds();
+    void engine_savedAllReadsTheLastSavedLine_data();
+    void engine_savedAllReadsTheLastSavedLine();
+    void engine_aCrashAfterSavingEverythingIsASuccess();
+    void engine_aCrashBeforeSavingIsStillAFailure();
+    void engine_aCrashAfterSavingStillChecksTheFiles();
+    void engine_aCrashAfterAPartialSavedLineIsAFailure();
+    void engine_aCrashAfterSavingAnUpscaleIsASuccessAndBeforeIsNot();
+    void engine_runsWithNoCoreDumpsAndTheParentKeepsItsLimit();
+    void batch_varietyRunsOncePerDraftWithItsOwnPromptSeedAndHint();
+    void batch_varietySeedsIsOneRunAndRecordsNoHint();
+    void batch_varietyWithAnEditedFullPromptDoesNotSplitTheRuns();
+    void batch_varietyWithASingleDraftSaysWhatTheEngineWasGiven();
+    void batch_varietyMapsProgressSamplingAndPreviewsToTheDraft();
+    void batch_varietyEstimateAndTimingCountEachRunOnce();
+    void batch_varietyCancelEndsCancelledWhereverItIs();
+    void batch_varietyCancelDuringARunStopsTheEngine();
+    void batch_varietyCancelBetweenTwoRunsStartsNoMore();
+    void batch_varietyAFailureInARunFailsTheBatchAndFilesNothing();
+    void batch_varietyEveryRunCrashingAtExitStillSucceeds();
+    void studio_varietyIsSavedChosenByIndexAndRestored();
+    void studio_varietyMakesEachPreviewItsOwnRunOnItsOwnTile();
+    void studio_seedsOnlyPreviewsCarryNoHint();
+    void studio_cancelBetweenOrDuringRunsKeepsNothing();
+    void studio_aFailedRunFailsTheBatchAndFreesTheGpu();
+    void studio_anEngineThatCrashesAtExitStillGivesPreviewsAndAnUpscale();
+    void cli_imageVarietyMakesARunPerDraftAndSaysWhichHint();
+    void cli_imageVarietyRejectsWhatItDoesNotKnow();
+    void qml_theVarietyBoxBlocksTheKeysAndTilesShowTheirHint();
 
 private:
     std::unique_ptr<Sandbox> m_global;
@@ -3271,8 +3383,13 @@ void LimgenTests::engine_draftPaths() {
 }
 
 void LimgenTests::engine_defaultProgram() {
-    EnvGuard guard({"LIMGEN_SD_CLI"});
-    QCOMPARE(SdCppEngine::defaultProgram(), QString("/usr/lib/limgen/sd-cli"));
+    EnvGuard guard({"LIMGEN_SD_CLI", "LIMGEN_ENGINE_DIR"});
+    qunsetenv("LIMGEN_SD_CLI");
+    qunsetenv("LIMGEN_ENGINE_DIR");
+    // With no engine package installed, the Vulkan package's path, so the
+    // error names a real place.
+    if (SdCppEngine::installed().isEmpty())
+        QCOMPARE(SdCppEngine::defaultProgram(), QString("/usr/lib/limgen/vulkan/sd-cli"));
     qputenv("LIMGEN_SD_CLI", "/tmp/limgen-test/sd-cli");
     QCOMPARE(SdCppEngine::defaultProgram(), QString("/tmp/limgen-test/sd-cli"));
     QCOMPARE(SdCppEngine("/x/y").program(), QString("/x/y"));
@@ -7444,6 +7561,8 @@ void typeText(QWindow *window, const QString &text) {
 // The real window with the real Backend, Theme and Translator, as main() builds it.
 struct QmlRig {
     BackendRig rig;
+    // After the rig, so it goes before the backend it holds on to.
+    std::unique_ptr<Studio> studio;
     QStringList warnings;
     std::unique_ptr<Translator> translator;
     std::unique_ptr<Theme> theme;
@@ -7453,7 +7572,7 @@ struct QmlRig {
     // With `small`, the model and the upscaler come from the small test
     // catalogue (64x64 drafts), so batches and keeps are quick.
     explicit QmlRig(bool installed = true, const QString &engineProgram = fakeEngine, bool small = false, int steps = 1,
-                    const QString &language = QString())
+                    const QString &language = QString(), const QString &startScreen = "theme")
         : rig(true, installed && !small) {
         qmlWarnings = &warnings;
         previousHandler = qInstallMessageHandler(collectQmlWarnings);
@@ -7477,9 +7596,15 @@ struct QmlRig {
         engine->rootContext()->setContextProperty("translator", translator.get());
         engine->rootContext()->setContextProperty("theme", theme.get());
         engine->rootContext()->setContextProperty("backend", rig.backend.get());
+        studio = std::make_unique<Studio>(rig.backend.get());
+        engine->rootContext()->setContextProperty("studio", studio.get());
         engine->load(QUrl("qrc:/Main.qml"));
         if (!engine->rootObjects().isEmpty())
             window = qobject_cast<QQuickWindow *>(engine->rootObjects().first());
+        // The window opens on the home screen; the tests written before it
+        // existed drive the theme screen.
+        if (window && startScreen != "home")
+            window->setProperty("screen", startScreen);
     }
     ~QmlRig() {
         settleBackend(rig.backend.get());
@@ -12926,4 +13051,3516 @@ int main(int argc, char *argv[]) {
     LimgenTests tc;
     return QTest::qExec(&tc, argc, argv);
 }
+// ============================== Generic generation ========================
+//
+// The Generic screen, limgen image and limgen upscale: images of anything at
+// any size, with an optional palette, that never touch a theme's folder.
+
+namespace {
+
+// An engine build in <dir>/<backend>/sd-cli, or <dir>/<backend>/bin/sd-cli
+// (a development build), that runs the fake engine and, when given a log,
+// writes the backend's name and its arguments there first.
+void putEngine(const QString &dir, const QString &backend, bool inBin, const QString &log = QString()) {
+    const QString path = dir + "/" + backend + (inBin ? "/bin" : "") + "/sd-cli";
+    QByteArray body;
+    if (!log.isEmpty())
+        body += "echo " + backend.toUtf8() + " \"$@\" >> '" + log.toUtf8() + "'\n";
+    body += "exec '" + fakeEngine.toUtf8() + "' \"$@\"\n";
+    QVERIFY(writeScript(path, body));
+}
+
+// The value after `option` in one logged engine call.
+QString argumentAfter(const QStringList &call, const QString &option) {
+    const int at = call.indexOf(option);
+    return at >= 0 && at + 1 < call.size() ? call.at(at + 1) : QString();
+}
+
+QString genericPrompt(const QString &log, int index = 0) {
+    return argumentAfter(imageCalls(log).value(index), "--prompt");
+}
+
+QSize sizeOf(const QJsonValue &value) {
+    const QJsonArray array = value.toArray();
+    return QSize(array.at(0).toInt(), array.at(1).toInt());
+}
+
+} // namespace
+
+void LimgenTests::batch_draftSizeFollowsTheTarget_data() {
+    QTest::addColumn<QSize>("target");
+    QTest::addColumn<QSize>("native");
+    QTest::addColumn<QSize>("expected");
+    const QSize native(1344, 768);
+    QTest::newRow("16:9 gives the native size") << QSize(1920, 1080) << native << QSize(1344, 768);
+    QTest::newRow("9:16 turns it on its side") << QSize(1080, 1920) << native << QSize(768, 1344);
+    QTest::newRow("square") << QSize(2048, 2048) << native << QSize(1024, 1024);
+    QTest::newRow("21:9") << QSize(3440, 1440) << native << QSize(1600, 640);
+    QTest::newRow("4:3 at a square model's pixel count") << QSize(1600, 1200) << QSize(1024, 1024) << QSize(1152, 896);
+    QTest::newRow("8:1 clamps the long side to 2048") << QSize(4096, 512) << native << QSize(2048, 384);
+    QTest::newRow("1:8 clamps the long side to 2048") << QSize(512, 4096) << native << QSize(384, 2048);
+    QTest::newRow("100:1 clamps the short side to 256") << QSize(10000, 100) << native << QSize(2048, 256);
+    QTest::newRow("a tiny model never goes under 256") << QSize(1920, 1080) << QSize(64, 64) << QSize(256, 256);
+    QTest::newRow("an empty target gives the native size") << QSize() << native << QSize(1344, 768);
+    QTest::newRow("a target with no height gives the native size") << QSize(1920, 0) << native << QSize(1344, 768);
+    QTest::newRow("an empty native size gives itself") << QSize(1920, 1080) << QSize() << QSize();
+}
+
+// Prevents drafts of the wrong shape: a 9:16 phone wallpaper made from a
+// landscape draft would be cropped, not upscaled.
+void LimgenTests::batch_draftSizeFollowsTheTarget() {
+    QFETCH(QSize, target);
+    QFETCH(QSize, native);
+    QFETCH(QSize, expected);
+    QCOMPARE(Batch::draftSize(target, native), expected);
+}
+
+void LimgenTests::batch_draftSizeStaysOnTheGridAndInRange() {
+    for (const QSize &native : {QSize(1344, 768), QSize(1024, 1024), QSize(512, 512)}) {
+        for (int width = 256; width <= 8192; width += 311) {
+            for (int height = 256; height <= 8192; height += 497) {
+                const QSize size = Batch::draftSize(QSize(width, height), native);
+                const QString what = QString("%1x%2 for %3x%4").arg(width).arg(height).arg(native.width()).arg(native.height());
+                QVERIFY2(size.width() % 64 == 0 && size.height() % 64 == 0, qPrintable(what));
+                QVERIFY2(size.width() >= 256 && size.width() <= 2048, qPrintable(what));
+                QVERIFY2(size.height() >= 256 && size.height() <= 2048, qPrintable(what));
+            }
+        }
+    }
+    // A wider target never gives a narrower draft shape.
+    QVERIFY(Batch::draftSize(QSize(3000, 1000), QSize(1344, 768)).width() >
+            Batch::draftSize(QSize(1000, 1000), QSize(1344, 768)).width());
+}
+
+void LimgenTests::studio_sizeProblemFor_data() {
+    QTest::addColumn<QSize>("target");
+    QTest::addColumn<QSize>("draft");
+    QTest::addColumn<QString>("fragment"); // empty: no problem; else a number the message names
+    const QSize draft(1344, 768);
+    QTest::newRow("a common size") << QSize(1920, 1080) << draft << QString();
+    QTest::newRow("exactly 256 on a side") << QSize(256, 256) << draft << QString();
+    QTest::newRow("255 wide") << QSize(255, 1000) << draft << QString("256");
+    QTest::newRow("255 tall") << QSize(1000, 255) << draft << QString("256");
+    QTest::newRow("exactly 4:1") << QSize(4000, 1000) << QSize(2048, 512) << QString();
+    QTest::newRow("exactly 1:4") << QSize(1000, 4000) << QSize(512, 2048) << QString();
+    QTest::newRow("a hair wider than 4:1") << QSize(4004, 1000) << QSize(2048, 512) << QString("4004");
+    QTest::newRow("a hair taller than 4:1") << QSize(1000, 4004) << QSize(512, 2048) << QString("4004");
+    QTest::newRow("exactly four times the preview") << QSize(5376, 3072) << draft << QString();
+    QTest::newRow("one pixel too wide for the preview") << QSize(5377, 3072) << draft << QString("1344");
+    QTest::newRow("one pixel too tall for the preview") << QSize(5376, 3073) << draft << QString("768");
+    QTest::newRow("no preview to compare with") << QSize(8000, 4500) << QSize() << QString();
+}
+
+void LimgenTests::studio_sizeProblemFor() {
+    QFETCH(QSize, target);
+    QFETCH(QSize, draft);
+    QFETCH(QString, fragment);
+    const QString problem = Studio::sizeProblemFor(target, draft);
+    if (fragment.isEmpty())
+        QVERIFY2(problem.isEmpty(), qPrintable(problem));
+    else
+        QVERIFY2(problem.contains(fragment), qPrintable(problem));
+}
+
+void LimgenTests::palette_fromColorsKeepsTheOrderAndNamesEachColour() {
+    const Palette palette = Palette::fromColors({"#1A1B26", " #7aa2f7 ", "#e0af68"});
+    QVERIFY2(palette.isValid(), qPrintable(palette.error));
+    QCOMPARE(roles(palette), QStringList({"colour 1", "colour 2", "colour 3"}));
+    QCOMPARE(palette.colors.at(0).hex, QString("#1a1b26")); // lower case, as the toml palette has it
+    QCOMPARE(palette.colors.at(1).hex, QString("#7aa2f7"));
+    QCOMPARE(palette.colors.at(0).words, Palette::describe("#1a1b26"));
+    QCOMPARE(palette.colors.at(2).words, Palette::describe("#e0af68"));
+    QCOMPARE(palette.words.size(), 3);
+    QCOMPARE(palette.words.at(2), Palette::describe("#e0af68"));
+    // A handful of colours does not say light or dark.
+    QCOMPARE(palette.mode, QString());
+    QCOMPARE(palette.mood, QString());
+    // The same colour twice is one word in the prompt, two colours in the list.
+    const Palette twice = Palette::fromColors({"#1a1b26", "#1a1b26"});
+    QCOMPARE(twice.colors.size(), 2);
+    QCOMPARE(twice.words.size(), 1);
+    // Five is the most.
+    QVERIFY(Palette::fromColors({"#111111", "#222222", "#333333", "#444444", "#555555"}).isValid());
+}
+
+void LimgenTests::palette_fromColorsRejectsBadInput_data() {
+    QTest::addColumn<QStringList>("colours");
+    QTest::addColumn<QString>("fragment");
+    QTest::newRow("none") << QStringList() << QString();
+    QTest::newRow("six") << QStringList({"#111111", "#222222", "#333333", "#444444", "#555555", "#666666"})
+                         << QString("5");
+    QTest::newRow("a name") << QStringList({"#111111", "red"}) << QString("red");
+    QTest::newRow("no hash") << QStringList({"111111"}) << QString("111111");
+    QTest::newRow("short") << QStringList({"#12345"}) << QString("#12345");
+    QTest::newRow("not hex") << QStringList({"#12345g"}) << QString("#12345g");
+    QTest::newRow("with alpha") << QStringList({"#80112233"}) << QString("#80112233");
+    QTest::newRow("empty string") << QStringList({""}) << QString();
+}
+
+void LimgenTests::palette_fromColorsRejectsBadInput() {
+    QFETCH(QStringList, colours);
+    QFETCH(QString, fragment);
+    const Palette palette = Palette::fromColors(colours);
+    QVERIFY(!palette.isValid());
+    QVERIFY2(palette.error.contains(fragment), qPrintable(palette.error));
+    // Nothing half-built is left for a caller that forgets to check.
+    QVERIFY(palette.colors.isEmpty());
+    QVERIFY(palette.words.isEmpty());
+}
+
+void LimgenTests::prompt_buildGenericIsTheTypedPromptThenThePaletteWords() {
+    const Palette palette = Palette::fromColors({"#1a1b26", "#7aa2f7"});
+    const Prompt::Text text = Prompt::buildGeneric("  a red\n fox   in snow ", palette);
+    QCOMPARE(text.positive, "a red fox in snow, " + palette.words.join(", ") + " colour palette");
+    // No style words and no wallpaper: the image can be anything.
+    for (const char *word : {"wallpaper", "cinematic", "desktop"})
+        QVERIFY2(!text.positive.contains(word), word);
+    QCOMPARE(text.negative, Prompt::build("x", palette).negative);
+    QVERIFY(!text.negative.isEmpty());
+
+    // A theme's palette brings its mood after the words.
+    const Palette theme = Palette::fromToml(stockToml);
+    QVERIFY(!theme.mood.isEmpty());
+    QCOMPARE(Prompt::buildGeneric("a red fox", theme).positive,
+             "a red fox, " + theme.words.join(", ") + " colour palette, " + theme.mood);
+
+    // No palette, or one that did not parse: the prompt is left as typed.
+    Palette none;
+    none.error = "none";
+    QCOMPARE(Prompt::buildGeneric("a red fox", none).positive, QString("a red fox"));
+    QCOMPARE(Prompt::buildGeneric("a red fox", Palette()).positive, QString("a red fox"));
+    QCOMPARE(Prompt::buildGeneric("a red fox", Palette::fromColors({"nope"})).positive, QString("a red fox"));
+    // Nothing typed and a palette: no leading comma.
+    QCOMPARE(Prompt::buildGeneric("   ", palette).positive, palette.words.join(", ") + " colour palette");
+}
+
+void LimgenTests::config_genericSettingsRoundTripAndKeepTheOtherKeys() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const QString file = fixture.root.path() + "/config/limgen/config.json";
+    Config fresh(file);
+    QCOMPARE(fresh.genericSize(), QSize());
+    QCOMPARE(fresh.genericCount(), 4);
+    QCOMPARE(fresh.genericPalette(), QString());
+    QCOMPARE(fresh.genericColors(), QStringList());
+    QCOMPARE(fresh.engine(), QString());
+
+    Config config(file);
+    config.setModelId("flux2-klein-4b");
+    config.setGenericSize(QSize(3440, 1440));
+    config.setGenericCount(9);
+    config.setGenericPalette("custom");
+    config.setGenericColors({"#1a1b26", "#7aa2f7"});
+    config.setEngine("cuda");
+    QVERIFY(config.save());
+
+    const Config again(file);
+    QCOMPARE(again.genericSize(), QSize(3440, 1440));
+    QCOMPARE(again.genericCount(), 9);
+    QCOMPARE(again.genericPalette(), QString("custom"));
+    QCOMPARE(again.genericColors(), QStringList({"#1a1b26", "#7aa2f7"}));
+    QCOMPARE(again.engine(), QString("cuda"));
+    QCOMPARE(again.modelId(), QString("flux2-klein-4b"));
+    // Setting one generic key leaves the others, and no size means the monitor's.
+    Config second(file);
+    second.setGenericCount(2);
+    second.setGenericSize(QSize());
+    QVERIFY(second.save());
+    const Config last(file);
+    QCOMPARE(last.genericCount(), 2);
+    QCOMPARE(last.genericSize(), QSize());
+    QCOMPARE(last.genericPalette(), QString("custom"));
+    QCOMPARE(last.genericColors(), QStringList({"#1a1b26", "#7aa2f7"}));
+    QCOMPARE(last.modelId(), QString("flux2-klein-4b"));
+}
+
+void LimgenTests::config_genericInvalidValuesReadAsDefaults() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const QString file = fixture.root.path() + "/config/limgen/config.json";
+    for (int count : {0, 1, 3, 5, 8, 10, -4}) {
+        QVERIFY(writeFile(file, "{\"generic\": {\"count\": " + QByteArray::number(count) + "}}"));
+        QCOMPARE(Config(file).genericCount(), 4);
+    }
+    for (int count : {2, 4, 6, 9}) {
+        QVERIFY(writeFile(file, "{\"generic\": {\"count\": " + QByteArray::number(count) + "}}"));
+        QCOMPARE(Config(file).genericCount(), count);
+    }
+    for (const char *size : {"[0, 100]", "[100, 0]", "[-5, 100]", "[100]", "[]", "\"1920x1080\"", "null", "{}"}) {
+        QVERIFY(writeFile(file, QByteArray("{\"generic\": {\"size\": ") + size + "}}"));
+        QCOMPARE(Config(file).genericSize(), QSize());
+    }
+    // Colours: only "#rrggbb", lower-cased, at most five.
+    QVERIFY(writeFile(file, R"({"generic": {"colors": ["#ABCDEF", "red", "#12345", "#80112233", 5, "#102030",
+                                                         "#111111", "#222222", "#333333", "#444444"]}})"));
+    QCOMPARE(Config(file).genericColors(), QStringList({"#abcdef", "#102030", "#111111", "#222222", "#333333"}));
+    // The wrong types for the whole group read as defaults too.
+    for (const char *content : {"{\"generic\": 5}", "{\"generic\": [1]}", "{\"generic\": {\"colors\": \"#111111\"}}",
+                                "{\"generic\": {\"palette\": 7}}"}) {
+        QVERIFY(writeFile(file, content));
+        const Config config(file);
+        QCOMPARE(config.genericColors(), QStringList());
+        QCOMPARE(config.genericPalette(), QString());
+        QCOMPARE(config.genericCount(), 4);
+    }
+}
+
+void LimgenTests::omarchy_themeSlugsListThemesWithColorsOnceAndTheCurrentOne() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    QVERIFY(fixture.addTheme("night-city", stockToml));
+    QVERIFY(fixture.addTheme("Zen", tomlWith("#fafafa", "#111111", "#ff0000")));
+    QVERIFY(fixture.addTheme("amber", tomlWith("#222222", "#eeeeee", "#ffbf00")));
+    QVERIFY(writeFile(fixture.themes + "/no-colours/readme.txt", "nothing here"));
+    QVERIFY(fixture.addTheme("bad name", stockToml)); // a space cannot be a slug
+    // A second theme folder repeating a name lists it once.
+    const QString user = fixture.root.path() + "/user-themes";
+    QVERIFY(writeFile(user + "/night-city/colors.toml", stockToml));
+    QVERIFY(writeFile(user + "/mine/colors.toml", stockToml));
+    OmarchyPaths paths = fixture.paths();
+    paths.themes = QStringList{fixture.themes, user};
+    QVERIFY(fixture.switchTo("amber"));
+    QCOMPARE(Omarchy(paths).themeSlugs(), QStringList({"amber", "mine", "night-city", "Zen"}));
+
+    // The current theme counts even when no theme folder has it (a theme that
+    // is only in the state folder), and is not listed twice when one does.
+    QVERIFY(writeFile(fixture.state + "/theme.name", "from-state\n"));
+    QFile::remove(fixture.state + "/theme");
+    QVERIFY(writeFile(fixture.state + "/theme/colors.toml", stockToml));
+    QCOMPARE(Omarchy(paths).themeSlugs(), QStringList({"amber", "from-state", "mine", "night-city", "Zen"}));
+    // Without a colors.toml it is not offered.
+    QVERIFY(QFile::remove(fixture.state + "/theme/colors.toml"));
+    QCOMPARE(Omarchy(paths).themeSlugs(), QStringList({"amber", "mine", "night-city", "Zen"}));
+    // No theme folders at all: nothing, not a crash.
+    paths.themes = QStringList{fixture.root.path() + "/missing"};
+    QCOMPARE(Omarchy(paths).themeSlugs(), QStringList());
+}
+
+void LimgenTests::omarchy_largestMonitorSizeFallsBackWhenThereIsNoMonitor() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    OmarchyPaths paths = fixture.paths();
+    // No hyprctl at all (an SSH session): the size the finish was measured at.
+    paths.hyprctl = QString();
+    QCOMPARE(Omarchy(paths).largestMonitorSize(), QSize(2560, 1440));
+    paths.hyprctl = fixture.root.path() + "/no-such-hyprctl";
+    QCOMPARE(Omarchy(paths).largestMonitorSize(), QSize(2560, 1440));
+    // A monitor list with nothing usable in it.
+    QVERIFY(writeScript(fixture.root.path() + "/empty-hyprctl", "echo '[]'\n"));
+    paths.hyprctl = fixture.root.path() + "/empty-hyprctl";
+    QCOMPARE(Omarchy(paths).largestMonitorSize(), QSize(2560, 1440));
+    // Several monitors: the one with the most pixels, not the first.
+    QVERIFY(writeScript(fixture.root.path() + "/two-hyprctl",
+                        "echo '[{\"name\":\"A\",\"width\":1920,\"height\":1080,\"transform\":0},"
+                        "{\"name\":\"B\",\"width\":3440,\"height\":1440,\"transform\":0}]'\n"));
+    paths.hyprctl = fixture.root.path() + "/two-hyprctl";
+    QCOMPARE(Omarchy(paths).largestMonitorSize(), QSize(3440, 1440));
+}
+
+void LimgenTests::engine_installedFindsBothLayoutsInTheOrderVulkanCudaRocmThenByName() {
+    Sandbox sb;
+    EnvGuard guard({"LIMGEN_ENGINE_DIR"});
+    const QString dir = sb.fixture.root.path() + "/engines";
+    qputenv("LIMGEN_ENGINE_DIR", dir.toUtf8());
+    qunsetenv("LIMGEN_SD_CLI");
+    QCOMPARE(SdCppEngine::engineDirectory(), dir);
+    putEngine(dir, "zeta", false);
+    putEngine(dir, "cuda", false);
+    putEngine(dir, "alpha", true); // a development build, in bin/
+    putEngine(dir, "vulkan", true);
+    putEngine(dir, "rocm", false);
+    // A backend with both layouts: the packaged one wins.
+    putEngine(dir, "both", true);
+    putEngine(dir, "both", false);
+
+    const QList<EngineInstall> found = SdCppEngine::installed();
+    QStringList backends, programs;
+    for (const EngineInstall &install : found) {
+        backends << install.backend;
+        programs << install.program;
+    }
+    QCOMPARE(backends, QStringList({"vulkan", "cuda", "rocm", "alpha", "both", "zeta"}));
+    QCOMPARE(programs.at(0), dir + "/vulkan/bin/sd-cli");
+    QCOMPARE(programs.at(1), dir + "/cuda/sd-cli");
+    QCOMPARE(programs.at(3), dir + "/alpha/bin/sd-cli");
+    QCOMPARE(programs.at(4), dir + "/both/sd-cli");
+}
+
+void LimgenTests::engine_installedIgnoresWhatCannotRun() {
+    Sandbox sb;
+    EnvGuard guard({"LIMGEN_ENGINE_DIR"});
+    const QString dir = sb.fixture.root.path() + "/engines";
+    qputenv("LIMGEN_ENGINE_DIR", dir.toUtf8());
+    qunsetenv("LIMGEN_SD_CLI");
+    QCOMPARE(SdCppEngine::installed().size(), 0); // the folder does not exist yet
+    // Present but not executable.
+    QVERIFY(writeFile(dir + "/cuda/sd-cli", "#!/bin/sh\n"));
+    // A folder where the program should be.
+    QVERIFY(QDir().mkpath(dir + "/rocm/sd-cli"));
+    // An empty backend folder, and a plain file where a backend folder goes.
+    QVERIFY(QDir().mkpath(dir + "/empty"));
+    QVERIFY(writeScript(dir + "/sd-cli", "exit 0\n"));
+    QCOMPARE(SdCppEngine::installed().size(), 0);
+    // A flat file that cannot run does not hide a build that can in bin/.
+    putEngine(dir, "cuda", true);
+    // And one that does run is found.
+    putEngine(dir, "vulkan", false);
+    QStringList backends;
+    for (const EngineInstall &install : SdCppEngine::installed())
+        backends << install.backend;
+    QCOMPARE(backends, QStringList({"vulkan", "cuda"}));
+    QCOMPARE(SdCppEngine::installed().at(1).program, dir + "/cuda/bin/sd-cli");
+}
+
+void LimgenTests::engine_overrideAndFallbacks() {
+    Sandbox sb;
+    EnvGuard guard({"LIMGEN_ENGINE_DIR"});
+    const QString dir = sb.fixture.root.path() + "/engines";
+    qputenv("LIMGEN_ENGINE_DIR", dir.toUtf8());
+    putEngine(dir, "vulkan", false);
+    putEngine(dir, "cuda", false);
+
+    // LIMGEN_SD_CLI wins over every build and every setting, and has no backend.
+    qputenv("LIMGEN_SD_CLI", "/tmp/limgen-test/sd-cli");
+    const QList<EngineInstall> overridden = SdCppEngine::installed();
+    QCOMPARE(overridden.size(), 1);
+    QCOMPARE(overridden.first().backend, QString());
+    QCOMPARE(overridden.first().program, QString("/tmp/limgen-test/sd-cli"));
+    QCOMPARE(SdCppEngine::programFor("cuda"), QString("/tmp/limgen-test/sd-cli"));
+    Config config(sb.configFile());
+    config.setEngine("cuda");
+    QVERIFY(config.save());
+    QCOMPARE(SdCppEngine::defaultProgram(), QString("/tmp/limgen-test/sd-cli"));
+
+    qunsetenv("LIMGEN_SD_CLI");
+    // The backend asked for when it is installed, else the first one.
+    QCOMPARE(SdCppEngine::programFor("cuda"), dir + "/cuda/sd-cli");
+    QCOMPARE(SdCppEngine::programFor("vulkan"), dir + "/vulkan/sd-cli");
+    QCOMPARE(SdCppEngine::programFor("rocm"), dir + "/vulkan/sd-cli");
+    QCOMPARE(SdCppEngine::programFor(QString()), dir + "/vulkan/sd-cli");
+    // The default follows config.json.
+    QCOMPARE(SdCppEngine::defaultProgram(), dir + "/cuda/sd-cli");
+    config.setEngine("gone");
+    QVERIFY(config.save());
+    QCOMPARE(SdCppEngine::defaultProgram(), dir + "/vulkan/sd-cli");
+    QVERIFY(QFile::remove(sb.configFile()));
+    QCOMPARE(SdCppEngine::defaultProgram(), dir + "/vulkan/sd-cli");
+    // Nothing installed: where the Vulkan package would put it, so the error names a real path.
+    QVERIFY(QDir(dir).removeRecursively());
+    QCOMPARE(SdCppEngine::programFor("cuda"), dir + "/vulkan/sd-cli");
+    QCOMPARE(SdCppEngine::defaultProgram(), dir + "/vulkan/sd-cli");
+}
+
+void LimgenTests::keeper_saveCopyOfAPngIsTheSameBytesAndReplacesAFile() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const QString base = fixture.root.path();
+    QImage image(40, 30, QImage::Format_RGB32);
+    image.fill(QColor(200, 30, 60));
+    image.setText("parameters", "oil rig\nSteps: 8");
+    QVERIFY(QDir().mkpath(base + "/out"));
+    QVERIFY(image.save(base + "/in.png", "PNG"));
+    const QString target = base + "/out/copy.png";
+
+    QCOMPARE(Keeper::saveCopy(base + "/in.png", target, "ignored for a png", 92), QString());
+    QCOMPARE(readFile(target), readFile(base + "/in.png"));
+    QCOMPARE(QImageReader(target).text("parameters"), QString("oil rig Steps: 8")); // the reader flattens lines
+    // The user chose the name, so a file there is replaced; nothing else is left beside it.
+    QVERIFY(writeFile(target, "old"));
+    QCOMPARE(Keeper::saveCopy(base + "/in.png", target, "", 92), QString());
+    QCOMPARE(readFile(target), readFile(base + "/in.png"));
+    QCOMPARE(QDir(base + "/out").entryList(QDir::Files), QStringList{"copy.png"});
+}
+
+void LimgenTests::keeper_saveCopyAsJpegDecodesAndCarriesTheParameters() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const QString base = fixture.root.path();
+    QImage noise(96, 64, QImage::Format_RGB32);
+    quint32 seed = 7;
+    for (int y = 0; y < noise.height(); ++y)
+        for (int x = 0; x < noise.width(); ++x) {
+            seed = seed * 1664525u + 1013904223u;
+            noise.setPixel(x, y, seed | 0xff000000u);
+        }
+    QVERIFY(noise.save(base + "/in.png", "PNG"));
+    const QString parameters = "oil rig\nSteps: 8";
+    for (const QString &name : {"a.jpg", "b.jpeg", "c.JPG"}) {
+        const QString target = base + "/" + name;
+        QCOMPARE(Keeper::saveCopy(base + "/in.png", target, parameters, 92), QString());
+        QVERIFY2(readFile(target).startsWith("\xFF\xD8"), qPrintable(name));
+        QCOMPARE(QImageReader(target).size(), QSize(96, 64));
+        QCOMPARE(QImageReader(target).text("parameters"), parameters.simplified());
+    }
+    // The quality is the one asked for.
+    QCOMPARE(Keeper::saveCopy(base + "/in.png", base + "/low.jpg", parameters, 10), QString());
+    QCOMPARE(Keeper::saveCopy(base + "/in.png", base + "/high.jpg", parameters, 98), QString());
+    QVERIFY(QFileInfo(base + "/low.jpg").size() * 2 < QFileInfo(base + "/high.jpg").size());
+    // And a name that is not a JPEG's gets a PNG.
+    QCOMPARE(Keeper::saveCopy(base + "/in.png", base + "/d.png", parameters, 92), QString());
+    QVERIFY(readFile(base + "/d.png").startsWith("\x89PNG"));
+}
+
+void LimgenTests::keeper_saveCopyFailuresSayWhatWentWrongAndLeaveTheTargetAlone() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const QString base = fixture.root.path();
+    QVERIFY(makePng(base + "/in.png", 8, 8) == base + "/in.png");
+    // A folder that does not exist.
+    QString error = Keeper::saveCopy(base + "/in.png", base + "/nowhere/x.png", "", 92);
+    QVERIFY(!error.isEmpty());
+    QVERIFY2(error.contains(base + "/nowhere/x.png"), qPrintable(error));
+    QVERIFY(!QFileInfo::exists(base + "/nowhere"));
+    error = Keeper::saveCopy(base + "/in.png", base + "/nowhere/x.jpg", "", 92);
+    QVERIFY2(error.contains(base + "/nowhere/x.jpg"), qPrintable(error));
+    // A source that is not there leaves the file the user chose as it was, for either format.
+    for (const QString &name : {"keep.png", "keep.jpg"}) {
+        QVERIFY(writeFile(base + "/" + name, "precious"));
+        error = Keeper::saveCopy(base + "/missing.png", base + "/" + name, "", 92);
+        QVERIFY2(error.contains("missing.png"), qPrintable(error));
+        QCOMPARE(readFile(base + "/" + name), QByteArray("precious"));
+    }
+    QCOMPARE(QDir(base).entryList({"*.part", "*.tmp", ".*"}, QDir::Files | QDir::Hidden), QStringList());
+    // A folder that cannot be written to.
+    if (geteuid() != 0) {
+        QVERIFY(QDir().mkpath(base + "/locked"));
+        QVERIFY(QFile::setPermissions(base + "/locked", QFile::ReadOwner | QFile::ExeOwner));
+        error = Keeper::saveCopy(base + "/in.png", base + "/locked/x.png", "", 92);
+        QFile::setPermissions(base + "/locked", QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        QVERIFY2(error.contains(base + "/locked/x.png"), qPrintable(error));
+        QCOMPARE(QDir(base + "/locked").entryList(QDir::AllEntries | QDir::NoDotAndDotDot), QStringList());
+    }
+}
+
+void LimgenTests::batch_genericRefusesAPaletteThatIsNotThere() {
+    BatchRig rig;
+    stockTheme(rig.sb.fixture);
+    QVERIFY(writeFile(rig.sb.fixture.themes + "/broken/colors.toml", "accent = \"#7aa2f7\"\n"));
+    // A real palette outside the theme folders, reachable only through a slug with dots.
+    QVERIFY(writeFile(rig.sb.fixture.root.path() + "/escape/colors.toml", stockToml));
+    const QStringList colours6{"#111111", "#222222", "#333333", "#444444", "#555555", "#666666"};
+    struct Case {
+        const char *name;
+        QString theme;
+        QStringList colours;
+        QString fragment;
+    };
+    const QList<Case> cases{{"no such theme", "nosuch", {}, "nosuch"},
+                            {"a theme without a background", "broken", {}, "background"},
+                            {"a slug that climbs out of the theme folders", "../escape", {}, "escape"},
+                            {"a colour that is not hex", QString(), {"#111111", "red"}, "red"},
+                            {"six colours", QString(), colours6, "5"}};
+    for (const Case &c : cases) {
+        rig.remake();
+        BatchSettings settings = BatchRig::settings();
+        settings.generic = true;
+        settings.target = QSize(1920, 1080);
+        settings.paletteTheme = c.theme;
+        settings.paletteColors = c.colours;
+        QString message;
+        QCOMPARE(int(rig.prepare(settings, &message)), int(Batch::Outcome::UnknownPalette));
+        QVERIFY2(message.contains(c.fragment), qPrintable(QString(c.name) + ": " + message));
+        QVERIFY2(!rig.batch->isRunning(), c.name);
+    }
+    // Nothing was made for any of them.
+    QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 0);
+}
+
+// The sidecar says what the image was made for, and not a theme it was never made for.
+void LimgenTests::batch_genericRecordsTheTargetAndThePaletteAndNotTheTheme() {
+    BatchRig rig;
+    stockTheme(rig.sb.fixture); // the current theme, whose colours must not appear
+    QVERIFY(rig.sb.fixture.addTheme("other", tomlWith("#fafafa", "#111111", "#ff0000")));
+    auto run = [&](const QString &theme, const QStringList &colours) -> bool {
+        rig.remake();
+        BatchSettings settings = BatchRig::settings();
+        settings.generic = true;
+        settings.subject = "a red fox";
+        settings.target = QSize(1080, 1920);
+        settings.count = 2;
+        settings.seed = 40u;
+        settings.paletteTheme = theme;
+        settings.paletteColors = colours;
+        QString message;
+        if (rig.prepare(settings, &message) != Batch::Outcome::Ok) {
+            qWarning("prepare: %s", qPrintable(message));
+            return false;
+        }
+        if (rig.batch->target() != QSize(1080, 1920) ||
+            QSize(rig.batch->request().width, rig.batch->request().height) != QSize(768, 1344))
+            return false;
+        rig.batch->start();
+        for (int i = 0; i < 600 && !rig.run.over(); ++i)
+            QTest::qWait(50);
+        return rig.run.finished && rig.run.entries.size() == 2;
+    };
+    const QString currentWords = Palette::fromToml(stockToml).words.join(", ");
+
+    // No palette: the prompt as typed; the current theme plays no part.
+    QVERIFY(run(QString(), {}));
+    QCOMPARE(rig.batch->request().prompt, QString("a red fox"));
+    for (const LibraryEntry &entry : rig.run.entries) {
+        const QJsonObject sidecar = entry.metadata;
+        QCOMPARE(QImageReader(entry.image).size(), QSize(768, 1344));
+        QVERIFY(sidecar["theme"].isNull());
+        QVERIFY(sidecar["style"].isNull());
+        QCOMPARE(sizeOf(sidecar["generic"].toObject()["target"]), QSize(1080, 1920));
+        QVERIFY(sidecar["generic"].toObject()["palette"].isNull());
+        QCOMPARE(sizeOf(sidecar["size"]), QSize(768, 1344));
+        QCOMPARE(sidecar["prompt"].toString(), QString("a red fox"));
+    }
+    QCOMPARE(rig.run.entries.at(1).metadata["seed"].toDouble(), 41.0);
+
+    // A theme's palette, chosen by name: its words, recorded as a palette and not as the draft's theme.
+    QVERIFY(run("other", {}));
+    const Palette other = Palette::fromToml(tomlWith("#fafafa", "#111111", "#ff0000"));
+    QVERIFY(rig.batch->request().prompt.startsWith("a red fox, " + other.words.join(", ") + " colour palette"));
+    QVERIFY(!rig.batch->request().prompt.contains(currentWords));
+    QJsonObject sidecar = rig.run.entries.at(0).metadata;
+    QVERIFY(sidecar["theme"].isNull());
+    QCOMPARE(sidecar["generic"].toObject()["palette"].toObject()["theme"].toString(), QString("other"));
+    QCOMPARE(sidecar["generic"].toObject()["palette"].toObject()["colors"].toObject()["background"].toString(),
+             QString("#fafafa"));
+
+    // Even the current theme's own palette, when asked for by name, is only a palette.
+    QVERIFY(run("night-city", {}));
+    sidecar = rig.run.entries.at(0).metadata;
+    QVERIFY(sidecar["theme"].isNull());
+    QCOMPARE(sidecar["generic"].toObject()["palette"].toObject()["theme"].toString(), QString("night-city"));
+
+    // Colours chosen by hand have no theme at all.
+    QVERIFY(run(QString(), {"#1A1B26", "#7aa2f7"}));
+    sidecar = rig.run.entries.at(0).metadata;
+    QVERIFY(sidecar["theme"].isNull());
+    const QJsonObject palette = sidecar["generic"].toObject()["palette"].toObject();
+    QVERIFY(palette["theme"].isNull());
+    QCOMPARE(palette["colors"].toObject()["colour 1"].toString(), QString("#1a1b26"));
+    QCOMPARE(palette["colors"].toObject()["colour 2"].toString(), QString("#7aa2f7"));
+    QVERIFY(rig.batch->request().prompt.contains(Palette::describe("#7aa2f7") + " colour palette"));
+
+    // The control: a theme batch of the same subject does carry the current theme's words.
+    rig.remake();
+    BatchSettings plain = BatchRig::settings();
+    plain.subject = "a red fox";
+    QCOMPARE(int(rig.prepare(plain)), int(Batch::Outcome::Ok));
+    QVERIFY(rig.batch->request().prompt.contains(currentWords));
+    QCOMPARE(rig.batch->target(), QSize());
+}
+
+void LimgenTests::batch_genericWithoutATargetUsesTheLargestMonitor() {
+    BatchRig rig;
+    BatchSettings settings = BatchRig::settings();
+    settings.generic = true;
+    settings.count = 1;
+    // No hyprctl in these paths: the fallback size, with drafts of its shape.
+    QCOMPARE(int(rig.prepare(settings)), int(Batch::Outcome::Ok));
+    QCOMPARE(rig.batch->target(), QSize(2560, 1440));
+    QCOMPARE(QSize(rig.batch->request().width, rig.batch->request().height), QSize(1344, 768));
+    // With a monitor: its size.
+    rig.remake();
+    OmarchyPaths paths = rig.sb.fixture.paths();
+    QVERIFY(writeScript(rig.sb.fixture.root.path() + "/wide-hyprctl",
+                        "echo '[{\"name\":\"W\",\"width\":3440,\"height\":1440,\"transform\":0}]'\n"));
+    paths.hyprctl = rig.sb.fixture.root.path() + "/wide-hyprctl";
+    rig.batch = std::make_unique<Batch>(rig.catalogue, paths, fakeEngine);
+    QCOMPARE(int(rig.prepare(settings)), int(Batch::Outcome::Ok));
+    QCOMPARE(rig.batch->target(), QSize(3440, 1440));
+    QCOMPARE(QSize(rig.batch->request().width, rig.batch->request().height), QSize(1600, 640));
+}
+
+void LimgenTests::keeper_withoutInstallingStaysInTheLibraryAtTheGenericTarget() {
+    KeepRig rig;
+    rig.sb.fixture.addTheme("other", tomlWith("#fafafa", "#111111", "#ff0000"));
+    Library library(rig.sb.library());
+    DraftRecord record = fullRecord();
+    record.themeSlug.clear();
+    record.themeMode.clear();
+    record.palette = QJsonObject();
+    record.style.clear();
+    record.generic = QJsonObject{{"target", QJsonArray{256, 192}}, {"palette", QJsonValue()}};
+    record.width = 64;
+    record.height = 48;
+    const LibraryEntry generic = library.addDraft(makePng(rig.sb.fixture.root.path() + "/g.png", 64, 48), record,
+                                                  QDateTime::currentDateTimeUtc());
+    QVERIFY(generic.isValid());
+
+    KeepSettings settings;
+    settings.draftId = generic.id;
+    settings.install = false;
+    settings.colorPass = 0.3;           // a colour pass has no theme to follow
+    settings.theme = "night-city";      // and no theme to go into
+    rig.remake();
+    KEEP_AND_WAIT(rig, settings);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    const KeepResult first = rig.run.result;
+    QCOMPARE(first.installed, QString());
+    QCOMPARE(first.theme, QString());
+    QVERIFY(!first.alreadyKept);
+    // The size is the generic target's, not the 320x180 monitor's.
+    QCOMPARE(QImageReader(first.final.image).size(), QSize(256, 192));
+    const QJsonObject finish = first.final.metadata["finish"].toObject();
+    QVERIFY(finish["theme"].isNull());
+    QVERIFY(finish["colorTarget"].isNull());
+    QCOMPARE(finish["colorPass"].toDouble(), 0.0);
+    QCOMPARE(sizeOf(finish["size"]), QSize(256, 192));
+    QCOMPARE(first.final.metadata["kind"].toString(), QString("final"));
+    QVERIFY(first.final.metadata["theme"].isNull());
+    // Nothing went anywhere else.
+    QCOMPARE(filesUnder(rig.sb.fixture.backgrounds), QStringList());
+    QVERIFY(!QFileInfo::exists(rig.sb.fixture.pictures()));
+    QCOMPARE(rig.sb.fixture.omarchyCalls(), QStringList());
+    QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+
+    // Again: a library image is not looked up in a theme folder, so it is made again.
+    rig.remake();
+    KEEP_AND_WAIT(rig, settings);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QVERIFY(!rig.run.result.alreadyKept);
+    QVERIFY(rig.run.result.final.id != first.final.id);
+    QCOMPARE(filesUnder(rig.sb.fixture.backgrounds), QStringList());
+
+    // An explicit size wins over the target.
+    settings.size = QSize(128, 96);
+    rig.remake();
+    KEEP_AND_WAIT(rig, settings);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(QImageReader(rig.run.result.final.image).size(), QSize(128, 96));
+
+    // A theme that does not exist is no problem when nothing is installed, and a refusal when it is.
+    settings = KeepSettings();
+    settings.draftId = generic.id;
+    settings.theme = "nosuch";
+    settings.install = false;
+    rig.remake();
+    QCOMPARE(int(rig.prepare(settings)), int(Keeper::Outcome::Ok));
+    settings.install = true;
+    rig.remake();
+    QCOMPARE(int(rig.prepare(settings)), int(Keeper::Outcome::UnknownTheme));
+}
+
+void LimgenTests::keeper_withoutInstallingAThemeDraftTakesTheMonitorSize() {
+    KeepRig rig;
+    KeepSettings settings;
+    settings.draftId = rig.draft.id; // made for night-city, with no generic target
+    settings.install = false;
+    KEEP_AND_WAIT(rig, settings);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(QImageReader(rig.run.result.final.image).size(), QSize(320, 180));
+    QCOMPARE(rig.run.result.installed, QString());
+    QCOMPARE(rig.keptFiles(), QStringList());
+    QVERIFY(!QFileInfo::exists(rig.keepFolder()));
+    QVERIFY(rig.run.result.final.metadata["finish"].toObject()["theme"].isNull());
+}
+
+
+namespace {
+
+// The small test catalogue (models "m", "m2", "m3", the upscaler), with its
+// models made 512x512 so previews have a shape worth testing (704x384 for
+// 16:9), a Backend on the fake engine, and a Studio on that. The theme
+// "night-city" is current and "other" is there too; the monitor is 1280x720.
+// Everything is in the Sandbox's temp folders.
+struct StudioRig : KeepBackendRig {
+    std::unique_ptr<Studio> studio;
+
+    explicit StudioRig(int native = 512, int steps = 1) : KeepBackendRig(true, steps) {
+        QJsonObject root = QJsonDocument::fromJson(world.json).object();
+        QJsonArray models = root["models"].toArray();
+        for (int i = 0; i < models.size(); ++i) {
+            QJsonObject model = models[i].toObject();
+            model["native"] = QJsonArray{native, native};
+            models[i] = model;
+        }
+        root["models"] = models;
+        writeFile(sb.fixture.root.path() + "/catalogue.json", QJsonDocument(root).toJson());
+    }
+    ~StudioRig() {
+        if (studio) {
+            studio->stop();
+            for (int i = 0; i < 400 && studio->busy(); ++i)
+                QTest::qWait(25);
+            studio.reset();
+        }
+    }
+    // With width 0 there is no monitor to measure.
+    void createStudio(const QString &engine = fakeEngine, int width = 1280, int height = 720) {
+        studio.reset();
+        create(engine);
+        // Written after the Backend, whose paths() call writes the 320x180 default.
+        if (width > 0)
+            sb.fixture.hyprctl(width, height);
+        else
+            QFile::remove(sb.fixture.root.path() + "/hyprctl");
+        studio = std::make_unique<Studio>(backend.get());
+    }
+    QVariantMap preview(int index) const { return studio->drafts().value(index).toMap(); }
+    // Makes a batch of previews and waits; true when every one is done.
+    bool makePreviews(const QString &prompt = "a red fox") {
+        studio->setPrompt(prompt);
+        if (!studio->canGenerate())
+            return false;
+        studio->generate();
+        for (int i = 0; i < 1200 && studio->running(); ++i)
+            QTest::qWait(25);
+        if (studio->running() || studio->drafts().size() != studio->count())
+            return false;
+        for (int i = 0; i < studio->drafts().size(); ++i)
+            if (preview(i)["state"].toString() != "done")
+                return false;
+        return true;
+    }
+    // Upscales a preview and waits; true when a result came.
+    bool upscaleAndWait(int index) {
+        studio->upscale(index);
+        for (int i = 0; i < 1200 && studio->upscaling(); ++i)
+            QTest::qWait(25);
+        return !studio->upscaling() && !studio->result().isEmpty();
+    }
+    Library library() const { return Library(sb.library()); }
+    QJsonObject sidecar(const QString &id) const { return library().find(id).metadata; }
+    int finals() const {
+        int count = 0;
+        for (const QString &file : filesUnder(sb.library()))
+            if (file.endsWith(".json") && QJsonDocument::fromJson(readFile(file)).object()["kind"] == "final")
+                ++count;
+        return count;
+    }
+    // The wrappers around the fake engine that Backend::engines() lists, each
+    // logging its name to engines.log.
+    QString engineDir() const { return sb.fixture.root.path() + "/engines"; }
+    QString engineLog() const { return sb.fixture.root.path() + "/engines.log"; }
+};
+
+// Every file under a folder with its contents, to compare before and after.
+QMap<QString, QByteArray> treeOf(const QString &directory) {
+    QMap<QString, QByteArray> tree;
+    for (const QString &file : filesUnder(directory))
+        tree.insert(file, readFile(file));
+    return tree;
+}
+
+} // namespace
+
+void LimgenTests::backend_enginesListTheBuildsAndSelectingOneIsSavedAndChecked() {
+    BackendRig rig;
+    EnvGuard dirGuard({"LIMGEN_ENGINE_DIR"});
+    const QString dir = rig.sb.fixture.root.path() + "/engines";
+    const QString log = rig.sb.fixture.root.path() + "/which.log";
+    putEngine(dir, "vulkan", false, log);
+    putEngine(dir, "cuda", true, log);
+    qputenv("LIMGEN_ENGINE_DIR", dir.toUtf8());
+    qunsetenv("LIMGEN_SD_CLI");
+    rig.create(QString());
+    WAIT_FOR_READY(rig);
+
+    const QVariantList engines = rig.backend->engines();
+    QCOMPARE(engines.size(), 2);
+    QCOMPARE(engines.at(0).toMap()["backend"].toString(), QString("vulkan"));
+    QCOMPARE(engines.at(0).toMap()["name"].toString(), QString("Vulkan"));
+    QCOMPARE(engines.at(1).toMap()["backend"].toString(), QString("cuda"));
+    QCOMPARE(engines.at(1).toMap()["name"].toString(), QString("CUDA"));
+    QCOMPARE(rig.backend->engineIndex(), 0);
+    QCOMPARE(rig.backend->engineProgram(), dir + "/vulkan/sd-cli");
+    QVERIFY(!readFile(log).contains("cuda")); // only the chosen build was probed
+
+    rig.backend->selectEngine(1);
+    QCOMPARE(rig.backend->engineIndex(), 1);
+    QCOMPARE(rig.backend->engineProgram(), dir + "/cuda/bin/sd-cli");
+    QCOMPARE(Config(rig.sb.configFile()).engine(), QString("cuda"));
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(log).contains("cuda --version"), 10000); // checked again, with the new build
+    WAIT_FOR_ENGINE(rig);
+    QVERIFY(rig.backend->engineReady());
+
+    // The same one again: nothing to check, nothing to write.
+    const int probes = readFile(log).count("cuda --version");
+    QVERIFY(QFile::remove(rig.sb.configFile()));
+    rig.backend->selectEngine(1);
+    QTest::qWait(300);
+    QCOMPARE(readFile(log).count("cuda --version"), probes);
+    QVERIFY(!QFileInfo::exists(rig.sb.configFile()));
+    // An index that is not there changes nothing.
+    rig.backend->selectEngine(-1);
+    rig.backend->selectEngine(2);
+    QCOMPARE(rig.backend->engineIndex(), 1);
+
+    // The next start of the window uses the saved choice.
+    rig.backend->selectEngine(0);
+    QCOMPARE(Config(rig.sb.configFile()).engine(), QString("vulkan"));
+    WAIT_FOR_ENGINE(rig); // a choice is refused while the last one is still being checked
+    rig.backend->selectEngine(1);
+    QCOMPARE(Config(rig.sb.configFile()).engine(), QString("cuda"));
+    rig.create(QString());
+    QCOMPARE(rig.backend->engineIndex(), 1);
+    QCOMPARE(rig.backend->engineProgram(), dir + "/cuda/bin/sd-cli");
+}
+
+void LimgenTests::backend_aFixedEngineProgramIsTheOnlyBuildAndHasAName() {
+    BackendRig rig;
+    EnvGuard dirGuard({"LIMGEN_ENGINE_DIR"});
+    // Installed builds exist, but the program given (as the tests and LIMGEN_SD_CLI do) is the only one offered.
+    putEngine(rig.sb.fixture.root.path() + "/engines", "cuda", false);
+    qputenv("LIMGEN_ENGINE_DIR", (rig.sb.fixture.root.path() + "/engines").toUtf8());
+    rig.create(fakeEngine);
+    WAIT_FOR_READY(rig);
+    const QVariantList engines = rig.backend->engines();
+    QCOMPARE(engines.size(), 1);
+    QCOMPARE(engines.at(0).toMap()["backend"].toString(), QString());
+    // Its backend is only known from the probe: the fake engine lists a Vulkan device.
+    QCOMPARE(engines.at(0).toMap()["name"].toString(), QString("Vulkan"));
+    QCOMPARE(rig.backend->engineIndex(), 0);
+    QCOMPARE(rig.backend->engineProgram(), fakeEngine);
+    rig.backend->selectEngine(0);
+    rig.backend->selectEngine(1);
+    QCOMPARE(rig.backend->engineIndex(), 0);
+    QVERIFY(!QFileInfo::exists(rig.sb.configFile()));
+}
+
+void LimgenTests::backend_selectingAnEngineIsRefusedWhileWorkRuns() {
+    BackendRig rig;
+    EnvGuard dirGuard({"LIMGEN_ENGINE_DIR"});
+    const QString dir = rig.sb.fixture.root.path() + "/engines";
+    putEngine(dir, "vulkan", false);
+    putEngine(dir, "cuda", false);
+    qputenv("LIMGEN_ENGINE_DIR", dir.toUtf8());
+    qunsetenv("LIMGEN_SD_CLI");
+    qputenv("FAKE_SD_CLI_STEP_SECONDS", "0.3");
+    rig.create(QString());
+    WAIT_FOR_READY(rig);
+
+    rig.backend->setSubject("oil rig");
+    rig.backend->generate();
+    QVERIFY(rig.backend->running());
+    rig.backend->selectEngine(1);
+    QCOMPARE(rig.backend->engineIndex(), 0);
+    QCOMPARE(Config(rig.sb.configFile()).engine(), QString());
+    rig.backend->stopAll();
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running(), 15000);
+
+    // The Generic screen's work counts as work.
+    rig.backend->setStudioBusy(true);
+    rig.backend->selectEngine(1);
+    QCOMPARE(rig.backend->engineIndex(), 0);
+    QCOMPARE(Config(rig.sb.configFile()).engine(), QString());
+    rig.backend->setStudioBusy(false);
+    rig.backend->selectEngine(1);
+    QCOMPARE(rig.backend->engineIndex(), 1);
+    QCOMPARE(Config(rig.sb.configFile()).engine(), QString("cuda"));
+}
+
+void LimgenTests::backend_studioBusyBlocksThemeBatchesAndKeepsWaitForItToLetGo() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    const QString firstId = rig.draft(0)["id"].toString();
+    QVERIFY(rig.backend->canGenerate()); // so the next check can fail
+    QVERIFY(!rig.backend->busy());
+
+    rig.backend->setStudioBusy(true);
+    QVERIFY(rig.backend->busy());
+    QVERIFY(!rig.backend->canGenerate());
+    QVERIFY(!rig.backend->canRerun());
+    rig.backend->generate();
+    rig.backend->rerun();
+    QTest::qWait(300);
+    QVERIFY(!rig.backend->running());
+    QCOMPARE(rig.draft(0)["id"].toString(), firstId); // the drafts on screen were not replaced
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 1);
+
+    // A keep asked for meanwhile is accepted and waits.
+    rig.backend->keep(0);
+    QVERIFY(rig.draft(0)["keeping"].toBool());
+    QTest::qWait(500);
+    QCOMPARE(rig.upscalesDone(), 0);
+    QVERIFY(!rig.draft(0)["kept"].toBool());
+    QVERIFY(rig.draft(0)["keeping"].toBool());
+    QCOMPARE(filesUnder(rig.sb.fixture.backgrounds), QStringList());
+
+    // It starts when the other screen lets go, and then the batch button is back.
+    rig.backend->setStudioBusy(false);
+    WAIT_KEPT(rig, 0);
+    QCOMPARE(rig.upscalesDone(), 1);
+    QCOMPARE(filesUnder(rig.sb.fixture.backgrounds), QStringList{rig.nameFor(0)});
+    WAIT_NOT_KEEPING(rig);
+    QVERIFY(!rig.backend->busy());
+    QVERIFY(rig.backend->canGenerate());
+}
+
+void LimgenTests::studio_waitsWhileAThemeBatchOrKeepUsesTheGpu() {
+    StudioRig rig;
+    rig.createStudio();
+    QVERIFY(rig.makePreviews());
+    const int imagesBefore = imageCalls(rig.sb.fakeLog()).size();
+
+    // A theme batch is running.
+    rig.studio->setPrompt("a red fox");
+    QVERIFY(rig.studio->canGenerate());
+    rig.backend->setSubject("oil rig");
+    rig.backend->generate();
+    QVERIFY(rig.backend->gpuBusy());
+    QVERIFY(!rig.studio->canGenerate());
+    rig.studio->generate();
+    rig.studio->upscale(0);
+    QVERIFY(!rig.studio->running());
+    QVERIFY(!rig.studio->upscaling());
+    QVERIFY(rig.studio->result().isEmpty());
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running(), 30000);
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), imagesBefore + 1); // the theme batch only
+    QCOMPARE(rig.upscalesDone(), 0);
+    QCOMPARE(rig.finals(), 0);
+
+    // A theme keep is running (or queued): the upscale does not start beside it.
+    rig.backend->keep(0);
+    QVERIFY(rig.backend->keeping());
+    QVERIFY(!rig.studio->canGenerate());
+    rig.studio->upscale(0);
+    QVERIFY(!rig.studio->upscaling());
+    WAIT_KEPT(rig, 0);
+    WAIT_NOT_KEEPING(rig);
+    QCOMPARE(rig.upscalesDone(), 1); // the keep's own
+    QVERIFY(rig.studio->result().isEmpty());
+
+    // When it is done, the Generic screen works again.
+    QVERIFY(rig.studio->canGenerate());
+    QVERIFY(rig.upscaleAndWait(0));
+    QCOMPARE(rig.upscalesDone(), 2);
+}
+
+void LimgenTests::studio_holdsTheGpuWhileItWorksAndLetsGoAfter() {
+    StudioRig rig;
+    rig.createStudio();
+    rig.backend->setSubject("oil rig");
+    QVERIFY(rig.backend->canGenerate());
+    rig.studio->setPrompt("a red fox");
+    rig.studio->generate();
+    QVERIFY(rig.studio->running());
+    QVERIFY(rig.backend->busy()); // quitting would stop it
+    QVERIFY(!rig.backend->canGenerate());
+    rig.backend->generate();
+    rig.backend->rerun();
+    QVERIFY(!rig.backend->running());
+    QVERIFY(rig.backend->drafts().isEmpty());
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->running(), 30000);
+    QVERIFY(!rig.backend->busy());
+    QVERIFY(rig.backend->canGenerate());
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 1); // the Generic batch; none from the theme screen
+
+    rig.studio->upscale(0);
+    QVERIFY(rig.studio->upscaling());
+    QVERIFY(rig.backend->busy());
+    QVERIFY(!rig.backend->canGenerate());
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->upscaling(), 30000);
+    QVERIFY(!rig.backend->busy());
+    QVERIFY(rig.backend->canGenerate());
+
+    // Closing the screen mid-batch does not leave the GPU held.
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.studio->generate();
+    QVERIFY(rig.studio->running());
+    QVERIFY(rig.backend->busy());
+    rig.studio.reset();
+    QVERIFY(!rig.backend->busy());
+    QVERIFY(!rig.backend->gpuBusy());
+}
+
+// Prevents a stale second copy of config.json from undoing the other screen's choices.
+void LimgenTests::studio_savingItsSettingsKeepsTheModelAndEngineTheBackendSaved() {
+    StudioRig rig;
+    EnvGuard dirGuard({"LIMGEN_ENGINE_DIR"});
+    putEngine(rig.engineDir(), "vulkan", false);
+    putEngine(rig.engineDir(), "cuda", false);
+    qputenv("LIMGEN_ENGINE_DIR", rig.engineDir().toUtf8());
+    qunsetenv("LIMGEN_SD_CLI");
+    for (const char *key : {"d", "e"}) // the files of model m2
+        QVERIFY(makeSparse(Catalogue::path(rig.world.file(key), rig.sb.fixture.models), rig.world.file(key).bytes));
+    rig.createStudio(QString());
+    QVERIFY(rig.backend->engineReady());
+
+    // The Studio exists; now the window's other half saves a model and an engine.
+    rig.backend->selectModel("m2");
+    QCOMPARE(rig.backend->modelId(), QString("m2"));
+    rig.backend->selectEngine(1);
+    QCOMPARE(rig.backend->engineIndex(), 1);
+    // And the Studio saves its own settings.
+    rig.studio->setGridIndex(2);
+    QCOMPARE(rig.studio->count(), 6);
+    Config saved(rig.sb.configFile());
+    QCOMPARE(saved.modelId(), QString("m2"));
+    QCOMPARE(saved.engine(), QString("cuda"));
+    QCOMPARE(saved.genericCount(), 6);
+
+    // The other way round: the Studio saved first, then the Backend saves.
+    rig.studio->addColor("#336699");
+    rig.studio->setSizeIndex(rig.studio->sizes().size() - 1);
+    rig.studio->setCustomWidth(1500);
+    rig.backend->selectModel("m");
+    saved = Config(rig.sb.configFile());
+    QCOMPARE(saved.modelId(), QString("m"));
+    QCOMPARE(saved.engine(), QString("cuda"));
+    QCOMPARE(saved.genericCount(), 6);
+    QCOMPARE(saved.genericPalette(), QString("custom"));
+    QCOMPARE(saved.genericColors(), QStringList{"#336699"});
+    QCOMPARE(saved.genericSize().width(), 1500);
+    // The style, saved by the Backend too, survives the Studio's next save.
+    const int style = (rig.backend->styleIndex() + 1) % Prompt::styleIds().size();
+    rig.backend->setStyleIndex(style);
+    rig.studio->setGridIndex(0);
+    saved = Config(rig.sb.configFile());
+    QCOMPARE(saved.styleId(), Prompt::styleIds().at(style));
+    QCOMPARE(saved.genericCount(), 2);
+}
+
+void LimgenTests::studio_restoresItsChoicesFromTheSettingsFile() {
+    StudioRig rig;
+    rig.createStudio();
+    // Chosen: a preset size, 9 previews, a theme palette.
+    rig.studio->setSizeIndex(2); // 2560x1440
+    rig.studio->setGridIndex(3);
+    rig.studio->setPaletteIndex(2);
+    QCOMPARE(rig.studio->target(), QSize(2560, 1440));
+    const QJsonObject json = QJsonDocument::fromJson(readFile(rig.sb.configFile())).object()["generic"].toObject();
+    QCOMPARE(sizeOf(json["size"]), QSize(2560, 1440));
+    QCOMPARE(json["count"].toInt(), 9);
+    QCOMPARE(json["palette"].toString(), QString("other"));
+    rig.createStudio(); // a new window, a new Backend reading the file
+    QCOMPARE(rig.studio->sizeIndex(), 2);
+    QVERIFY(!rig.studio->customSize());
+    QCOMPARE(rig.studio->count(), 9);
+    QCOMPARE(rig.studio->gridIndex(), 3);
+    QCOMPARE(rig.studio->palettes().at(rig.studio->paletteIndex()).toMap()["id"].toString(), QString("other"));
+
+    // A size that is no preset comes back as the custom one.
+    rig.studio->setSizeIndex(rig.studio->sizes().size() - 1);
+    rig.studio->setCustomWidth(1500);
+    rig.studio->setCustomHeight(900);
+    rig.createStudio();
+    QVERIFY(rig.studio->customSize());
+    QCOMPARE(rig.studio->target(), QSize(1500, 900));
+    // The monitor's entry is saved as no size, so it follows the monitor.
+    rig.studio->setSizeIndex(0);
+    QVERIFY(QJsonDocument::fromJson(readFile(rig.sb.configFile())).object()["generic"].toObject()["size"].isNull());
+    QCOMPARE(Config(rig.sb.configFile()).genericSize(), QSize());
+    rig.createStudio(fakeEngine, 1920, 1080);
+    QCOMPARE(rig.studio->sizeIndex(), 0);
+    QCOMPARE(rig.studio->target(), QSize(1920, 1080));
+    // A theme that has gone since leaves no palette chosen.
+    rig.studio->setPaletteIndex(2);
+    QVERIFY(QDir(rig.sb.fixture.themes + "/other").removeRecursively());
+    rig.studio->reload();
+    QCOMPARE(rig.studio->paletteIndex(), 0);
+    QCOMPARE(rig.studio->paletteWords(), QString());
+}
+
+void LimgenTests::studio_sizesStartWithTheMonitorAndEndWithCustom() {
+    StudioRig rig;
+    rig.createStudio();
+    QVariantList sizes = rig.studio->sizes();
+    QStringList kinds;
+    for (const QVariant &size : sizes)
+        kinds << size.toMap()["kind"].toString();
+    QCOMPARE(kinds, QStringList({"monitor", "preset", "preset", "preset", "wide", "portrait", "square", "custom"}));
+    QCOMPARE(QSize(sizes.at(0).toMap()["width"].toInt(), sizes.at(0).toMap()["height"].toInt()), QSize(1280, 720));
+    QCOMPARE(rig.studio->sizeIndex(), 0);
+    QCOMPARE(rig.studio->target(), QSize(1280, 720));
+    QVERIFY(!rig.studio->customSize());
+    // Without a monitor: a fallback, said to be one.
+    rig.createStudio(fakeEngine, 0);
+    sizes = rig.studio->sizes();
+    QCOMPARE(sizes.at(0).toMap()["kind"].toString(), QString("fallback"));
+    QCOMPARE(rig.studio->target(), QSize(2560, 1440));
+    // The custom entry is last, and its numbers are bounded.
+    QSignalSpy spy(rig.studio.get(), &Studio::settingsChanged);
+    rig.studio->setSizeIndex(99);
+    rig.studio->setSizeIndex(-1);
+    QCOMPARE(spy.count(), 0);
+    QCOMPARE(rig.studio->sizeIndex(), 0);
+    rig.studio->setSizeIndex(sizes.size() - 1);
+    QVERIFY(rig.studio->customSize());
+    rig.studio->setCustomWidth(0);
+    QCOMPARE(rig.studio->customWidth(), 1);
+    rig.studio->setCustomWidth(99999);
+    QCOMPARE(rig.studio->customWidth(), 16384);
+    rig.studio->setCustomHeight(-5);
+    QCOMPARE(rig.studio->customHeight(), 1);
+    rig.studio->setCustomWidth(1600);
+    rig.studio->setCustomHeight(900);
+    QCOMPARE(rig.studio->target(), QSize(1600, 900));
+    // The preview counts are 2, 4, 6 and 9, and nothing else.
+    QCOMPARE(rig.studio->gridNames(), QStringList({"2x1", "2x2", "2x3", "3x3"}));
+    QCOMPARE(rig.studio->count(), 4);
+    QCOMPARE(rig.studio->gridIndex(), 1);
+    for (int i = 0; i < 4; ++i) {
+        rig.studio->setGridIndex(i);
+        QCOMPARE(rig.studio->count(), Studio::counts().at(i));
+    }
+    rig.studio->setGridIndex(7);
+    rig.studio->setGridIndex(-1);
+    QCOMPARE(rig.studio->count(), 9);
+}
+
+void LimgenTests::studio_aSizeThatCannotBeMadeIsReportedAndMakesNothing() {
+    StudioRig rig;
+    rig.createStudio();
+    // 16:9 at a 512x512 model: previews of 704x384, so up to 2816x1536.
+    QCOMPARE(QSize(rig.studio->draftWidth(), rig.studio->draftHeight()), QSize(704, 384));
+    QCOMPARE(rig.studio->sizeProblem(), QString());
+    rig.studio->setPrompt("a red fox");
+    QVERIFY(rig.studio->canGenerate());
+    rig.studio->setSizeIndex(rig.studio->sizes().size() - 1);
+    const QList<QPair<QSize, bool>> cases{{QSize(2816, 1536), true}, {QSize(2817, 1536), false},
+                                          {QSize(2816, 1537), false}, {QSize(255, 900), false},
+                                          {QSize(4000, 900), false},  {QSize(900, 4000), false},
+                                          {QSize(256, 256), true}};
+    for (const auto &c : cases) {
+        rig.studio->setCustomWidth(c.first.width());
+        rig.studio->setCustomHeight(c.first.height());
+        const QString what = QString("%1x%2: %3").arg(c.first.width()).arg(c.first.height()).arg(rig.studio->sizeProblem());
+        QCOMPARE(rig.studio->sizeProblem().isEmpty(), c.second);
+        QVERIFY2(rig.studio->canGenerate() == c.second, qPrintable(what));
+    }
+    // A target that cannot be made starts nothing, whatever calls generate().
+    rig.studio->setCustomWidth(255);
+    rig.studio->setCustomHeight(900);
+    rig.studio->generate();
+    QVERIFY(!rig.studio->running());
+    QVERIFY(rig.studio->drafts().isEmpty());
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 0);
+    QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+}
+
+void LimgenTests::studio_cannotGenerateWithoutAPromptAModelOrAnEngine() {
+    StudioRig rig;
+    rig.createStudio();
+    QVERIFY(!rig.studio->canGenerate()); // no prompt yet
+    rig.studio->setPrompt("   \n ");
+    QVERIFY(!rig.studio->canGenerate());
+    rig.studio->generate();
+    QVERIFY(!rig.studio->running());
+    rig.studio->setPrompt("a red fox");
+    QVERIFY(rig.studio->canGenerate());
+
+    // The model's files are gone.
+    QVERIFY(QFile::remove(Catalogue::path(rig.world.file("a"), rig.sb.fixture.models)));
+    rig.createStudio();
+    rig.studio->setPrompt("a red fox");
+    QVERIFY(!rig.studio->canGenerate());
+    rig.studio->generate();
+    QVERIFY(!rig.studio->running());
+    QVERIFY(rig.studio->drafts().isEmpty());
+    // The engine is not there.
+    QVERIFY(makeSparse(Catalogue::path(rig.world.file("a"), rig.sb.fixture.models), rig.world.file("a").bytes));
+    rig.createStudio("/nonexistent/sd-cli");
+    rig.studio->setPrompt("a red fox");
+    QVERIFY(!rig.studio->canGenerate());
+    rig.studio->generate();
+    QVERIFY(!rig.studio->running());
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 0);
+    QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+}
+
+void LimgenTests::studio_palettesAreNoneThenThemesWithColorsThenCustom() {
+    StudioRig rig;
+    QVERIFY(writeFile(rig.sb.fixture.themes + "/no-colours/readme.txt", "nothing"));
+    QVERIFY(writeFile(rig.sb.fixture.themes + "/broken/colors.toml", "accent = \"#7aa2f7\"\n"));
+    rig.createStudio();
+    QStringList ids;
+    for (const QVariant &palette : rig.studio->palettes())
+        ids << palette.toMap()["id"].toString();
+    QCOMPARE(ids, QStringList({"", "night-city", "other", "custom"})); // the current theme is among them
+    QCOMPARE(rig.studio->paletteIndex(), 0);
+    QVERIFY(!rig.studio->customPalette());
+    QCOMPARE(rig.studio->paletteWords(), QString());
+    QVERIFY(rig.studio->palettes().at(0).toMap()["swatches"].toStringList().isEmpty());
+    const QStringList swatches = rig.studio->palettes().at(1).toMap()["swatches"].toStringList();
+    QVERIFY(swatches.contains("#1a1b26"));
+    QCOMPARE(swatches.size(), Palette::fromToml(stockToml).colors.size());
+    QVERIFY(rig.studio->palettes().at(3).toMap()["swatches"].toStringList().isEmpty());
+
+    // Choosing one gives its words, for the prompt shown and the prompt made.
+    rig.studio->setPrompt("a red fox");
+    rig.studio->setPaletteIndex(2);
+    const Palette other = Palette::fromToml(tomlWith("#fafafa", "#111111", "#ff0000"));
+    QCOMPARE(rig.studio->paletteWords(), other.words.join(", "));
+    QCOMPARE(rig.studio->fullPrompt(), "a red fox, " + other.words.join(", ") + " colour palette, " + other.mood);
+    rig.studio->setPaletteIndex(99);
+    QCOMPARE(rig.studio->paletteIndex(), 2);
+    rig.studio->setPaletteIndex(0);
+    QCOMPARE(rig.studio->fullPrompt(), QString("a red fox"));
+
+    // A new theme folder shows up when Omarchy says something changed.
+    QVERIFY(rig.sb.fixture.addTheme("fresh", tomlWith("#001122", "#ddeeff", "#33cc99")));
+    rig.studio->reload();
+    QCOMPARE(rig.studio->palettes().size(), 5);
+    ids.clear();
+    for (const QVariant &palette : rig.studio->palettes())
+        ids << palette.toMap()["id"].toString();
+    QCOMPARE(ids, QStringList({"", "fresh", "night-city", "other", "custom"}));
+}
+
+void LimgenTests::studio_customColorsAreNormalisedLimitedAndSaved() {
+    StudioRig rig;
+    rig.createStudio();
+    QCOMPARE(rig.studio->maxColors(), 5);
+    QSignalSpy changed(rig.studio.get(), &Studio::settingsChanged);
+    rig.studio->addColor("#ABCDEF");
+    rig.studio->addColor(" #80AABBCC "); // from a colour dialog: the alpha goes
+    QCOMPARE(rig.studio->customColors().size(), 2);
+    QCOMPARE(rig.studio->customColors().at(0).toMap()["hex"].toString(), QString("#abcdef"));
+    QCOMPARE(rig.studio->customColors().at(1).toMap()["hex"].toString(), QString("#aabbcc"));
+    QCOMPARE(rig.studio->customColors().at(1).toMap()["words"].toString(), Palette::describe("#aabbcc"));
+    // Adding one chooses the custom palette.
+    QVERIFY(rig.studio->customPalette());
+    QCOMPARE(rig.studio->paletteIndex(), rig.studio->palettes().size() - 1);
+    QCOMPARE(rig.studio->palettes().last().toMap()["swatches"].toStringList(), QStringList({"#abcdef", "#aabbcc"}));
+
+    // What is not a colour is ignored.
+    const int events = changed.count();
+    for (const char *bad : {"red", "#12345", "abcdef", "", "  ", "#12345678x", "#gggggg", "#1234567"})
+        rig.studio->addColor(bad);
+    QCOMPARE(rig.studio->customColors().size(), 2);
+    QCOMPARE(changed.count(), events);
+
+    rig.studio->setColor(1, "#112233");
+    QCOMPARE(rig.studio->customColors().at(1).toMap()["hex"].toString(), QString("#112233"));
+    const int afterSet = changed.count();
+    rig.studio->setColor(1, "#112233"); // the same again
+    rig.studio->setColor(1, "nope");
+    rig.studio->setColor(5, "#445566");
+    rig.studio->setColor(-1, "#445566");
+    QCOMPARE(changed.count(), afterSet);
+    QCOMPARE(rig.studio->customColors().at(0).toMap()["hex"].toString(), QString("#abcdef"));
+
+    // Five at most.
+    for (const char *colour : {"#010101", "#020202", "#030303", "#040404"})
+        rig.studio->addColor(colour);
+    QCOMPARE(rig.studio->customColors().size(), 5);
+    QCOMPARE(rig.studio->customColors().at(4).toMap()["hex"].toString(), QString("#030303"));
+    QCOMPARE(Config(rig.sb.configFile()).genericColors(),
+             QStringList({"#abcdef", "#112233", "#010101", "#020202", "#030303"}));
+    QCOMPARE(Config(rig.sb.configFile()).genericPalette(), QString("custom"));
+
+    // Removing.
+    rig.studio->removeColor(7);
+    rig.studio->removeColor(-1);
+    QCOMPARE(rig.studio->customColors().size(), 5);
+    rig.studio->removeColor(0);
+    QCOMPARE(rig.studio->customColors().size(), 4);
+    QCOMPARE(rig.studio->customColors().at(0).toMap()["hex"].toString(), QString("#112233"));
+    QCOMPARE(Config(rig.sb.configFile()).genericColors(), QStringList({"#112233", "#010101", "#020202", "#030303"}));
+    // The words in the prompt follow the colours.
+    rig.studio->setPrompt("a fox");
+    QCOMPARE(rig.studio->fullPrompt(),
+             "a fox, " + Palette::fromColors({"#112233", "#010101", "#020202", "#030303"}).words.join(", ") +
+                 " colour palette");
+    // With none left the custom palette adds nothing.
+    for (int i = 0; i < 4; ++i)
+        rig.studio->removeColor(0);
+    QVERIFY(rig.studio->customPalette());
+    QCOMPARE(rig.studio->paletteWords(), QString());
+    QCOMPARE(rig.studio->fullPrompt(), QString("a fox"));
+}
+
+void LimgenTests::studio_makesPreviewsShapedLikeTheTargetWithNoThemeInThePrompt() {
+    StudioRig rig;
+    rig.createStudio();
+    // The current theme is night-city; the previews are of a fox in a 9:16 phone shape.
+    rig.studio->setSizeIndex(rig.studio->sizes().size() - 1);
+    rig.studio->setCustomWidth(720);
+    rig.studio->setCustomHeight(1280);
+    rig.studio->setGridIndex(0); // two
+    QCOMPARE(QSize(rig.studio->draftWidth(), rig.studio->draftHeight()), QSize(384, 704));
+    QVERIFY(rig.makePreviews("  a red   fox in snow "));
+    QCOMPARE(rig.studio->drafts().size(), 2);
+    const QString currentWords = Palette::fromToml(stockToml).words.join(", ");
+    QCOMPARE(genericPrompt(rig.sb.fakeLog()), QString("a red fox in snow"));
+    QVERIFY(!genericPrompt(rig.sb.fakeLog()).contains(currentWords));
+    const QStringList call = imageCalls(rig.sb.fakeLog()).first();
+    QCOMPARE(argumentAfter(call, "--width"), QString("384"));
+    QCOMPARE(argumentAfter(call, "--height"), QString("704"));
+    QVERIFY(call.contains("--prompt"));
+    QCOMPARE(rig.studio->status().isEmpty(), false);
+    QVERIFY(!rig.studio->statusIsError());
+    for (int i = 0; i < 2; ++i) {
+        const QVariantMap draft = rig.preview(i);
+        QCOMPARE(draft["width"].toInt(), 384);
+        QCOMPARE(draft["height"].toInt(), 704);
+        const QString path = QUrl(draft["image"].toString()).toLocalFile();
+        QCOMPARE(QImageReader(path).size(), QSize(384, 704));
+        const QJsonObject sidecar = rig.sidecar(draft["id"].toString());
+        QCOMPARE(sidecar["kind"].toString(), QString("draft"));
+        QVERIFY(sidecar["theme"].isNull());
+        QVERIFY(sidecar["style"].isNull());
+        QCOMPARE(sidecar["subject"].toString(), QString("a red   fox in snow")); // trimmed, otherwise as typed
+        QCOMPARE(sidecar["prompt"].toString(), QString("a red fox in snow"));
+        QCOMPARE(sizeOf(sidecar["generic"].toObject()["target"]), QSize(720, 1280));
+        QVERIFY(sidecar["generic"].toObject()["palette"].isNull());
+        QCOMPARE(sidecar["seed"].toDouble(), draft["seed"].toDouble());
+    }
+    QCOMPARE(rig.preview(1)["seed"].toDouble(), rig.preview(0)["seed"].toDouble() + 1);
+    // The theme's own folders are as they were.
+    QCOMPARE(filesUnder(rig.sb.fixture.backgrounds), QStringList());
+    QCOMPARE(rig.calls(), QStringList());
+}
+
+void LimgenTests::studio_aChosenPaletteGoesIntoThePromptAndTheSidecar() {
+    StudioRig rig;
+    rig.createStudio();
+    rig.studio->setGridIndex(0);
+    rig.studio->setPaletteIndex(2); // other
+    QVERIFY(rig.makePreviews());
+    const Palette other = Palette::fromToml(tomlWith("#fafafa", "#111111", "#ff0000"));
+    const QString currentWords = Palette::fromToml(stockToml).words.join(", ");
+    QString prompt = genericPrompt(rig.sb.fakeLog(), 0);
+    QCOMPARE(prompt, "a red fox, " + other.words.join(", ") + " colour palette, " + other.mood);
+    QVERIFY(!prompt.contains(currentWords));
+    QJsonObject palette = rig.sidecar(rig.preview(0)["id"].toString())["generic"].toObject()["palette"].toObject();
+    QCOMPARE(palette["theme"].toString(), QString("other"));
+    QCOMPARE(palette["colors"].toObject()["accent"].toString(), QString("#ff0000"));
+
+    // Custom colours: no theme, no mood.
+    rig.studio->addColor("#1a1b26");
+    rig.studio->addColor("#e0af68");
+    QVERIFY(rig.makePreviews());
+    prompt = genericPrompt(rig.sb.fakeLog(), 1);
+    QCOMPARE(prompt, "a red fox, " + Palette::fromColors({"#1a1b26", "#e0af68"}).words.join(", ") + " colour palette");
+    palette = rig.sidecar(rig.preview(0)["id"].toString())["generic"].toObject()["palette"].toObject();
+    QVERIFY(palette["theme"].isNull());
+    QCOMPARE(palette["colors"].toObject()["colour 2"].toString(), QString("#e0af68"));
+
+    // Custom with no colours is no palette.
+    rig.studio->removeColor(0);
+    rig.studio->removeColor(0);
+    QVERIFY(rig.studio->customPalette());
+    QVERIFY(rig.makePreviews());
+    QCOMPARE(genericPrompt(rig.sb.fakeLog(), 2), QString("a red fox"));
+    QVERIFY(rig.sidecar(rig.preview(0)["id"].toString())["generic"].toObject()["palette"].isNull());
+    // The theme keeps its own screen: nothing from here reached it.
+    QCOMPARE(rig.backend->drafts().size(), 0);
+}
+
+void LimgenTests::studio_upscalesThePickedPreviewToTheTargetSize() {
+    StudioRig rig;
+    rig.createStudio();
+    QVERIFY(rig.makePreviews());
+    QVERIFY(rig.studio->result().isEmpty());
+    QCOMPARE(rig.studio->suggestedName(), QString());
+    const QString pictures = rig.sb.fixture.pictures();
+    const int draftFiles = filesUnder(rig.sb.library()).size();
+    QCOMPARE(draftFiles, 8);
+
+    QSignalSpy resultChanged(rig.studio.get(), &Studio::resultChanged);
+    QVERIFY(rig.upscaleAndWait(2));
+    QCOMPARE(resultChanged.count(), 1);
+    const QVariantMap result = rig.studio->result();
+    QCOMPARE(result["width"].toInt(), 1280);
+    QCOMPARE(result["height"].toInt(), 720);
+    QCOMPARE(result["from"].toInt(), 2);
+    QCOMPARE(result["seed"].toDouble(), rig.preview(2)["seed"].toDouble());
+    QVERIFY(Library::isValidId(result["id"].toString()));
+    const QString path = result["path"].toString();
+    QVERIFY(path.startsWith(rig.sb.library() + "/"));
+    QCOMPARE(QUrl(result["image"].toString()).toLocalFile(), path);
+    QCOMPARE(QImageReader(path).size(), QSize(1280, 720));
+    QCOMPARE(filesUnder(rig.sb.library()).size(), draftFiles + 2); // the final and its sidecar
+    QCOMPARE(rig.upscalesDone(), 1);
+    // It is the final of that preview, with no theme in it.
+    const QJsonObject sidecar = rig.sidecar(result["id"].toString());
+    QCOMPARE(sidecar["kind"].toString(), QString("final"));
+    QCOMPARE(sidecar["finish"].toObject()["from"].toString(), rig.preview(2)["id"].toString());
+    QVERIFY(sidecar["finish"].toObject()["theme"].isNull());
+    QCOMPARE(sidecar["finish"].toObject()["colorPass"].toDouble(), 0.0);
+    QVERIFY(sidecar["theme"].isNull());
+    QCOMPARE(sizeOf(sidecar["generic"].toObject()["target"]), QSize(1280, 720));
+    // The tile is back to normal, and the screen says what it did.
+    QVERIFY(!rig.preview(2)["keeping"].toBool());
+    QCOMPARE(rig.studio->upscalingIndex(), -1);
+    QVERIFY(!rig.studio->statusIsError());
+    QVERIFY2(rig.studio->status().contains("1280"), qPrintable(rig.studio->status()));
+    // The suggested name is the library's own file name for it.
+    QCOMPARE(rig.studio->suggestedName(), Keeper::fileName("a red fox", result["id"].toString(), "png"));
+    // The save dialog opens in the pictures folder, or beside it when there is none.
+    QVERIFY(!QFileInfo::exists(pictures));
+    QCOMPARE(rig.studio->saveFolder(), QUrl::fromLocalFile(rig.sb.fixture.root.path()));
+    QVERIFY(QDir().mkpath(pictures));
+    QCOMPARE(rig.studio->saveFolder(), QUrl::fromLocalFile(pictures));
+    // Nothing was added to it, and nothing went to the theme.
+    QCOMPARE(filesUnder(pictures), QStringList());
+    QCOMPARE(filesUnder(rig.sb.fixture.backgrounds), QStringList());
+
+    // New previews take the old result away: it belonged to the old ones.
+    QVERIFY(rig.makePreviews("a blue boat"));
+    QVERIFY(rig.studio->result().isEmpty());
+    QCOMPARE(rig.studio->suggestedName(), QString());
+}
+
+void LimgenTests::studio_upscaleGoesToTheSizeThePreviewsWereMadeFor() {
+    StudioRig rig;
+    rig.createStudio();
+    QVERIFY(rig.makePreviews()); // for the 1280x720 monitor
+    rig.studio->setSizeIndex(2); // the choice moves on before the upscale
+    QCOMPARE(rig.studio->target(), QSize(2560, 1440));
+    QVERIFY(rig.upscaleAndWait(0));
+    QCOMPARE(QImageReader(rig.studio->result()["path"].toString()).size(), QSize(1280, 720));
+    QCOMPARE(rig.studio->result()["width"].toInt(), 1280);
+}
+
+void LimgenTests::studio_upscaleIgnoresIndexesItCannotUse() {
+    StudioRig rig;
+    rig.createStudio();
+    rig.studio->upscale(0); // nothing made yet
+    QVERIFY(!rig.studio->upscaling());
+    QVERIFY(rig.makePreviews());
+    for (int index : {-1, 4, 99}) {
+        rig.studio->upscale(index);
+        QVERIFY(!rig.studio->upscaling());
+    }
+    QCOMPARE(rig.upscalesDone(), 0);
+    // A second request while one runs is ignored; the first completes alone.
+    rig.studio->upscale(0);
+    QVERIFY(rig.studio->upscaling());
+    rig.studio->upscale(1);
+    QCOMPARE(rig.studio->upscalingIndex(), 0);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->upscaling(), 30000);
+    QCOMPARE(rig.upscalesDone(), 1);
+    QCOMPARE(rig.studio->result()["from"].toInt(), 0);
+    QCOMPARE(rig.finals(), 1);
+    QVERIFY(!rig.preview(1)["keeping"].toBool());
+}
+
+void LimgenTests::studio_aFailedBatchSaysSoAndFreesTheGpu() {
+    StudioRig rig;
+    rig.createStudio();
+    qputenv("FAKE_SD_CLI_MODE", "fail");
+    rig.studio->setPrompt("a red fox");
+    rig.studio->generate();
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->running(), 30000);
+    QVERIFY(rig.studio->statusIsError());
+    QVERIFY(!rig.studio->status().isEmpty());
+    QVERIFY(rig.studio->drafts().isEmpty());
+    QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+    QVERIFY(!rig.backend->busy());
+    // And it works again once the engine does.
+    qunsetenv("FAKE_SD_CLI_MODE");
+    QVERIFY(rig.makePreviews());
+    QVERIFY(!rig.studio->statusIsError());
+}
+
+void LimgenTests::studio_cancelStopsPreviewsAndKeepsNothing() {
+    StudioRig rig;
+    rig.createStudio();
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.studio->setPrompt("a red fox");
+    rig.studio->generate();
+    QVERIFY(rig.studio->running());
+    QCOMPARE(rig.studio->drafts().size(), 4);
+    QTRY_VERIFY_WITH_TIMEOUT(imageCalls(rig.sb.fakeLog()).size() == 1, 15000);
+    rig.studio->upscale(0); // not a finished preview: nothing to upscale
+    QVERIFY(!rig.studio->upscaling());
+    rig.studio->cancel();
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->running(), 20000);
+    QVERIFY(rig.studio->drafts().isEmpty());
+    QVERIFY(!rig.studio->statusIsError()); // cancelling is not an error
+    QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+    QVERIFY(!rig.backend->busy());
+    // Cancel with nothing running does nothing.
+    rig.studio->cancel();
+    QVERIFY(!rig.studio->statusIsError());
+    // The Generic screen can be used again.
+    qunsetenv("FAKE_SD_CLI_MODE");
+    QVERIFY(rig.makePreviews());
+}
+
+void LimgenTests::studio_cancelStopsAnUpscaleAndAddsNoFinal() {
+    StudioRig rig;
+    rig.createStudio();
+    QVERIFY(rig.makePreviews());
+    const QStringList before = filesUnder(rig.sb.library());
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.studio->upscale(1);
+    QVERIFY(rig.studio->upscaling());
+    QVERIFY(rig.preview(1)["keeping"].toBool());
+    QVERIFY(rig.studio->busy());
+    QTRY_VERIFY_WITH_TIMEOUT(rig.upscalesDone() == 1, 15000);
+    rig.studio->cancel();
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->upscaling(), 20000);
+    QVERIFY(rig.studio->result().isEmpty());
+    QVERIFY(!rig.preview(1)["keeping"].toBool());
+    QVERIFY(!rig.studio->statusIsError());
+    QCOMPARE(filesUnder(rig.sb.library()), before);
+    QCOMPARE(rig.finals(), 0);
+    QVERIFY(!rig.backend->busy());
+    // The preview is still there to try again.
+    qunsetenv("FAKE_SD_CLI_MODE");
+    QVERIFY(rig.upscaleAndWait(1));
+}
+
+void LimgenTests::studio_saveImageWritesPngOrJpegByNameOrFilter() {
+    StudioRig rig;
+    rig.createStudio();
+    QVERIFY(rig.makePreviews());
+    QVERIFY(rig.upscaleAndWait(0));
+    const QString source = rig.studio->result()["path"].toString();
+    const QByteArray original = readFile(source);
+    const QString out = rig.sb.fixture.root.path() + "/chosen";
+    QVERIFY(QDir().mkpath(out));
+    QVERIFY(!original.isEmpty());
+
+    struct Case {
+        const char *name;
+        bool jpegFilter;
+        const char *expected;
+        bool jpeg;
+    };
+    const QList<Case> cases{{"a.png", false, "a.png", false},      {"b.jpg", false, "b.jpg", true},
+                            {"c.jpeg", true, "c.jpeg", true},      {"d.JPG", false, "d.JPG", true},
+                            {"e.PNG", true, "e.PNG", false},       {"f", false, "f.png", false},
+                            {"g", true, "g.jpg", true},            {"h.webp", false, "h.webp.png", false},
+                            {"with space.png", false, "with space.png", false}};
+    QStringList expectedFiles;
+    for (const Case &c : cases) {
+        rig.studio->saveImage(QUrl::fromLocalFile(out + "/" + c.name), c.jpegFilter);
+        QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->saving(), 20000);
+        const QString file = out + "/" + c.expected;
+        expectedFiles << c.expected;
+        QVERIFY2(QFileInfo(file).isFile(), c.name);
+        QVERIFY2(!rig.studio->statusIsError(), qPrintable(rig.studio->status()));
+        QVERIFY2(rig.studio->status().contains(file), qPrintable(rig.studio->status()));
+        QCOMPARE(QImageReader(file).size(), QSize(1280, 720));
+        if (c.jpeg) {
+            QVERIFY2(readFile(file).startsWith("\xFF\xD8"), c.name);
+            QVERIFY2(QImageReader(file).text("parameters").contains("a red fox"), c.name);
+        } else {
+            QCOMPARE(readFile(file), original); // the library's own bytes
+        }
+    }
+    expectedFiles.sort();
+    QCOMPARE(QDir(out).entryList(QDir::Files, QDir::Name), expectedFiles);
+    // The library's final was not touched by any of it.
+    QCOMPARE(readFile(source), original);
+
+    // An existing file is replaced.
+    QVERIFY(writeFile(out + "/a.png", "old"));
+    rig.studio->saveImage(QUrl::fromLocalFile(out + "/a.png"));
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->saving(), 20000);
+    QCOMPARE(readFile(out + "/a.png"), original);
+    // Nowhere but the library and the chosen folder was written to.
+    QCOMPARE(filesUnder(rig.sb.fixture.backgrounds), QStringList());
+    QVERIFY(!QFileInfo::exists(rig.sb.fixture.pictures()));
+}
+
+void LimgenTests::studio_saveImageFailsInTheOpenAndWithNothingToSave() {
+    StudioRig rig;
+    rig.createStudio();
+    const QString out = rig.sb.fixture.root.path() + "/chosen";
+    QVERIFY(QDir().mkpath(out));
+    // No result yet: nothing is written, and nothing is said.
+    rig.studio->saveImage(QUrl::fromLocalFile(out + "/early.png"));
+    QVERIFY(!rig.studio->saving());
+    QCOMPARE(QDir(out).entryList(QDir::Files), QStringList());
+    QCOMPARE(rig.studio->status(), QString());
+    QVERIFY(rig.makePreviews());
+    QVERIFY(rig.upscaleAndWait(0));
+    rig.studio->saveImage(QUrl());
+    rig.studio->saveImage(QUrl::fromLocalFile(QString()));
+    QVERIFY(!rig.studio->saving());
+    // A folder that is not there: an error that names the file, and no file.
+    const QString missing = out + "/not-there/x.png";
+    rig.studio->saveImage(QUrl::fromLocalFile(missing));
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->saving(), 20000);
+    QVERIFY(rig.studio->statusIsError());
+    QVERIFY2(rig.studio->status().contains(missing), qPrintable(rig.studio->status()));
+    QVERIFY(!QFileInfo::exists(out + "/not-there"));
+    QCOMPARE(QDir(out).entryList(QDir::Files), QStringList());
+    // And the next save works and clears the error.
+    rig.studio->saveImage(QUrl::fromLocalFile(out + "/ok.png"));
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->saving(), 20000);
+    QVERIFY(!rig.studio->statusIsError());
+    QVERIFY(QFileInfo(out + "/ok.png").isFile());
+}
+
+// The one test that looks at everything the Generic screen touched.
+void LimgenTests::studio_neverWritesToAThemeOrThePicturesFolder() {
+    StudioRig rig;
+    QVERIFY(writeFile(rig.sb.fixture.themes + "/night-city/backgrounds/existing.png", "someone's picture"));
+    rig.createStudio();
+    const QMap<QString, QByteArray> themesBefore = treeOf(rig.sb.fixture.themes);
+    const QMap<QString, QByteArray> backgroundsBefore = treeOf(rig.sb.fixture.backgrounds);
+    const QMap<QString, QByteArray> stateBefore = treeOf(rig.sb.fixture.state);
+    QStringList rootBefore = filesUnder(rig.sb.fixture.root.path());
+
+    rig.studio->setPaletteIndex(1); // even the current theme's own palette
+    QVERIFY(rig.makePreviews());
+    QVERIFY(rig.upscaleAndWait(3));
+    const QString chosen = rig.sb.fixture.root.path() + "/chosen/out.png";
+    QVERIFY(QDir().mkpath(rig.sb.fixture.root.path() + "/chosen"));
+    rig.studio->saveImage(QUrl::fromLocalFile(chosen));
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->saving(), 20000);
+    QVERIFY(QFileInfo(chosen).isFile());
+
+    QVERIFY2(treeOf(rig.sb.fixture.themes) == themesBefore, "a theme folder changed");
+    QVERIFY2(treeOf(rig.sb.fixture.backgrounds) == backgroundsBefore, "a background folder changed");
+    QVERIFY2(treeOf(rig.sb.fixture.state) == stateBefore, "the Omarchy state changed");
+    QVERIFY(!QFileInfo::exists(rig.sb.fixture.pictures()));
+    QCOMPARE(rig.calls(), QStringList()); // omarchy was never run
+    QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+    // Every new file is in the library, limgen's own settings and state, the engine log, or the file chosen.
+    const QString root = rig.sb.fixture.root.path();
+    const QStringList allowed{rig.sb.library() + "/", root + "/config/limgen/", root + "/state/limgen/",
+                              root + "/fake.log", chosen};
+    for (const QString &file : filesUnder(root)) {
+        if (rootBefore.contains(file))
+            continue;
+        bool known = false;
+        for (const QString &prefix : allowed)
+            known = known || file.startsWith(prefix);
+        QVERIFY2(known, qPrintable("unexpected new file " + file));
+    }
+    // Everything the library got says it is not for a theme.
+    int sidecars = 0;
+    for (const QString &file : filesUnder(rig.sb.library())) {
+        if (!file.endsWith(".json"))
+            continue;
+        ++sidecars;
+        const QJsonObject sidecar = QJsonDocument::fromJson(readFile(file)).object();
+        QVERIFY2(sidecar["theme"].isNull(), qPrintable(file));
+        QVERIFY2(sidecar["finish"].isNull() || sidecar["finish"].toObject()["theme"].isNull(), qPrintable(file));
+    }
+    QCOMPARE(sidecars, 5); // four previews and the final
+}
+
+
+// ============================== Generic generation: the commands ==========
+
+namespace {
+
+// A fixture for limgen image: z-image-turbo installed, night-city the current
+// theme (whose colours must stay out of the images), "other" available, and
+// a 1920x1080 monitor.
+struct CliImage {
+    Fixture fixture;
+    Catalogue catalogue = Catalogue::builtIn();
+    QHash<QString, QString> env;
+
+    CliImage() {
+        installModel(catalogue, "z-image-turbo", fixture.models);
+        fixture.addTheme("night-city", stockToml);
+        fixture.addTheme("other", tomlWith("#fafafa", "#111111", "#ff0000"));
+        fixture.switchTo("night-city");
+        env = engineEnvironment(fixture);
+        writeScript(fixture.root.path() + "/big-hyprctl",
+                    "echo '[{\"name\":\"T-1\",\"width\":1920,\"height\":1080,\"transform\":0}]'\n");
+        env["LIMGEN_HYPRCTL"] = fixture.root.path() + "/big-hyprctl";
+    }
+    QString log() const { return fixture.root.path() + "/fake.log"; }
+    QString libraryDir() const { return fixture.data + "/limgen/library"; }
+    // Nothing of the theme or the pictures was touched.
+    bool themeUntouched() const {
+        return filesUnder(fixture.backgrounds).isEmpty() && !QFileInfo::exists(fixture.pictures()) &&
+               fixture.omarchyCalls().isEmpty();
+    }
+};
+
+QString firstLine(const QString &text) { return text.section('\n', 0, 0); }
+
+} // namespace
+
+void LimgenTests::cli_imageMakesPreviewsInTheTargetsShapeWithTheChosenColours() {
+    REQUIRE_BINARY();
+    CliImage rig;
+    const CliResult result =
+        runCli(rig.fixture,
+               {"image", "red fox", "--size", "1080x1920", "--palette", "#1a1b26, #7aa2f7", "--count", "2", "--seed", "7",
+                "--json"},
+               rig.env);
+    QVERIFY(result.started);
+    QVERIFY2(result.exitCode == 0, qPrintable(result.err));
+    QCOMPARE(result.err, QString());
+    const QJsonObject json = jsonObject(result.out);
+    QVERIFY2(!json.isEmpty(), qPrintable(result.out));
+    QCOMPARE(json["model"].toString(), QString("z-image-turbo"));
+    QCOMPARE(sizeOf(json["target"]), QSize(1080, 1920));
+    QCOMPARE(sizeOf(json["size"]), QSize(768, 1344));
+    QCOMPARE(json["seed"].toInt(), 7);
+    QVERIFY(!json.contains("theme"));
+    QVERIFY(!json.contains("style"));
+    const QString expected = "red fox, " + Palette::fromColors({"#1a1b26", "#7aa2f7"}).words.join(", ") + " colour palette";
+    QCOMPARE(json["prompt"].toString(), expected);
+    QCOMPARE(genericPrompt(rig.log()), expected);
+    QCOMPARE(json["palette"].toObject()["colors"].toObject()["colour 2"].toString(), QString("#7aa2f7"));
+    QVERIFY(json["palette"].toObject()["theme"].isNull());
+    QVERIFY(!expected.contains(Palette::fromToml(stockToml).words.join(", ")));
+
+    const QJsonArray drafts = json["drafts"].toArray();
+    QCOMPARE(drafts.size(), 2);
+    for (int i = 0; i < 2; ++i) {
+        const QJsonObject draft = drafts[i].toObject();
+        QCOMPARE(draft["seed"].toInt(), 7 + i);
+        QCOMPARE(QImageReader(draft["path"].toString()).size(), QSize(768, 1344));
+        const QJsonObject sidecar = Library(rig.libraryDir()).find(draft["id"].toString()).metadata;
+        QVERIFY(sidecar["theme"].isNull());
+        QVERIFY(sidecar["style"].isNull());
+        QCOMPARE(sizeOf(sidecar["generic"].toObject()["target"]), QSize(1080, 1920));
+    }
+    QVERIFY(rig.themeUntouched());
+}
+
+void LimgenTests::cli_imageDefaultsToTheMonitorAndNoPaletteAndPrintsIdsAndPaths() {
+    REQUIRE_BINARY();
+    CliImage rig;
+    CliResult result = runCli(rig.fixture, {"image", "  red fox  ", "--count", "3"}, rig.env);
+    QVERIFY(result.started);
+    QVERIFY2(result.exitCode == 0, qPrintable(result.err));
+    const QStringList lines = result.out.trimmed().split('\n');
+    QCOMPARE(lines.size(), 3);
+    for (const QString &line : lines) {
+        const QString id = line.section("  ", 0, 0), path = line.section("  ", 1);
+        QVERIFY2(Library::isValidId(id), qPrintable(line));
+        QCOMPARE(path, Library(rig.libraryDir()).find(id).image);
+        QCOMPARE(QImageReader(path).size(), QSize(1344, 768)); // the 1920x1080 monitor's shape
+    }
+    // No palette: the prompt is what was typed, with nothing from the current theme.
+    QCOMPARE(genericPrompt(rig.log()), QString("red fox"));
+    QCOMPARE(sizeOf(Library(rig.libraryDir()).find(lines.first().section("  ", 0, 0)).metadata["generic"].toObject()["target"]),
+             QSize(1920, 1080));
+    // "none" says the same, and a theme's name takes that theme's palette.
+    result = runCli(rig.fixture, {"image", "red fox", "--count", "1", "--palette", "none", "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(jsonObject(result.out)["prompt"].toString(), QString("red fox"));
+    QVERIFY(jsonObject(result.out)["palette"].isNull());
+    result = runCli(rig.fixture, {"image", "red fox", "--count", "1", "--palette", "other", "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    const Palette other = Palette::fromToml(tomlWith("#fafafa", "#111111", "#ff0000"));
+    QCOMPARE(jsonObject(result.out)["prompt"].toString(),
+             "red fox, " + other.words.join(", ") + " colour palette, " + other.mood);
+    QCOMPARE(jsonObject(result.out)["palette"].toObject()["theme"].toString(), QString("other"));
+    QVERIFY(rig.themeUntouched());
+}
+
+void LimgenTests::cli_imageUsageErrorsExitWithTwoAndMakeNothing_data() {
+    QTest::addColumn<QStringList>("arguments");
+    QTest::addColumn<QString>("fragment"); // in the error's first line
+    QTest::newRow("no prompt") << QStringList{"image"} << QString();
+    QTest::newRow("a blank prompt") << QStringList{"image", "   "} << QString("prompt");
+    QTest::newRow("count 0") << QStringList{"image", "x", "--count", "0"} << QString("--count");
+    QTest::newRow("count 10") << QStringList{"image", "x", "--count", "10"} << QString("--count");
+    QTest::newRow("count not a number") << QStringList{"image", "x", "--count", "many"} << QString("--count");
+    QTest::newRow("seed not a number") << QStringList{"image", "x", "--seed", "abc"} << QString("--seed");
+    QTest::newRow("negative seed") << QStringList{"image", "x", "--seed", "-1"} << QString("--seed");
+    QTest::newRow("seed too high for the count") << QStringList{"image", "x", "--seed", "4294967295", "--count", "4"}
+                                                 << QString("--seed");
+    QTest::newRow("size without an x") << QStringList{"image", "x", "--size", "1920"} << QString("--size");
+    QTest::newRow("size in words") << QStringList{"image", "x", "--size", "big"} << QString("--size");
+    QTest::newRow("size zero") << QStringList{"image", "x", "--size", "0x0"} << QString("--size");
+    QTest::newRow("side under 256") << QStringList{"image", "x", "--size", "1920x255"} << QString("--size");
+    QTest::newRow("wider than 4:1") << QStringList{"image", "x", "--size", "4004x1000"} << QString("--size");
+    QTest::newRow("taller than 4:1") << QStringList{"image", "x", "--size", "1000x4004"} << QString("--size");
+    QTest::newRow("beyond four times the preview") << QStringList{"image", "x", "--size", "5400x3000"} << QString("--size");
+    QTest::newRow("palette colour that is not hex") << QStringList{"image", "x", "--palette", "#111111,red"}
+                                                    << QString("--palette");
+    QTest::newRow("palette with a bad hex") << QStringList{"image", "x", "--palette", "#12345"} << QString("--palette");
+    QTest::newRow("six palette colours")
+        << QStringList{"image", "x", "--palette", "#111111,#222222,#333333,#444444,#555555,#666666"} << QString("--palette");
+    QTest::newRow("a theme that is not there") << QStringList{"image", "x", "--palette", "nosuch"} << QString("nosuch");
+    QTest::newRow("a theme name that climbs out") << QStringList{"image", "x", "--palette", "../night-city"}
+                                                  << QString("night-city");
+    QTest::newRow("a model that is not there") << QStringList{"image", "x", "--model", "nope"} << QString("--model");
+    QTest::newRow("an option that does not exist") << QStringList{"image", "x", "--bogus"} << QString("bogus");
+    QTest::newRow("two prompts") << QStringList{"image", "x", "y"} << QString("y");
+}
+
+void LimgenTests::cli_imageUsageErrorsExitWithTwoAndMakeNothing() {
+    REQUIRE_BINARY();
+    QFETCH(QStringList, arguments);
+    QFETCH(QString, fragment);
+    CliImage rig;
+    const CliResult result = runCli(rig.fixture, arguments, rig.env);
+    QVERIFY(result.started);
+    QCOMPARE(result.exitCode, 2);
+    QCOMPARE(result.out, QString());
+    QVERIFY2(!firstLine(result.err).isEmpty(), qPrintable(result.err));
+    QVERIFY2(firstLine(result.err).contains(fragment), qPrintable(result.err));
+    QCOMPARE(imageCalls(rig.log()).size(), 0);
+    QCOMPARE(filesUnder(rig.libraryDir()), QStringList());
+    QVERIFY(rig.themeUntouched());
+}
+
+void LimgenTests::cli_imageWithoutTheModelIsNotRunnableHere() {
+    REQUIRE_BINARY();
+    CliImage rig;
+    QVERIFY(QDir(rig.fixture.models).removeRecursively());
+    const CliResult result = runCli(rig.fixture, {"image", "red fox"}, rig.env);
+    QCOMPARE(result.exitCode, 3);
+    QCOMPARE(result.out, QString());
+    QVERIFY2(result.err.contains("limgen models pull"), qPrintable(result.err));
+    QCOMPARE(filesUnder(rig.libraryDir()), QStringList());
+}
+
+namespace {
+
+// A draft of a generic image in the library the CLI reads: 128x96, made for
+// a 384x288 target, with a fixture that has the upscaler installed.
+LibraryEntry addGenericDraft(CliKeep &rig, const QSize &target = QSize(384, 288)) {
+    Library library(rig.libraryDir());
+    DraftRecord record = fullRecord();
+    record.themeSlug.clear();
+    record.themeMode.clear();
+    record.palette = QJsonObject();
+    record.style.clear();
+    record.subject = "red fox";
+    record.generic = QJsonObject{{"target", QJsonArray{target.width(), target.height()}}, {"palette", QJsonValue()}};
+    record.width = 128;
+    record.height = 96;
+    return library.addDraft(makePng(rig.fixture.root.path() + "/generic.png", 128, 96), record,
+                            QDateTime::currentDateTimeUtc());
+}
+
+} // namespace
+
+void LimgenTests::cli_upscaleFinishesAPreviewWithoutAThemeFolder() {
+    REQUIRE_BINARY();
+    CliKeep rig;
+    const LibraryEntry draft = addGenericDraft(rig);
+    QVERIFY(draft.isValid());
+    const int filesBefore = rig.libraryFiles();
+    // The size comes from the preview's own target; the output is where the library keeps it.
+    CliResult result = runCli(rig.fixture, {"upscale", draft.id, "--json"}, rig.env);
+    QVERIFY(result.started);
+    QVERIFY2(result.exitCode == 0, qPrintable(result.err));
+    const QJsonObject json = jsonObject(result.out);
+    QCOMPARE(json["draft"].toString(), draft.id);
+    QVERIFY(Library::isValidId(json["final"].toString()));
+    QCOMPARE(sizeOf(json["size"]), QSize(384, 288));
+    QCOMPARE(json["path"].toString(), json["library"].toString());
+    QCOMPARE(QImageReader(json["path"].toString()).size(), QSize(384, 288));
+    QCOMPARE(rig.libraryFiles(), filesBefore + 2);
+    QCOMPARE(rig.upscales(), 1);
+    // Not a file in any theme, not the pictures folder, no omarchy call.
+    QCOMPARE(filesUnder(rig.fixture.backgrounds), QStringList());
+    QVERIFY(!QFileInfo::exists(rig.fixture.pictures()));
+    QCOMPARE(rig.fixture.omarchyCalls(), QStringList());
+    QVERIFY(rig.sidecarOf(json["final"].toString())["finish"].toObject()["theme"].isNull());
+
+    // --output also writes a copy: the same bytes for a PNG, a JPEG for .jpg.
+    const QString out = rig.fixture.root.path() + "/out";
+    QVERIFY(QDir().mkpath(out));
+    result = runCli(rig.fixture, {"upscale", draft.id, "--output", out + "/fox.png", "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    const QJsonObject withOutput = jsonObject(result.out);
+    QCOMPARE(withOutput["path"].toString(), out + "/fox.png");
+    QCOMPARE(readFile(out + "/fox.png"), readFile(withOutput["library"].toString()));
+    result = runCli(rig.fixture, {"upscale", draft.id, "--output", out + "/fox.jpg"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(result.out.trimmed(), out + "/fox.jpg"); // the path of the image made
+    QVERIFY(readFile(out + "/fox.jpg").startsWith("\xFF\xD8"));
+    QCOMPARE(QImageReader(out + "/fox.jpg").size(), QSize(384, 288));
+    QVERIFY(QImageReader(out + "/fox.jpg").text("parameters").contains("oil rig at dusk")); // the draft's prompt
+    // A size of its own, within four times the preview.
+    result = runCli(rig.fixture, {"upscale", draft.id, "--size", "512x384", "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    QCOMPARE(QImageReader(jsonObject(result.out)["path"].toString()).size(), QSize(512, 384));
+    QCOMPARE(filesUnder(rig.fixture.backgrounds), QStringList());
+    QVERIFY(!QFileInfo::exists(rig.fixture.pictures()));
+}
+
+void LimgenTests::cli_upscaleOfAThemeDraftWithoutASizeUsesTheMonitorAndInstallsNothing() {
+    REQUIRE_BINARY();
+    CliKeep rig; // a draft made for night-city
+    const CliResult result = runCli(rig.fixture, {"upscale", rig.draft.id, "--json"}, rig.env);
+    QVERIFY(result.started);
+    QVERIFY2(result.exitCode == 0, qPrintable(result.err));
+    QCOMPARE(QImageReader(jsonObject(result.out)["path"].toString()).size(), QSize(320, 180));
+    QCOMPARE(filesUnder(rig.fixture.backgrounds), QStringList());
+    QVERIFY(!QFileInfo::exists(rig.fixture.pictures()));
+    QCOMPARE(rig.fixture.omarchyCalls(), QStringList());
+}
+
+void LimgenTests::cli_upscaleUsageErrorsExitWithTwoAndMakeNothing() {
+    REQUIRE_BINARY();
+    CliKeep rig;
+    const LibraryEntry draft = addGenericDraft(rig);
+    const QString out = rig.fixture.root.path() + "/out";
+    QVERIFY(QDir().mkpath(out));
+    const QString finalId = [&] {
+        const CliResult made = runCli(rig.fixture, {"upscale", draft.id, "--json"}, rig.env);
+        return jsonObject(made.out)["final"].toString();
+    }();
+    QVERIFY(Library::isValidId(finalId));
+    const int filesBefore = rig.libraryFiles();
+    const int upscalesBefore = rig.upscales();
+
+    struct Case {
+        QStringList arguments;
+        QString fragment;
+    };
+    const QList<Case> cases{{{"upscale"}, QString()},
+                            {{"upscale", "2026-01-01-aaaaaa"}, "2026-01-01-aaaaaa"},
+                            {{"upscale", finalId}, finalId}, // a finished image is not a draft
+                            {{"upscale", draft.id, "--size", "big"}, "--size"},
+                            {{"upscale", draft.id, "--size", "255x300"}, "--size"},
+                            {{"upscale", draft.id, "--size", "1000x200"}, "--size"},
+                            {{"upscale", draft.id, "--size", "513x384"}, "--size"}, // over four times 128x96
+                            {{"upscale", draft.id, "--output", out + "/x.gif"}, "--output"},
+                            {{"upscale", draft.id, "--output", out + "/x"}, "--output"},
+                            {{"upscale", draft.id, "--output", out + "/missing/x.png"}, out + "/missing"},
+                            {{"upscale", draft.id, "--bogus"}, "bogus"}};
+    for (const Case &c : cases) {
+        const CliResult result = runCli(rig.fixture, c.arguments, rig.env);
+        QVERIFY2(result.started, qPrintable(c.arguments.join(' ')));
+        QVERIFY2(result.exitCode == 2, qPrintable(c.arguments.join(' ') + ": " + QString::number(result.exitCode) + " " + result.err));
+        QVERIFY2(result.out.isEmpty(), qPrintable(c.arguments.join(' ')));
+        QVERIFY2(firstLine(result.err).contains(c.fragment), qPrintable(c.arguments.join(' ') + ": " + result.err));
+    }
+    QCOMPARE(rig.upscales(), upscalesBefore);
+    QCOMPARE(rig.libraryFiles(), filesBefore);
+    QCOMPARE(QDir(out).entryList(QDir::AllEntries | QDir::NoDotAndDotDot), QStringList());
+}
+
+void LimgenTests::cli_engineOptionChoosesTheBuildAndTheSettingsFollow() {
+    REQUIRE_BINARY();
+    CliImage rig;
+    const QString dir = rig.fixture.root.path() + "/engines";
+    const QString which = rig.fixture.root.path() + "/which.log";
+    putEngine(dir, "vulkan", false, which);
+    putEngine(dir, "cuda", true, which);
+    QHash<QString, QString> env = rig.env;
+    env.remove("LIMGEN_SD_CLI");
+    env["LIMGEN_ENGINE_DIR"] = dir;
+    auto doctor = [&](const QStringList &extra) {
+        return runCli(rig.fixture, QStringList{"doctor", "--json"} + extra, env);
+    };
+    auto chosen = [](const QJsonObject &json) {
+        QStringList names;
+        for (const QJsonValue &engine : json["engines"].toArray())
+            if (engine.toObject()["chosen"].toBool())
+                names << engine.toObject()["backend"].toString();
+        return names;
+    };
+
+    CliResult result = doctor({});
+    QVERIFY(result.started);
+    QJsonObject json = jsonObject(result.out);
+    QVERIFY2(!json.isEmpty(), qPrintable(result.out + result.err));
+    QCOMPARE(json["engines"].toArray().size(), 2);
+    QCOMPARE(json["engines"].toArray().at(0).toObject()["backend"].toString(), QString("vulkan"));
+    QCOMPARE(json["engines"].toArray().at(1).toObject()["path"].toString(), dir + "/cuda/bin/sd-cli");
+    QCOMPARE(chosen(json), QStringList{"vulkan"});
+    QCOMPARE(json["engine"].toObject()["path"].toString(), dir + "/vulkan/sd-cli");
+    // The text report names the other one.
+    result = runCli(rig.fixture, {"doctor"}, env);
+    QVERIFY2(result.out.contains("cuda"), qPrintable(result.out));
+
+    // The window's choice, in config.json, is the commands' default.
+    Config config(rig.fixture.root.path() + "/config/limgen/config.json");
+    config.setEngine("cuda");
+    QVERIFY(config.save());
+    json = jsonObject(doctor({}).out);
+    QCOMPARE(chosen(json), QStringList{"cuda"});
+    QCOMPARE(json["engine"].toObject()["path"].toString(), dir + "/cuda/bin/sd-cli");
+    // --engine wins over it.
+    json = jsonObject(doctor({"--engine", "vulkan"}).out);
+    QCOMPARE(chosen(json), QStringList{"vulkan"});
+    QCOMPARE(json["engine"].toObject()["path"].toString(), dir + "/vulkan/sd-cli");
+
+    // A build that is not installed is a usage error that says which are.
+    result = doctor({"--engine", "rocm"});
+    QCOMPARE(result.exitCode, 2);
+    QVERIFY2(firstLine(result.err).contains("vulkan") && firstLine(result.err).contains("cuda"), qPrintable(result.err));
+    // And the engine that makes the images is the one asked for.
+    QVERIFY(QFile::remove(which));
+    result = runCli(rig.fixture, {"image", "red fox", "--count", "1", "--engine", "vulkan"}, env);
+    QCOMPARE(result.exitCode, 0);
+    QVERIFY2(readFile(which).contains("vulkan --") && !readFile(which).contains("cuda"), qPrintable(readFile(which)));
+    QVERIFY(readFile(which).contains(" --prompt red fox"));
+    QVERIFY(QFile::remove(which));
+    result = runCli(rig.fixture, {"generate", "oil rig", "--count", "1"}, env); // the saved choice: cuda
+    QCOMPARE(result.exitCode, 0);
+    auto madeBy = [&](const QString &backend) {
+        for (const QString &line : QString::fromUtf8(readFile(which)).split('\n'))
+            if (line.startsWith(backend + " ") && line.contains(" --prompt "))
+                return true;
+        return false;
+    };
+    QVERIFY2(madeBy("cuda") && !madeBy("vulkan"), qPrintable(readFile(which)));
+
+    // LIMGEN_SD_CLI, for development, wins over all of it.
+    env["LIMGEN_SD_CLI"] = fakeEngine;
+    json = jsonObject(doctor({"--engine", "cuda"}).out);
+    QCOMPARE(json["engine"].toObject()["path"].toString(), fakeEngine);
+    // No engine installed at all.
+    env.remove("LIMGEN_SD_CLI");
+    env["LIMGEN_ENGINE_DIR"] = rig.fixture.root.path() + "/empty";
+    result = doctor({"--engine", "cuda"});
+    QCOMPARE(result.exitCode, 2);
+    QVERIFY2(firstLine(result.err).contains(rig.fixture.root.path() + "/empty"), qPrintable(result.err));
+}
+
+void LimgenTests::cli_openWithAnUnknownScreenIsAUsageErrorAndNeedsNoDisplay() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    for (const QStringList &arguments :
+         {QStringList{"open", "nosuch"}, QStringList{"open", "generic", "theme"}, QStringList{"open", "Generic"}}) {
+        const CliResult result = runCli(fixture, arguments);
+        QVERIFY2(result.started, qPrintable(arguments.join(' ')));
+        QVERIFY2(result.exitCode == 2, qPrintable(arguments.join(' ') + ": " + result.err));
+        QCOMPARE(result.out, QString());
+        QVERIFY2(!firstLine(result.err).isEmpty(), qPrintable(arguments.join(' ')));
+    }
+    QVERIFY2(runCli(fixture, {"open", "nosuch"}).err.contains("nosuch"), "the error names the screen");
+}
+
+void LimgenTests::cli_openGenericAndOpenThemeStartTheWindowWithoutHyprland() {
+    REQUIRE_BINARY();
+    for (const QString &screen : {QString("generic"), QString("theme")}) {
+        Fixture fixture;
+        QVERIFY(fixture.ok());
+        QProcess process;
+        QProcessEnvironment environment = cliEnvironment(fixture, {{"QT_QPA_PLATFORM", "offscreen"}});
+        process.setProcessEnvironment(environment);
+        process.start(qEnvironmentVariable("LIMGEN_BINARY"), {"open", screen});
+        QVERIFY2(process.waitForStarted(5000), qPrintable(screen));
+        // A window keeps running; a usage error or a crash ends the process at once.
+        QVERIFY2(!process.waitForFinished(3000),
+                 qPrintable(screen + ": exited " + QString::number(process.exitCode()) + " " +
+                            QString::fromUtf8(process.readAllStandardError())));
+        process.kill();
+        process.waitForFinished(5000);
+    }
+}
+
+void LimgenTests::cli_helpListsImageAndUpscale() {
+    REQUIRE_BINARY();
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const CliResult summary = runCli(fixture, {"help"});
+    QCOMPARE(summary.exitCode, 0);
+    QVERIFY2(summary.out.contains(QRegularExpression("(?m)^  image <prompt> ")), qPrintable(summary.out));
+    QVERIFY2(summary.out.contains(QRegularExpression("(?m)^  upscale <id> ")), qPrintable(summary.out));
+    QVERIFY2(summary.out.contains(QRegularExpression("(?m)^  open \\[screen\\] ")), qPrintable(summary.out));
+    const CliResult image = runCli(fixture, {"help", "image"});
+    QCOMPARE(image.exitCode, 0);
+    for (const char *option : {"--size", "--palette", "--count", "--model", "--seed", "--engine", "--json"})
+        QVERIFY2(image.out.contains(option), option);
+    const CliResult upscale = runCli(fixture, {"upscale", "--help"});
+    QCOMPARE(upscale.exitCode, 0);
+    for (const char *option : {"--size", "--output", "--engine", "--json"})
+        QVERIFY2(upscale.out.contains(option), option);
+    for (const char *command : {"generate", "keep", "doctor"})
+        QVERIFY2(runCli(fixture, {"help", command}).out.contains("--engine"), command);
+}
+
+// ============================== Generic generation: the window ============
+
+namespace {
+
+// The window on the small catalogue, opened on the home screen.
+struct HomeRig {
+    QmlRig q;
+    HomeRig() : q(true, fakeEngine, true, 1, QString(), "home") {}
+    QString screen() const { return q.prop("screen").toString(); }
+    bool visited() const { return q.prop("genericVisited").toBool(); }
+    QQuickItem *itemById(const char *prefix) const { return q.itemNamed(prefix); }
+    // A preview size the small catalogue's 256x256 previews can make.
+    void useAMakeableSize() {
+        q.studio->setSizeIndex(q.studio->sizes().size() - 1);
+        q.studio->setCustomWidth(1024);
+        q.studio->setCustomHeight(576);
+    }
+    QQuickItem *promptField() const {
+        for (QQuickItem *item : q.items())
+            if (item->objectName() == "promptField")
+                return item;
+        return nullptr;
+    }
+    QStringList helpKeys() const {
+        QQuickItem *help = q.itemNamed("HelpOverlay");
+        QStringList keys;
+        if (!help)
+            return keys;
+        for (const QVariant &row : help->property("rows").toList())
+            keys << row.toList().value(0).toString();
+        return keys;
+    }
+};
+
+} // namespace
+
+void LimgenTests::qml_theWindowOpensOnTheHomeScreenWithoutWarnings() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QCOMPARE(rig.screen(), QString("home"));
+    QVERIFY(!rig.visited());
+    QVERIFY(rig.itemById("HomeScreen") != nullptr);
+    QVERIFY(rig.itemById("GenericScreen") == nullptr); // built on the first visit
+    QVERIFY(!rig.q.prop("helpVisible").toBool());
+    // The default is the first choice, and it is the Generic screen.
+    QCOMPARE(rig.itemById("HomeScreen")->property("current").toInt(), 0);
+    NO_QML_WARNINGS(rig.q);
+}
+
+void LimgenTests::qml_homeKeysOpenTheScreensAndHGoesBack() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QWindow *window = rig.q.window;
+    // 1 and 2 open one directly, H returns.
+    QTest::keyClick(window, '1');
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    QVERIFY(rig.visited());
+    QTest::keyClick(window, 'h');
+    QTRY_COMPARE(rig.screen(), QString("home"));
+    QTest::keyClick(window, '2');
+    QTRY_COMPARE(rig.screen(), QString("theme"));
+    QTest::keyClick(window, 'h');
+    QTRY_COMPARE(rig.screen(), QString("home"));
+    // Enter and Space open the one chosen: Generic first, Theme after Right, Generic again after Left.
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    QTest::keyClick(window, 'h');
+    QTRY_COMPARE(rig.screen(), QString("home"));
+    QTest::keyClick(window, Qt::Key_Right);
+    QTRY_COMPARE(rig.itemById("HomeScreen")->property("current").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Enter);
+    QTRY_COMPARE(rig.screen(), QString("theme"));
+    QTest::keyClick(window, 'h');
+    QTRY_COMPARE(rig.screen(), QString("home"));
+    QTest::keyClick(window, Qt::Key_Right); // the home screen starts afresh each time, on Generic
+    QTRY_COMPARE(rig.itemById("HomeScreen")->property("current").toInt(), 1);
+    QTest::keyClick(window, Qt::Key_Space);
+    QTRY_COMPARE(rig.screen(), QString("theme"));
+    QTest::keyClick(window, 'h');
+    QTRY_COMPARE(rig.screen(), QString("home"));
+    QTest::keyClick(window, Qt::Key_Left);
+    QTRY_COMPARE(rig.itemById("HomeScreen")->property("current").toInt(), 0);
+    QTest::keyClick(window, Qt::Key_Space);
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    // H on the home screen does nothing, and the others' keys are not its keys.
+    QTest::keyClick(window, 'h');
+    QTRY_COMPARE(rig.screen(), QString("home"));
+    QTest::keyClick(window, 'h');
+    QTest::keyClick(window, '3');
+    QTest::qWait(100);
+    QCOMPARE(rig.screen(), QString("home"));
+    NO_QML_WARNINGS(rig.q);
+}
+
+void LimgenTests::qml_themeOnlyKeysDoNothingOnTheHomeAndGenericScreens() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QWindow *window = rig.q.window;
+    // First, that they do act on the theme screen, so the rest means something.
+    QTest::keyClick(window, '2');
+    QTRY_COMPARE(rig.screen(), QString("theme"));
+    QTest::keyClick(window, 'l');
+    QTRY_COMPARE(rig.q.prop("libraryVisible").toBool(), true);
+    QTest::keyClick(window, 'l');
+    QTRY_COMPARE(rig.q.prop("libraryVisible").toBool(), false);
+    QTest::keyClick(window, 'p');
+    QTRY_COMPARE(rig.q.prop("promptVisible").toBool(), true);
+    QTest::keyClick(window, 'p');
+    QTRY_COMPARE(rig.q.prop("promptVisible").toBool(), false);
+    QTest::keyClick(window, 'm');
+    QTRY_VERIFY(rig.q.isOpen(rig.q.modelPicker()));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!rig.q.isOpen(rig.q.modelPicker()));
+    QTest::keyClick(window, 'h');
+    QTRY_COMPARE(rig.screen(), QString("home"));
+
+    const QStringList themeKeys{"l", "p", "m", "r", "k", "s", "d", "v", "b", "B"};
+    auto pressThemeKeys = [&] {
+        for (const QString &key : themeKeys)
+            QTest::keyClick(window, key.at(0).toLatin1(), key == "B" ? Qt::ShiftModifier : Qt::NoModifier);
+        QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+        QTest::qWait(150);
+    };
+    auto untouched = [&](const QString &where) {
+        QVERIFY2(!rig.q.prop("libraryVisible").toBool(), qPrintable(where));
+        QVERIFY2(!rig.q.prop("promptVisible").toBool(), qPrintable(where));
+        QVERIFY2(!rig.q.isOpen(rig.q.modelPicker()), qPrintable(where));
+        QVERIFY2(!rig.q.backend().running() && !rig.q.backend().keeping(), qPrintable(where));
+        QVERIFY2(rig.q.backend().drafts().isEmpty(), qPrintable(where));
+        QVERIFY2(rig.q.rig.sb.fixture.omarchyCalls().isEmpty(), qPrintable(where));
+        QCOMPARE(imageCalls(rig.q.rig.sb.fakeLog()).size(), 0);
+    };
+    pressThemeKeys();
+    QCOMPARE(rig.screen(), QString("home"));
+    untouched("home");
+    QTest::keyClick(window, '1');
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    pressThemeKeys();
+    QCOMPARE(rig.screen(), QString("generic"));
+    untouched("generic");
+    NO_QML_WARNINGS(rig.q);
+}
+
+void LimgenTests::qml_theHelpShowsTheRowsOfTheScreenShown() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QWindow *window = rig.q.window;
+    auto keysOn = [&](const char *key, const QString &screen) {
+        QTest::keyClick(window, key[0]);
+        QTRY_COMPARE_WITH_TIMEOUT(rig.screen(), screen, 3000);
+    };
+    // Each screen's own list, told apart by keys only that screen has.
+    QTest::keyClick(window, '?');
+    QTRY_COMPARE(rig.q.prop("helpVisible").toBool(), true);
+    QCOMPARE(rig.q.itemNamed("HelpOverlay")->property("screen").toString(), QString("home"));
+    QStringList keys = rig.helpKeys();
+    QCOMPARE(keys.size(), 5);
+    QVERIFY(keys.contains("1  2"));
+    QVERIFY(!keys.contains("K") && !keys.contains("U"));
+    // Under the help the screen keys do nothing: 2 would open the theme screen.
+    QTest::keyClick(window, '2');
+    QTest::qWait(100);
+    QCOMPARE(rig.screen(), QString("home"));
+    QTest::keyClick(window, '?');
+    QTRY_COMPARE(rig.q.prop("helpVisible").toBool(), false);
+
+    keysOn("1", "generic");
+    QTest::keyClick(window, '?');
+    QTRY_COMPARE(rig.q.prop("helpVisible").toBool(), true);
+    QCOMPARE(rig.q.itemNamed("HelpOverlay")->property("screen").toString(), QString("generic"));
+    keys = rig.helpKeys();
+    QVERIFY(keys.contains("U"));
+    QVERIFY(keys.contains("Ctrl+S"));
+    QVERIFY(keys.contains("H"));
+    QVERIFY(!keys.contains("K") && !keys.contains("1  2") && !keys.contains("M"));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_COMPARE(rig.q.prop("helpVisible").toBool(), false);
+
+    keysOn("h", "home");
+    keysOn("2", "theme");
+    QTest::keyClick(window, '?');
+    QTRY_COMPARE(rig.q.prop("helpVisible").toBool(), true);
+    QCOMPARE(rig.q.itemNamed("HelpOverlay")->property("screen").toString(), QString("theme"));
+    keys = rig.helpKeys();
+    QVERIFY(keys.contains("K") && keys.contains("M") && keys.contains("L"));
+    QVERIFY(!keys.contains("U") && !keys.contains("1  2"));
+    NO_QML_WARNINGS(rig.q);
+}
+
+void LimgenTests::qml_theGenericScreenLoadsOnFirstVisitAndIsKept() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QTest::keyClick(rig.q.window, '1');
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    QQuickItem *generic = rig.itemById("GenericScreen");
+    QVERIFY(generic != nullptr);
+    QTRY_VERIFY(rig.promptField() != nullptr);
+    QVERIFY(generic->isVisible());
+    QVERIFY(!rig.q.typing()); // the keys work from the start: the prompt does not take the focus
+    // Leaving and coming back keeps the very same screen, with its previews.
+    rig.useAMakeableSize();
+    rig.q.studio->setPrompt("a red fox");
+    QVERIFY(rig.q.studio->canGenerate());
+    QTest::keyClick(rig.q.window, Qt::Key_Space);
+    QTRY_VERIFY_WITH_TIMEOUT(rig.q.studio->running(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.q.studio->running(), 30000);
+    QCOMPARE(rig.q.studio->drafts().size(), 4);
+    QTest::keyClick(rig.q.window, 'h');
+    QTRY_COMPARE(rig.screen(), QString("home"));
+    QVERIFY(!generic->isVisible());
+    QTest::keyClick(rig.q.window, '1');
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    QCOMPARE(rig.itemById("GenericScreen"), generic);
+    QVERIFY(generic->isVisible());
+    QCOMPARE(rig.q.studio->drafts().size(), 4);
+    QCOMPARE(rig.q.studio->prompt(), QString("a red fox"));
+    NO_QML_WARNINGS(rig.q);
+}
+
+void LimgenTests::qml_enterInTheGenericPromptStartsAStudioBatchAndNotTheThemes() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QTest::keyClick(rig.q.window, '1');
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    rig.useAMakeableSize();
+    QTRY_VERIFY(rig.promptField() != nullptr);
+    QMetaObject::invokeMethod(rig.promptField(), "forceActiveFocus");
+    QTRY_VERIFY(rig.q.typing());
+    // Letters typed in the field are text, not shortcuts: H and Q would otherwise leave or quit.
+    typeText(rig.q.window, "red fox");
+    QTRY_COMPARE(rig.q.studio->prompt(), QString("red fox"));
+    QCOMPARE(rig.screen(), QString("generic"));
+    QVERIFY(!rig.q.isOpen(rig.q.quitDialog()));
+    QVERIFY(!rig.q.studio->running());
+    QTest::keyClick(rig.q.window, Qt::Key_Return);
+    QTRY_VERIFY_WITH_TIMEOUT(rig.q.studio->running() || !rig.q.studio->drafts().isEmpty(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.q.studio->running(), 30000);
+    QCOMPARE(rig.q.studio->drafts().size(), 4);
+    for (int i = 0; i < 4; ++i)
+        QCOMPARE(rig.q.studio->drafts().at(i).toMap()["state"].toString(), QString("done"));
+    QCOMPARE(imageCalls(rig.q.rig.sb.fakeLog()).size(), 1);
+    QCOMPARE(genericPrompt(rig.q.rig.sb.fakeLog()), QString("red fox"));
+    QVERIFY(!rig.q.typing()); // the field let go of the keys
+    // The theme screen's batch was not touched.
+    QVERIFY(rig.q.backend().drafts().isEmpty());
+    QCOMPARE(filesUnder(rig.q.rig.sb.fixture.backgrounds), QStringList());
+    NO_QML_WARNINGS(rig.q);
+}
+
+void LimgenTests::qml_escOnTheGenericScreenStopsARunningBatch() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QTest::keyClick(rig.q.window, '1');
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    rig.useAMakeableSize();
+    rig.q.studio->setPrompt("a red fox");
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    QTest::keyClick(rig.q.window, Qt::Key_Space);
+    QTRY_VERIFY_WITH_TIMEOUT(rig.q.studio->running(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(imageCalls(rig.q.rig.sb.fakeLog()).size() == 1, 15000);
+    QTest::keyClick(rig.q.window, Qt::Key_Escape);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.q.studio->running(), 20000);
+    QVERIFY(rig.q.studio->drafts().isEmpty());
+    QCOMPARE(filesUnder(rig.q.rig.sb.library()), QStringList());
+    QCOMPARE(rig.screen(), QString("generic")); // Esc stopped the work and did not leave
+    QVERIFY(!rig.q.backend().busy());
+    // With nothing left to stop, Esc does nothing.
+    QTest::keyClick(rig.q.window, Qt::Key_Escape);
+    QTest::qWait(100);
+    QCOMPARE(rig.screen(), QString("generic"));
+    // While the batch runs, the theme screen's own Esc does not apply, and Esc on home does nothing.
+    QTest::keyClick(rig.q.window, 'h');
+    QTRY_COMPARE(rig.screen(), QString("home"));
+    QTest::keyClick(rig.q.window, Qt::Key_Escape);
+    QTest::qWait(100);
+    QCOMPARE(rig.screen(), QString("home"));
+    NO_QML_WARNINGS(rig.q);
+}
+
+void LimgenTests::qml_quitAsksWhileTheGenericScreenWorks() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QTest::keyClick(rig.q.window, '1');
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    rig.useAMakeableSize();
+    rig.q.studio->setPrompt("a red fox");
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    QTest::keyClick(rig.q.window, Qt::Key_Space);
+    QTRY_VERIFY_WITH_TIMEOUT(rig.q.studio->running(), 5000);
+    QTest::keyClick(rig.q.window, 'q');
+    QTRY_VERIFY(rig.q.isOpen(rig.q.quitDialog()));
+    QVERIFY(rig.q.studio->running()); // asking is not stopping
+    QTest::keyClick(rig.q.window, Qt::Key_Escape);
+    QTRY_VERIFY(!rig.q.isOpen(rig.q.quitDialog()));
+    QVERIFY(rig.q.studio->running());
+    rig.q.studio->cancel();
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.q.studio->running(), 20000);
+    // Idle, there is nothing to lose: Q would quit, which a test cannot watch, so only the asking is checked.
+    QVERIFY(!rig.q.backend().busy());
+}
+
+
+// ============================== Generic generation: review fixes ==========
+
+namespace {
+
+// The popup of one of the Generic screen's combo boxes, by object name.
+QObject *comboPopup(const QmlRig &q, const char *name) {
+    for (QQuickItem *item : q.items())
+        if (item->objectName() == name)
+            return item->property("popup").value<QObject *>();
+    return nullptr;
+}
+
+// The text of a label that names both sizes, whatever else it says.
+QString labelWith(const QmlRig &q, const QStringList &fragments) {
+    for (QQuickItem *item : q.items()) {
+        if (!item->isVisible() || !item->inherits("QQuickText"))
+            continue;
+        const QString text = item->property("text").toString();
+        bool all = !text.isEmpty();
+        for (const QString &fragment : fragments)
+            all = all && text.contains(fragment);
+        if (all)
+            return text;
+    }
+    return QString();
+}
+
+} // namespace
+
+void LimgenTests::studio_batchSizeStaysWhatThePreviewsWereMadeFor() {
+    StudioRig rig;
+    rig.createStudio();
+    QCOMPARE(rig.studio->batchWidth(), 0); // nothing on screen
+    QCOMPARE(rig.studio->batchHeight(), 0);
+    QVERIFY(rig.makePreviews());
+    QCOMPARE(rig.studio->batchWidth(), 1280);
+    QCOMPARE(rig.studio->batchHeight(), 720);
+    QSignalSpy drafts(rig.studio.get(), &Studio::draftsChanged);
+    rig.studio->setSizeIndex(2); // 2560x1440, chosen after the previews
+    QCOMPARE(rig.studio->target(), QSize(2560, 1440));
+    QCOMPARE(rig.studio->batchWidth(), 1280);
+    QCOMPARE(rig.studio->batchHeight(), 720);
+    QVERIFY(rig.upscaleAndWait(0));
+    QCOMPARE(rig.studio->result()["width"].toInt(), rig.studio->batchWidth());
+    QCOMPARE(rig.studio->result()["height"].toInt(), rig.studio->batchHeight());
+    QCOMPARE(QImageReader(rig.studio->result()["path"].toString()).size(), QSize(1280, 720));
+    // A new batch is for the new choice.
+    QVERIFY(rig.makePreviews());
+    QCOMPARE(rig.studio->batchWidth(), 2560);
+    QCOMPARE(rig.studio->batchHeight(), 1440);
+    // A cancelled batch leaves no previews, so no size.
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.studio->generate();
+    rig.studio->cancel();
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->running(), 20000);
+    QCOMPARE(rig.studio->batchWidth(), 0);
+}
+
+void LimgenTests::qml_theGenericScreenSaysWhatSizeThePreviewsUpscaleTo() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QTest::keyClick(rig.q.window, '1');
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    rig.useAMakeableSize(); // 1024x576
+    rig.q.studio->setPrompt("a red fox");
+    QTest::keyClick(rig.q.window, Qt::Key_Space);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.q.studio->running() && rig.q.studio->drafts().size() == 4, 30000);
+    QCOMPARE(rig.q.studio->batchWidth(), 1024);
+    QVERIFY(labelWith(rig.q, {"generate again"}).isEmpty()); // the box and the previews agree
+    rig.q.studio->setCustomWidth(1000);
+    QTRY_VERIFY(!labelWith(rig.q, {"generate again", "1024", "576", "1000"}).isEmpty());
+    // Back to the same size: the note goes.
+    rig.q.studio->setCustomWidth(1024);
+    QTRY_VERIFY(labelWith(rig.q, {"generate again"}).isEmpty());
+    // The upscale tooltip names the previews' size, not the box's.
+    rig.q.studio->setCustomWidth(1000);
+    QQuickItem *button = nullptr;
+    for (QQuickItem *item : rig.q.items())
+        if (item->objectName() == "upscaleButton")
+            button = item;
+    QVERIFY(button);
+    QString tip;
+    for (QObject *child : button->children())
+        if (QString(child->metaObject()->className()).contains("ToolTipAttached"))
+            tip = child->property("text").toString();
+    QVERIFY2(tip.contains("1024") && !tip.contains("1000"), qPrintable(tip));
+    NO_QML_WARNINGS(rig.q);
+}
+
+void LimgenTests::qml_anOpenComboBoxTakesTheKeysFromTheGenericScreen() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QTest::keyClick(rig.q.window, '1');
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    rig.useAMakeableSize();
+    rig.q.studio->setPrompt("a red fox");
+    QQuickItem *generic = rig.itemById("GenericScreen");
+    QVERIFY(generic);
+    for (const char *box : {"modelBox", "engineBox", "sizeBox", "gridBox", "paletteBox"}) {
+        QObject *popup = comboPopup(rig.q, box);
+        QVERIFY2(popup, box);
+        QMetaObject::invokeMethod(popup, "open");
+        QTRY_VERIFY2(popup->property("opened").toBool(), box);
+        QTRY_VERIFY2(generic->property("dialogOpen").toBool(), box);
+        QTest::keyClick(rig.q.window, Qt::Key_Space);
+        QTest::qWait(150);
+        QVERIFY2(!rig.q.studio->running() && rig.q.studio->drafts().isEmpty(), box);
+        QCOMPARE(imageCalls(rig.q.rig.sb.fakeLog()).size(), 0);
+        QMetaObject::invokeMethod(popup, "close");
+        QTRY_VERIFY2(!popup->property("opened").toBool(), box);
+        QTRY_VERIFY2(!generic->property("dialogOpen").toBool(), box);
+    }
+    // Closed, Space makes the previews, and the arrows move the selection.
+    QTest::keyClick(rig.q.window, Qt::Key_Space);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.q.studio->running() && rig.q.studio->drafts().size() == 4, 30000);
+    QCOMPARE(generic->property("selected").toInt(), 0);
+    QObject *popup = comboPopup(rig.q, "gridBox");
+    QMetaObject::invokeMethod(popup, "open");
+    QTRY_VERIFY(popup->property("opened").toBool());
+    QTest::keyClick(rig.q.window, Qt::Key_Down);
+    QTest::keyClick(rig.q.window, Qt::Key_Right);
+    QTest::qWait(150);
+    QCOMPARE(generic->property("selected").toInt(), 0);
+    QMetaObject::invokeMethod(popup, "close");
+    QTRY_VERIFY(!popup->property("opened").toBool());
+    QTest::keyClick(rig.q.window, Qt::Key_Down);
+    QTest::keyClick(rig.q.window, Qt::Key_Right);
+    QTRY_VERIFY(generic->property("selected").toInt() != 0);
+    NO_QML_WARNINGS(rig.q);
+}
+
+void LimgenTests::qml_theCustomSizeFieldsShowTheValueInUse() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QTest::keyClick(rig.q.window, '1');
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    rig.q.studio->setSizeIndex(rig.q.studio->sizes().size() - 1);
+    rig.q.studio->setCustomWidth(1500);
+    QQuickItem *field = nullptr;
+    for (QQuickItem *item : rig.q.items())
+        if (item->objectName() == "widthField")
+            field = item;
+    QVERIFY(field);
+    QTRY_VERIFY(field->isVisible());
+    QCOMPARE(field->property("text").toString(), QString("1500"));
+    // Typed over, which breaks the field's binding: the value in use goes back into it.
+    auto typeInto = [&](const QString &digits) {
+        QMetaObject::invokeMethod(field, "forceActiveFocus");
+        QMetaObject::invokeMethod(field, "selectAll");
+        typeText(rig.q.window, digits);
+        QTest::keyClick(rig.q.window, Qt::Key_Return);
+    };
+    typeInto("800");
+    QTRY_COMPARE(rig.q.studio->customWidth(), 800);
+    // The same value typed another way changes nothing in the Studio, so only the field's
+    // own reset can show what is in use.
+    typeInto("0800");
+    QTRY_COMPARE(field->property("text").toString(), QString("800"));
+    QCOMPARE(rig.q.studio->customWidth(), 800);
+    typeInto("9999"); // the field was typed over before, and still takes input
+    QTRY_COMPARE(rig.q.studio->customWidth(), 9999);
+    QCOMPARE(field->property("text").toString(), QString("9999"));
+    // Numbers the setter clamps reach it, and the field then shows the clamped value
+    // rather than what was typed.
+    typeInto("0");
+    QTRY_COMPARE(rig.q.studio->customWidth(), 1);
+    QTRY_COMPARE(field->property("text").toString(), QString("1"));
+    typeInto("99999");
+    QTRY_COMPARE(rig.q.studio->customWidth(), Studio::maxSide);
+    QTRY_COMPARE(field->property("text").toString(), QString::number(Studio::maxSide));
+    // And a change from elsewhere still shows.
+    rig.q.studio->setCustomWidth(1200);
+    QTRY_COMPARE(field->property("text").toString(), QString("1200"));
+    NO_QML_WARNINGS(rig.q);
+}
+
+void LimgenTests::studio_aNameWithNoSuffixIsNeverAllowedToReplaceAFile() {
+    StudioRig rig;
+    rig.createStudio();
+    QVERIFY(rig.makePreviews());
+    QVERIFY(rig.upscaleAndWait(0));
+    const QString out = rig.sb.fixture.root.path() + "/chosen";
+    QVERIFY(QDir().mkpath(out));
+    for (bool jpeg : {false, true}) {
+        const QString existing = out + (jpeg ? "/pic.jpg" : "/pic.png");
+        QVERIFY(writeFile(existing, "someone's file"));
+        rig.studio->saveImage(QUrl::fromLocalFile(out + "/pic"), jpeg);
+        QVERIFY(!rig.studio->saving());
+        QVERIFY(rig.studio->statusIsError());
+        QVERIFY2(rig.studio->status().contains(existing), qPrintable(rig.studio->status()));
+        QCOMPARE(readFile(existing), QByteArray("someone's file"));
+    }
+    QCOMPARE(QDir(out).entryList(QDir::Files, QDir::Name), QStringList({"pic.jpg", "pic.png"}));
+    // A name typed with its suffix is a deliberate replace, which the dialog asked about.
+    rig.studio->saveImage(QUrl::fromLocalFile(out + "/pic.png"));
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->saving(), 20000);
+    QVERIFY(!rig.studio->statusIsError());
+    QCOMPARE(readFile(out + "/pic.png"), readFile(rig.studio->result()["path"].toString()));
+    // A free name works and clears the error.
+    rig.studio->saveImage(QUrl::fromLocalFile(out + "/free"));
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->saving(), 20000);
+    QVERIFY(!rig.studio->statusIsError());
+    QVERIFY(QFileInfo(out + "/free.png").isFile());
+}
+
+void LimgenTests::backend_whileTheGenericScreenHoldsTheGpuTheThemeScreenSaysSo() {
+    KeepBackendRig rig;
+    rig.create();
+    QVERIFY(rig.makeBatch());
+    const QString firstId = rig.draft(0)["id"].toString();
+    rig.backend->setStudioBusy(true);
+    rig.backend->setSubject("another rig");
+    rig.backend->generate();
+    QVERIFY2(rig.backend->status().contains("Generic screen"), qPrintable(rig.backend->status()));
+    QVERIFY(!rig.backend->running());
+    QCOMPARE(rig.draft(0)["id"].toString(), firstId);
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 1);
+    // A keep is accepted, says when it starts, and does start.
+    rig.backend->keep(0);
+    QVERIFY2(rig.backend->status().contains("keep starts"), qPrintable(rig.backend->status()));
+    QVERIFY(rig.draft(0)["keeping"].toBool());
+    QTest::qWait(300);
+    QCOMPARE(rig.upscalesDone(), 0);
+    rig.backend->setStudioBusy(false);
+    WAIT_KEPT(rig, 0);
+    QCOMPARE(rig.upscalesDone(), 1);
+}
+
+void LimgenTests::studio_whileTheThemeScreenHoldsTheGpuTheGenericScreenSaysSo() {
+    StudioRig rig;
+    rig.createStudio();
+    QVERIFY(rig.makePreviews());
+    const int images = imageCalls(rig.sb.fakeLog()).size();
+    rig.backend->setSubject("oil rig");
+    rig.backend->generate(); // a theme batch
+    QVERIFY(rig.backend->gpuBusy());
+    rig.studio->setPrompt("a blue boat");
+    rig.studio->generate();
+    QVERIFY2(rig.studio->status().contains("theme screen"), qPrintable(rig.studio->status()));
+    QVERIFY(!rig.studio->running());
+    QCOMPARE(rig.studio->drafts().size(), 4);
+    QCOMPARE(rig.preview(0)["state"].toString(), QString("done")); // the old previews were not replaced
+    // Clear the message, then an upscale is refused with the same one.
+    rig.studio->setPrompt("a blue boat");
+    rig.studio->upscale(0);
+    QVERIFY2(rig.studio->status().contains("theme screen"), qPrintable(rig.studio->status()));
+    QVERIFY(!rig.studio->upscaling());
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.backend->running(), 30000);
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), images + 1);
+    QCOMPARE(rig.upscalesDone(), 0);
+    // A theme keep says the same.
+    rig.backend->keep(0);
+    rig.studio->upscale(0);
+    QVERIFY2(rig.studio->status().contains("theme screen"), qPrintable(rig.studio->status()));
+    QVERIFY(!rig.studio->upscaling());
+    WAIT_KEPT(rig, 0);
+    WAIT_NOT_KEEPING(rig);
+    QCOMPARE(rig.upscalesDone(), 1);
+}
+
+
+// ============================== Generic generation: variety, crashes ======
+
+namespace {
+
+// An engine that is the fake one, except that its `run`-th image run (from 1)
+// goes in `mode`. The count is kept in a file beside it.
+QString flakyEngine(const QString &directory, int run, const QString &mode) {
+    const QString path = directory + "/flaky-sd-cli";
+    writeScript(path, "case \" $* \" in *\" --prompt \"*)\n"
+                      "  n=$(cat '" + directory.toUtf8() + "/runs' 2>/dev/null || echo 0); n=$((n+1))\n"
+                      "  echo $n > '" + directory.toUtf8() + "/runs'\n"
+                      "  if [ $n -eq " + QByteArray::number(run) + " ]; then FAKE_SD_CLI_MODE=" + mode.toUtf8() +
+                      "; export FAKE_SD_CLI_MODE; fi;;\n"
+                      "esac\n"
+                      "exec '" + fakeEngine.toUtf8() + "' \"$@\"\n");
+    return path;
+}
+
+BatchSettings genericSettings(Prompt::Variety variety, int count, quint32 seed = 100) {
+    BatchSettings settings = BatchRig::settings();
+    settings.generic = true;
+    settings.subject = "a red fox";
+    settings.target = QSize(1920, 1080);
+    settings.count = count;
+    settings.seed = seed;
+    settings.variety = variety;
+    return settings;
+}
+
+// The colour bin/fake-sd-cli paints the image of a given seed.
+QColor fakeColour(quint32 seed) {
+    const quint32 value = quint32((quint64(seed) * 2654435761ULL) % 16777216ULL);
+    return QColor(value >> 16, (value >> 8) & 255, value & 255);
+}
+
+QStringList promptsOf(const QString &log) {
+    QStringList prompts;
+    for (const QStringList &call : imageCalls(log))
+        prompts << argumentAfter(call, "--prompt");
+    return prompts;
+}
+
+} // namespace
+
+void LimgenTests::prompt_varietyIdsRoundTrip() {
+    QCOMPARE(Prompt::varietyIds(), QStringList({"seeds", "framing", "light"}));
+    for (int i = 0; i < 3; ++i) {
+        Prompt::Variety variety = Prompt::Variety::Seeds;
+        QVERIFY(Prompt::varietyFromId(Prompt::varietyIds().at(i), &variety));
+        QCOMPARE(int(variety), i);
+        QCOMPARE(Prompt::varietyId(variety), Prompt::varietyIds().at(i));
+    }
+    // An id that is not one leaves the answer alone.
+    Prompt::Variety variety = Prompt::Variety::Light;
+    for (const char *junk : {"", "Framing", "frame", "light "})
+        QVERIFY2(!Prompt::varietyFromId(junk, &variety), junk);
+    QCOMPARE(int(variety), int(Prompt::Variety::Light));
+}
+
+void LimgenTests::prompt_varietyHintsSeedsAreEmptyAndCountsAreHonoured() {
+    QCOMPARE(Prompt::varietyHints(Prompt::Variety::Seeds, 3, 7), QStringList({"", "", ""}));
+    for (Prompt::Variety variety : {Prompt::Variety::Seeds, Prompt::Variety::Framing, Prompt::Variety::Light}) {
+        QCOMPARE(Prompt::varietyHints(variety, 0, 7), QStringList());
+        QCOMPARE(Prompt::varietyHints(variety, -2, 7), QStringList());
+        QCOMPARE(Prompt::varietyHints(variety, 9, 7).size(), 9);
+    }
+}
+
+void LimgenTests::prompt_varietyHintsAreDistinctDeterministicAndWrap() {
+    const QStringList framings = Prompt::framingHints();
+    QCOMPARE(framings.size(), 12);
+    QCOMPARE(Prompt::lightHints().size(), 10);
+    QCOMPARE(QSet<QString>(framings.begin(), framings.end()).size(), 12);
+
+    // Framing: a permutation of the list while it lasts, so no two previews share a camera.
+    const QStringList twelve = Prompt::varietyHints(Prompt::Variety::Framing, 12, 1234);
+    QCOMPARE(QSet<QString>(twelve.begin(), twelve.end()).size(), 12);
+    for (const QString &hint : twelve)
+        QVERIFY2(framings.contains(hint), qPrintable(hint));
+    // The same seed, the same hints; each count is a prefix of the longer one.
+    QCOMPARE(Prompt::varietyHints(Prompt::Variety::Framing, 12, 1234), twelve);
+    QCOMPARE(Prompt::varietyHints(Prompt::Variety::Framing, 4, 1234), twelve.mid(0, 4));
+    // Other seeds order them otherwise (not every seed may, but they cannot all agree).
+    QSet<QString> orders;
+    for (quint32 seed = 1; seed <= 20; ++seed)
+        orders << Prompt::varietyHints(Prompt::Variety::Framing, 12, seed).join('|');
+    QVERIFY2(orders.size() > 10, qPrintable(QString::number(orders.size())));
+    QVERIFY(Prompt::varietyHints(Prompt::Variety::Framing, 4, 1) != Prompt::varietyHints(Prompt::Variety::Framing, 4, 2) ||
+            Prompt::varietyHints(Prompt::Variety::Framing, 4, 1) != Prompt::varietyHints(Prompt::Variety::Framing, 4, 3));
+    // Past the end of the list it wraps.
+    const QStringList fifteen = Prompt::varietyHints(Prompt::Variety::Framing, 15, 1234);
+    QCOMPARE(fifteen.mid(0, 12), twelve);
+    QCOMPARE(fifteen.at(12), twelve.at(0));
+    QCOMPARE(fifteen.at(14), twelve.at(2));
+
+    // Light: the same framings, each with a light of its own after a comma.
+    const QStringList lights = Prompt::lightHints();
+    const QStringList both = Prompt::varietyHints(Prompt::Variety::Light, 10, 1234);
+    QSet<QString> usedLights;
+    for (int i = 0; i < both.size(); ++i) {
+        QVERIFY2(both.at(i).startsWith(twelve.at(i) + ", "), qPrintable(both.at(i)));
+        const QString light = both.at(i).mid(twelve.at(i).size() + 2);
+        QVERIFY2(lights.contains(light), qPrintable(both.at(i)));
+        usedLights << light;
+    }
+    QCOMPARE(usedLights.size(), 10);
+    QCOMPARE(Prompt::varietyHints(Prompt::Variety::Light, 10, 1234), both);
+    // The light is shuffled on its own stream: it does not follow the framing's order.
+    bool differs = false;
+    for (quint32 seed = 1; seed <= 20 && !differs; ++seed) {
+        const QStringList f = Prompt::varietyHints(Prompt::Variety::Framing, 10, seed);
+        const QStringList l = Prompt::varietyHints(Prompt::Variety::Light, 10, seed);
+        for (int i = 0; i < 10; ++i)
+            differs = differs || l.at(i).mid(f.at(i).size() + 2) != lights.at(framings.indexOf(f.at(i)) % lights.size());
+    }
+    QVERIFY(differs);
+}
+
+void LimgenTests::prompt_buildGenericPutsTheHintRightAfterThePrompt() {
+    const Palette palette = Palette::fromColors({"#1a1b26", "#7aa2f7"});
+    const QString words = palette.words.join(", ") + " colour palette";
+    QCOMPARE(Prompt::buildGeneric("a red  fox", palette, "low angle, looking up").positive,
+             "a red fox, low angle, looking up, " + words);
+    // No hint, an empty one or a blank one: as before.
+    QCOMPARE(Prompt::buildGeneric("a red fox", palette, QString()).positive, Prompt::buildGeneric("a red fox", palette).positive);
+    QCOMPARE(Prompt::buildGeneric("a red fox", palette, "  \n").positive, "a red fox, " + words);
+    // With no palette, and with a theme's mood after the words.
+    QCOMPARE(Prompt::buildGeneric("a red fox", Palette(), "side view").positive, QString("a red fox, side view"));
+    const Palette theme = Palette::fromToml(stockToml);
+    QCOMPARE(Prompt::buildGeneric("a red fox", theme, "side view").positive,
+             "a red fox, side view, " + theme.words.join(", ") + " colour palette, " + theme.mood);
+    // The hint stands alone when nothing was typed.
+    QCOMPARE(Prompt::buildGeneric(QString(), Palette(), "side view").positive, QString("side view"));
+}
+
+void LimgenTests::config_genericVarietyRoundTripsAndJunkReadsAsSeeds() {
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    const QString file = fixture.root.path() + "/config/limgen/config.json";
+    QCOMPARE(Config(file).genericVariety(), QString("seeds"));
+    Config config(file);
+    config.setGenericCount(6);
+    config.setGenericVariety("light");
+    QVERIFY(config.save());
+    QCOMPARE(Config(file).genericVariety(), QString("light"));
+    QCOMPARE(Config(file).genericCount(), 6); // its neighbours are kept
+    for (const char *junk : {"{\"generic\": {\"variety\": \"wild\"}}", "{\"generic\": {\"variety\": 2}}",
+                             "{\"generic\": {\"variety\": null}}", "{\"generic\": {\"variety\": \"Light\"}}"}) {
+        QVERIFY(writeFile(file, junk));
+        QCOMPARE(Config(file).genericVariety(), QString("seeds"));
+    }
+}
+
+void LimgenTests::engine_savedAllReadsTheLastSavedLine_data() {
+    QTest::addColumn<QString>("output");
+    QTest::addColumn<int>("count");
+    QTest::addColumn<bool>("expected");
+    QTest::newRow("all four") << "[I] save result image 3 --- x\n[I] 4/4 images saved --- main.cpp:534\n" << 4 << true;
+    QTest::newRow("a partial 3/4") << "[I] 3/4 images saved --- main.cpp:534\n" << 4 << false;
+    QTest::newRow("no line") << "[I] latent 1 decoded\n[I] save result image 0 to 'x' (success)\n" << 4 << false;
+    QTest::newRow("empty") << "" << 1 << false;
+    QTest::newRow("several lines, the last counts") << "[I] 1/4 images saved\n[I] 2/4 images saved\n[I] 4/4 images saved\n" << 4 << true;
+    QTest::newRow("an earlier full line then a partial") << "[I] 4/4 images saved\n[I] 2/4 images saved\n" << 4 << false;
+    QTest::newRow("a different count") << "[I] 4/4 images saved\n" << 3 << false;
+    QTest::newRow("saved of another total") << "[I] 4/5 images saved\n" << 4 << false;
+    QTest::newRow("saved more than asked") << "[I] 5/5 images saved\n" << 4 << false;
+    QTest::newRow("one of one") << "[I] 1/1 images saved --- main.cpp:579" << 1 << true;
+    QTest::newRow("without the [I] tag") << "4/4 images saved\n" << 4 << false;
+    QTest::newRow("carriage returns") << "\r[I] 2/2 images saved\r\n" << 2 << true;
+}
+
+void LimgenTests::engine_savedAllReadsTheLastSavedLine() {
+    QFETCH(QString, output);
+    QFETCH(int, count);
+    QFETCH(bool, expected);
+    QCOMPARE(SdCppEngine::savedAll(output, count), expected);
+}
+
+void LimgenTests::engine_aCrashAfterSavingEverythingIsASuccess() {
+    EnvGuard guard({"FAKE_SD_CLI_MODE", "FAKE_SD_CLI_LOG", "FAKE_SD_CLI_STEP_SECONDS"});
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    qputenv("FAKE_SD_CLI_MODE", "crash-at-exit");
+    const EngineRequest request = runnableRequest(fixture.root.path(), 3, 3);
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    QVERIFY2(run.finished, qPrintable(run.error.message + run.error.detail));
+    QVERIFY(!run.failed);
+    QCOMPARE(run.drafts, SdCppEngine::draftPaths(request));
+    for (const QString &draft : run.drafts)
+        QCOMPARE(QImageReader(draft).size(), QSize(128, 96));
+}
+
+void LimgenTests::engine_aCrashBeforeSavingIsStillAFailure() {
+    EnvGuard guard({"FAKE_SD_CLI_MODE", "FAKE_SD_CLI_LOG", "FAKE_SD_CLI_STEP_SECONDS"});
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    qputenv("FAKE_SD_CLI_MODE", "crash-before-save");
+    const EngineRequest request = runnableRequest(fixture.root.path(), 3, 3);
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    QVERIFY(run.failed);
+    QVERIFY(!run.finished);
+    QVERIFY(run.drafts.isEmpty());
+    QVERIFY(run.error.kind != EngineError::None);
+    QVERIFY(!run.error.message.isEmpty());
+    QVERIFY(!QFileInfo::exists(request.outputDirectory + "/draft-0.png"));
+}
+
+void LimgenTests::engine_aCrashAfterSavingStillChecksTheFiles() {
+    EnvGuard guard({"FAKE_SD_CLI_MODE", "FAKE_SD_CLI_LOG", "FAKE_SD_CLI_STEP_SECONDS"});
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    // An engine that saves wrong-sized images, says so, and then dies as it exits.
+    QVERIFY(writeScript(fixture.root.path() + "/wrong-then-crash",
+                        "FAKE_SD_CLI_MODE=wrong-size '" + fakeEngine.toUtf8() + "' \"$@\"\n"
+                        "kill -ABRT $$\n"));
+    const EngineRequest request = runnableRequest(fixture.root.path(), 2, 3);
+    SdCppEngine engine(fixture.root.path() + "/wrong-then-crash");
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    // The sd-cli it ran exited cleanly; it is the wrapper that died, so the
+    // output has the saved line and the crash, as the real case does.
+    QVERIFY(SdCppEngine::savedAll(run.error.detail, 2)); // the rule is reached
+    QVERIFY(run.failed);
+    QVERIFY(!run.finished);
+    // The crash was forgiven and the size check is what failed: without the
+    // rule the message would be the crash's ("stopped unexpectedly").
+    QVERIFY2(run.error.message.contains("missing or the wrong size"), qPrintable(run.error.message));
+}
+
+void LimgenTests::engine_aCrashAfterSavingAnUpscaleIsASuccessAndBeforeIsNot() {
+    EnvGuard guard({"FAKE_SD_CLI_MODE", "FAKE_SD_CLI_LOG", "FAKE_SD_CLI_STEP_SECONDS"});
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    qputenv("FAKE_SD_CLI_MODE", "crash-at-exit");
+    EngineRequest request = upscaleRequest(fixture.root.path());
+    {
+        SdCppEngine engine(fakeEngine);
+        EngineRun run;
+        RUN_ENGINE(engine, run, request, 20000);
+        QVERIFY2(run.finished, qPrintable(run.error.message + run.error.detail));
+        QCOMPARE(run.drafts, QStringList{request.outputDirectory + "/upscaled.png"});
+        QCOMPARE(QImageReader(run.drafts.first()).size(), QSize(1200, 800));
+    }
+    QVERIFY(QDir(request.outputDirectory).removeRecursively());
+    qputenv("FAKE_SD_CLI_MODE", "crash-before-save");
+    SdCppEngine engine(fakeEngine);
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    QVERIFY(run.failed);
+    QVERIFY(!run.finished);
+    QVERIFY(!QFileInfo::exists(request.outputDirectory + "/upscaled.png"));
+}
+
+// A core dump of an engine that crashed as it exited takes half a minute to write.
+void LimgenTests::engine_runsWithNoCoreDumpsAndTheParentKeepsItsLimit() {
+    EnvGuard guard({"FAKE_SD_CLI_MODE", "FAKE_SD_CLI_LOG", "FAKE_SD_CLI_STEP_SECONDS"});
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    rlimit before{};
+    QVERIFY(getrlimit(RLIMIT_CORE, &before) == 0);
+    const QString limits = fixture.root.path() + "/limits.log";
+    QVERIFY(writeScript(fixture.root.path() + "/report-limit",
+                        "echo \"core=$(ulimit -c)\" >> '" + limits.toUtf8() + "'\nexec '" + fakeEngine.toUtf8() + "' \"$@\"\n"));
+    SdCppEngine engine(fixture.root.path() + "/report-limit");
+    EngineRun run;
+    RUN_ENGINE(engine, run, runnableRequest(fixture.root.path(), 1, 2), 20000);
+    QVERIFY(run.finished);
+    const QStringList lines = QString::fromUtf8(readFile(limits)).split('\n', Qt::SkipEmptyParts);
+    QVERIFY(!lines.isEmpty());
+    for (const QString &line : lines)
+        QCOMPARE(line, QString("core=0"));
+    rlimit after{};
+    QVERIFY(getrlimit(RLIMIT_CORE, &after) == 0);
+    QCOMPARE(quint64(after.rlim_cur), quint64(before.rlim_cur)); // only the child was limited
+}
+
+void LimgenTests::batch_varietyRunsOncePerDraftWithItsOwnPromptSeedAndHint() {
+    BatchRig rig;
+    stockTheme(rig.sb.fixture);
+    BatchSettings settings = genericSettings(Prompt::Variety::Framing, 3);
+    QCOMPARE(int(rig.prepare(settings)), int(Batch::Outcome::Ok));
+    QVERIFY(rig.batch->runsPerDraft());
+    const QStringList hints = Prompt::varietyHints(Prompt::Variety::Framing, 3, 100);
+    QCOMPARE(rig.batch->hints(), hints);
+    QCOMPARE(rig.batch->prompts().size(), 3);
+    QCOMPARE(rig.batch->prompts().at(1), "a red fox, " + hints.at(1));
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.run.entries.size(), 3);
+
+    // The engine ran three times, each with one image, its own seed, prompt and folder.
+    const QList<QStringList> calls = imageCalls(rig.sb.fakeLog());
+    QCOMPARE(calls.size(), 3);
+    QSet<QString> folders;
+    for (int i = 0; i < 3; ++i) {
+        QCOMPARE(argumentAfter(calls.at(i), "--batch-count"), QString("1"));
+        QCOMPARE(argumentAfter(calls.at(i), "--seed"), QString::number(100 + i));
+        QCOMPARE(argumentAfter(calls.at(i), "--prompt"), "a red fox, " + hints.at(i));
+        QVERIFY2(argumentAfter(calls.at(i), "--output").contains(QString("/run-%1/").arg(i)),
+                 qPrintable(argumentAfter(calls.at(i), "--output")));
+        folders << argumentAfter(calls.at(i), "--output");
+    }
+    QCOMPARE(folders.size(), 3);
+    // The drafts are filed in draft order: each has its own prompt, seed, hint and image.
+    for (int i = 0; i < 3; ++i) {
+        const LibraryEntry entry = rig.run.entries.at(i);
+        QCOMPARE(entry.metadata["prompt"].toString(), "a red fox, " + hints.at(i));
+        QCOMPARE(entry.metadata["seed"].toDouble(), double(100 + i));
+        QCOMPARE(entry.metadata["subject"].toString(), QString("a red fox"));
+        const QJsonObject generic = entry.metadata["generic"].toObject();
+        QCOMPARE(generic["variety"].toString(), QString("framing"));
+        QCOMPARE(generic["hint"].toString(), hints.at(i));
+        QVERIFY(entry.metadata["theme"].isNull());
+        QCOMPARE(QImageReader(entry.image).size(), QSize(1344, 768));
+        const QColor expected = fakeColour(100 + i);
+        QCOMPARE(QImage(entry.image).pixelColor(0, 0).red(), expected.red());
+        QCOMPARE(QImage(entry.image).pixelColor(0, 0).green(), expected.green());
+    }
+    // Nothing was left in the cache, and the engine's run folders are gone.
+    QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+    QCOMPARE(filesUnder(rig.sb.library()).size(), 6);
+}
+
+void LimgenTests::batch_varietySeedsIsOneRunAndRecordsNoHint() {
+    BatchRig rig;
+    QCOMPARE(int(rig.prepare(genericSettings(Prompt::Variety::Seeds, 3))), int(Batch::Outcome::Ok));
+    QVERIFY(!rig.batch->runsPerDraft());
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    const QList<QStringList> calls = imageCalls(rig.sb.fakeLog());
+    QCOMPARE(calls.size(), 1);
+    QCOMPARE(argumentAfter(calls.first(), "--batch-count"), QString("3"));
+    QCOMPARE(argumentAfter(calls.first(), "--prompt"), QString("a red fox"));
+    for (const LibraryEntry &entry : rig.run.entries) {
+        QCOMPARE(entry.metadata["generic"].toObject()["variety"].toString(), QString("seeds"));
+        QVERIFY(!entry.metadata["generic"].toObject().contains("hint"));
+        QCOMPARE(entry.metadata["prompt"].toString(), QString("a red fox"));
+    }
+    // A theme batch has no variety at all.
+    rig.remake();
+    BatchSettings plain = BatchRig::settings();
+    plain.variety = Prompt::Variety::Light; // ignored without generic
+    QCOMPARE(int(rig.prepare(plain)), int(Batch::Outcome::Ok));
+    QVERIFY(!rig.batch->runsPerDraft());
+    QCOMPARE(rig.batch->hints(), QStringList({"", "", "", ""}));
+}
+
+void LimgenTests::batch_varietyWithAnEditedFullPromptDoesNotSplitTheRuns() {
+    BatchRig rig;
+    BatchSettings settings = genericSettings(Prompt::Variety::Light, 3);
+    settings.fullPrompt = "exactly this, nothing added";
+    QCOMPARE(int(rig.prepare(settings)), int(Batch::Outcome::Ok));
+    QVERIFY(!rig.batch->runsPerDraft());
+    for (const QString &prompt : rig.batch->prompts())
+        QCOMPARE(prompt, QString("exactly this, nothing added"));
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 1);
+    QCOMPARE(genericPrompt(rig.sb.fakeLog()), QString("exactly this, nothing added"));
+    // The sidecar must not claim a hint the engine was not given.
+    for (const LibraryEntry &entry : rig.run.entries) {
+        QCOMPARE(entry.metadata["prompt"].toString(), QString("exactly this, nothing added"));
+        QVERIFY(!entry.metadata["generic"].toObject().contains("hint"));
+        QCOMPARE(entry.metadata["generic"].toObject()["variety"].toString(), QString("seeds"));
+    }
+}
+
+void LimgenTests::batch_varietyWithASingleDraftSaysWhatTheEngineWasGiven() {
+    BatchRig rig;
+    QCOMPARE(int(rig.prepare(genericSettings(Prompt::Variety::Framing, 1))), int(Batch::Outcome::Ok));
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.run.entries.size(), 1);
+    const QString given = genericPrompt(rig.sb.fakeLog());
+    const QJsonObject sidecar = rig.run.entries.first().metadata;
+    // The one image is described as it was made: the prompt in the sidecar is the engine's.
+    QCOMPARE(sidecar["prompt"].toString(), given);
+    const QString hint = sidecar["generic"].toObject()["hint"].toString();
+    QVERIFY(!hint.isEmpty());
+    QCOMPARE(given.contains(hint), true);
+    QCOMPARE(sidecar["generic"].toObject()["variety"].toString(), QString("framing"));
+}
+
+void LimgenTests::batch_varietyMapsProgressSamplingAndPreviewsToTheDraft() {
+    BatchRig rig;
+    BatchSettings settings = genericSettings(Prompt::Variety::Framing, 3);
+    settings.previews = true;
+    QCOMPARE(int(rig.prepare(settings)), int(Batch::Outcome::Ok));
+    QList<int> progressImages;
+    QObject::connect(rig.batch.get(), &Batch::progress, rig.batch.get(),
+                     [&](int image, int, int, double) { progressImages << image; });
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.run.sampled, QList<int>({0, 1, 2}));
+    QVERIFY(!progressImages.isEmpty());
+    // Each run counts for its own draft, in order, never for draft 0 again.
+    QVERIFY(std::is_sorted(progressImages.begin(), progressImages.end()));
+    QCOMPARE(QSet<int>(progressImages.begin(), progressImages.end()), QSet<int>({0, 1, 2}));
+    QVERIFY(!rig.run.previews.isEmpty());
+    QSet<int> previewed;
+    int last = 0;
+    for (const auto &preview : rig.run.previews) {
+        QVERIFY2(preview.second.contains(QString("/run-%1/").arg(preview.first)), qPrintable(preview.second));
+        QVERIFY(preview.first >= last);
+        last = preview.first;
+        previewed << preview.first;
+    }
+    QCOMPARE(previewed, QSet<int>({0, 1, 2}));
+}
+
+void LimgenTests::batch_varietyEstimateAndTimingCountEachRunOnce() {
+    BatchRig rig;
+    QCOMPARE(int(rig.prepare(genericSettings(Prompt::Variety::Framing, 3))), int(Batch::Outcome::Ok));
+    QCOMPARE(rig.batch->estimate(), -1.0); // nothing measured yet
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY(rig.run.finished);
+    const CatalogueModel &model = *rig.catalogue.model("z-image-turbo");
+    const QString key = Timings::key(model.id, model.levels.first().id, rig.probe.gpu().backend());
+    const Timing measured = Timings().get(key);
+    // Measured as a batch of one: the start is what the first run took beyond its steps.
+    QVERIFY(measured.overheadSeconds > 0);
+    QVERIFY(measured.secondsPerStep > 0);
+    rig.remake();
+    QCOMPARE(int(rig.prepare(genericSettings(Prompt::Variety::Framing, 3))), int(Batch::Outcome::Ok));
+    const int steps = rig.batch->request().samplingSteps();
+    QCOMPARE(rig.batch->estimate(), 3 * measured.estimate(1, steps));
+    rig.remake();
+    QCOMPARE(int(rig.prepare(genericSettings(Prompt::Variety::Seeds, 3))), int(Batch::Outcome::Ok));
+    QCOMPARE(rig.batch->estimate(), measured.estimate(3, steps));
+    QVERIFY(3 * measured.estimate(1, steps) > measured.estimate(3, steps)); // each run pays the start again
+}
+
+void LimgenTests::batch_varietyCancelEndsCancelledWhereverItIs() {
+    // During a run, between two runs, or after the last: it ends Cancelled, files nothing and leaves nothing.
+    for (int delay : {-1, 0, 1, 5, 20, 60}) {
+        BatchRig rig;
+        qputenv("FAKE_SD_CLI_STEP_SECONDS", "0.05");
+        QCOMPARE(int(rig.prepare(genericSettings(Prompt::Variety::Framing, 3))), int(Batch::Outcome::Ok));
+        QSignalSpy sampled(rig.batch.get(), &Batch::sampled);
+        rig.batch->start();
+        if (delay < 0) {
+            // As soon as the first draft is sampled.
+            QTRY_VERIFY_WITH_TIMEOUT(sampled.count() >= 1 || rig.run.over(), 20000);
+        } else {
+            QTRY_VERIFY_WITH_TIMEOUT(imageCalls(rig.sb.fakeLog()).size() >= 1, 20000);
+            QTest::qWait(delay);
+        }
+        rig.batch->cancel();
+        WAIT_FOR_BATCH(rig);
+        QVERIFY2(rig.run.failed, qPrintable(QString::number(delay)));
+        QCOMPARE(int(rig.run.outcome), int(Batch::Outcome::Cancelled));
+        QVERIFY(rig.run.entries.isEmpty());
+        QVERIFY(imageCalls(rig.sb.fakeLog()).size() < 3);
+        QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+        QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+        QVERIFY(!rig.batch->isRunning());
+        // No run starts after it.
+        const int calls = imageCalls(rig.sb.fakeLog()).size();
+        QTest::qWait(300);
+        QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), calls);
+    }
+}
+
+void LimgenTests::batch_varietyCancelDuringARunStopsTheEngine() {
+    BatchRig rig;
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    QCOMPARE(int(rig.prepare(genericSettings(Prompt::Variety::Framing, 3))), int(Batch::Outcome::Ok));
+    rig.batch->start();
+    QTRY_VERIFY_WITH_TIMEOUT(imageCalls(rig.sb.fakeLog()).size() == 1, 15000);
+    rig.batch->cancel();
+    WAIT_FOR_BATCH(rig);
+    QCOMPARE(int(rig.run.outcome), int(Batch::Outcome::Cancelled));
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 1);
+    QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+    QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+}
+
+void LimgenTests::batch_varietyAFailureInARunFailsTheBatchAndFilesNothing() {
+    for (const QString &mode : {QString("fail"), QString("crash-before-save")}) {
+        BatchRig rig;
+        const QString flaky = flakyEngine(rig.sb.fixture.root.path(), 2, mode);
+        rig.batch = std::make_unique<Batch>(rig.catalogue, rig.sb.fixture.paths(), flaky);
+        rig.run = BatchRun();
+        watchBatch(*rig.batch, rig.run);
+        QCOMPARE(int(rig.prepare(genericSettings(Prompt::Variety::Framing, 4))), int(Batch::Outcome::Ok));
+        rig.batch->start();
+        WAIT_FOR_BATCH(rig);
+        QVERIFY2(rig.run.failed, qPrintable(mode));
+        QCOMPARE(int(rig.run.outcome), int(Batch::Outcome::Failed));
+        QVERIFY(!rig.run.message.isEmpty());
+        QVERIFY(rig.run.entries.isEmpty());
+        QVERIFY(!rig.run.finished);
+        // The third and fourth runs never started; the first draft was not kept.
+        QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 2);
+        QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+        QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+    }
+}
+
+void LimgenTests::batch_varietyEveryRunCrashingAtExitStillSucceeds() {
+    BatchRig rig;
+    qputenv("FAKE_SD_CLI_MODE", "crash-at-exit");
+    QCOMPARE(int(rig.prepare(genericSettings(Prompt::Variety::Framing, 3))), int(Batch::Outcome::Ok));
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.run.entries.size(), 3);
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 3);
+    // And a plain batch that crashes as it exits as well.
+    rig.remake();
+    QCOMPARE(int(rig.prepare(genericSettings(Prompt::Variety::Seeds, 3))), int(Batch::Outcome::Ok));
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    QVERIFY2(rig.run.finished, qPrintable(rig.run.message));
+    QCOMPARE(rig.run.entries.size(), 3);
+}
+
+void LimgenTests::studio_varietyIsSavedChosenByIndexAndRestored() {
+    StudioRig rig;
+    rig.createStudio();
+    QCOMPARE(rig.studio->varietyIndex(), 0);
+    QSignalSpy changed(rig.studio.get(), &Studio::settingsChanged);
+    rig.studio->setVarietyIndex(2);
+    QCOMPARE(rig.studio->varietyIndex(), 2);
+    QCOMPARE(Config(rig.sb.configFile()).genericVariety(), QString("light"));
+    const int events = changed.count();
+    rig.studio->setVarietyIndex(2);
+    rig.studio->setVarietyIndex(3);
+    rig.studio->setVarietyIndex(-1);
+    QCOMPARE(changed.count(), events);
+    QCOMPARE(rig.studio->varietyIndex(), 2);
+    rig.studio->setVarietyIndex(1);
+    rig.createStudio();
+    QCOMPARE(rig.studio->varietyIndex(), 1);
+    // A saved value that is junk reads as seeds.
+    QVERIFY(writeFile(rig.sb.configFile(), "{\"generic\": {\"variety\": \"wild\"}}"));
+    rig.createStudio();
+    QCOMPARE(rig.studio->varietyIndex(), 0);
+}
+
+void LimgenTests::studio_varietyMakesEachPreviewItsOwnRunOnItsOwnTile() {
+    // The small catalogue has no preview decoder, so the engine draws no previews here; batch_varietyMaps...
+    // checks those on the real catalogue. The tiles' progress is seen.
+    StudioRig rig(512, 6);
+    rig.createStudio();
+    rig.studio->setVarietyIndex(2); // framing and light
+    QList<QVariantList> snapshots;
+    QObject::connect(rig.studio.get(), &Studio::draftsChanged, rig.studio.get(),
+                     [&] { snapshots << rig.studio->drafts(); });
+    QVERIFY(rig.makePreviews());
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 4);
+    QSet<QString> hints;
+    for (int i = 0; i < 4; ++i) {
+        const QVariantMap tile = rig.preview(i);
+        const QString hint = tile["hint"].toString();
+        QVERIFY2(hint.contains(", "), qPrintable(hint)); // a framing and a light
+        hints << hint;
+        QCOMPARE(promptsOf(rig.sb.fakeLog()).at(i), "a red fox, " + hint);
+        const QJsonObject sidecar = rig.sidecar(tile["id"].toString());
+        QCOMPARE(sidecar["prompt"].toString(), "a red fox, " + hint);
+        QCOMPARE(sidecar["generic"].toObject()["hint"].toString(), hint);
+        QCOMPARE(sidecar["generic"].toObject()["variety"].toString(), QString("light"));
+        QCOMPARE(sidecar["seed"].toDouble(), tile["seed"].toDouble());
+    }
+    QCOMPARE(hints.size(), 4);
+    // Progress landed on the tile of its run: a tile is sampling only after the one before is done.
+    QSet<int> sampling;
+    for (const QVariantList &snapshot : snapshots)
+        for (int i = 0; i < snapshot.size(); ++i) {
+            const QVariantMap tile = snapshot.at(i).toMap();
+            if (tile["state"].toString() != "sampling")
+                continue;
+            sampling << i;
+            for (int j = 0; j < snapshot.size(); ++j) {
+                const QString state = snapshot.at(j).toMap()["state"].toString();
+                QVERIFY2(j < i ? state == "sampled" : j == i || state == "waiting", qPrintable(QString("%1 sampling, %2 %3").arg(i).arg(j).arg(state)));
+            }
+        }
+    QCOMPARE(sampling, QSet<int>({0, 1, 2, 3}));
+    // The last snapshot has nothing waiting or half done.
+    for (int i = 0; i < 4; ++i)
+        QCOMPARE(rig.preview(i)["state"].toString(), QString("done"));
+    // An upscale of a preview made from a hint keeps it in its sidecar.
+    QVERIFY(rig.upscaleAndWait(2));
+    const QJsonObject made = rig.sidecar(rig.studio->result()["id"].toString());
+    QCOMPARE(made["generic"].toObject()["hint"].toString(), rig.preview(2)["hint"].toString());
+    QVERIFY(made["theme"].isNull());
+}
+
+void LimgenTests::studio_seedsOnlyPreviewsCarryNoHint() {
+    StudioRig rig;
+    rig.createStudio();
+    QVERIFY(rig.makePreviews());
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 1);
+    for (int i = 0; i < 4; ++i)
+        QCOMPARE(rig.preview(i)["hint"].toString(), QString());
+}
+
+void LimgenTests::studio_cancelBetweenOrDuringRunsKeepsNothing() {
+    StudioRig rig;
+    rig.createStudio();
+    rig.studio->setVarietyIndex(1);
+    qputenv("FAKE_SD_CLI_MODE", "hang");
+    rig.studio->setPrompt("a red fox");
+    rig.studio->generate();
+    QVERIFY(rig.studio->running());
+    QTRY_VERIFY_WITH_TIMEOUT(imageCalls(rig.sb.fakeLog()).size() == 1, 15000);
+    rig.studio->cancel();
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->running(), 20000);
+    QVERIFY(rig.studio->drafts().isEmpty());
+    QVERIFY(!rig.studio->statusIsError());
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 1);
+    QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+    QVERIFY(!rig.backend->busy());
+    qunsetenv("FAKE_SD_CLI_MODE");
+    QVERIFY(rig.makePreviews());
+}
+
+void LimgenTests::studio_aFailedRunFailsTheBatchAndFreesTheGpu() {
+    StudioRig rig;
+    const QString flaky = flakyEngine(rig.sb.fixture.root.path(), 3, "fail");
+    rig.createStudio(flaky);
+    rig.studio->setVarietyIndex(1);
+    rig.studio->setPrompt("a red fox");
+    rig.studio->generate();
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->running(), 30000);
+    QVERIFY(rig.studio->statusIsError());
+    QVERIFY(rig.studio->drafts().isEmpty());
+    QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 3);
+    QVERIFY(!rig.backend->busy());
+    // The next batch is all good (the flaky run has passed).
+    QVERIFY(rig.makePreviews());
+    QVERIFY(!rig.studio->statusIsError());
+}
+
+void LimgenTests::studio_anEngineThatCrashesAtExitStillGivesPreviewsAndAnUpscale() {
+    StudioRig rig;
+    rig.createStudio();
+    qputenv("FAKE_SD_CLI_MODE", "crash-at-exit");
+    rig.studio->setVarietyIndex(1);
+    QVERIFY(rig.makePreviews());
+    QVERIFY(!rig.studio->statusIsError());
+    QVERIFY(rig.upscaleAndWait(1));
+    QCOMPARE(QImageReader(rig.studio->result()["path"].toString()).size(), QSize(1280, 720));
+    // Crashing before saving is an error, for the previews and for the upscale.
+    qputenv("FAKE_SD_CLI_MODE", "crash-before-save");
+    rig.studio->upscale(0);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->upscaling(), 30000);
+    QVERIFY(rig.studio->statusIsError());
+    QCOMPARE(rig.finals(), 1); // the earlier one only
+    rig.studio->generate();
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.studio->running(), 30000);
+    QVERIFY(rig.studio->statusIsError());
+    QVERIFY(rig.studio->drafts().isEmpty());
+}
+
+void LimgenTests::cli_imageVarietyMakesARunPerDraftAndSaysWhichHint() {
+    REQUIRE_BINARY();
+    CliImage rig;
+    CliResult result = runCli(rig.fixture, {"image", "red fox", "--variety", "framing", "--count", "3", "--seed", "5",
+                                            "--json"}, rig.env);
+    QVERIFY(result.started);
+    QVERIFY2(result.exitCode == 0, qPrintable(result.err));
+    const QJsonObject json = jsonObject(result.out);
+    QCOMPARE(json["variety"].toString(), QString("framing"));
+    const QStringList hints = Prompt::varietyHints(Prompt::Variety::Framing, 3, 5);
+    const QJsonArray drafts = json["drafts"].toArray();
+    QCOMPARE(drafts.size(), 3);
+    QSet<QString> seen;
+    for (int i = 0; i < 3; ++i) {
+        const QJsonObject draft = drafts[i].toObject();
+        QCOMPARE(draft["hint"].toString(), hints.at(i));
+        QCOMPARE(draft["prompt"].toString(), "red fox, " + hints.at(i));
+        QCOMPARE(draft["seed"].toInt(), 5 + i);
+        seen << draft["hint"].toString();
+        const QJsonObject sidecar = Library(rig.libraryDir()).find(draft["id"].toString()).metadata;
+        QCOMPARE(sidecar["generic"].toObject()["hint"].toString(), hints.at(i));
+        QCOMPARE(sidecar["prompt"].toString(), draft["prompt"].toString());
+    }
+    QCOMPARE(seen.size(), 3);
+    QCOMPARE(promptsOf(rig.log()), QStringList({"red fox, " + hints.at(0), "red fox, " + hints.at(1), "red fox, " + hints.at(2)}));
+    QVERIFY(rig.themeUntouched());
+
+    // The default is seeds: one run, no per-draft keys.
+    QVERIFY(QFile::remove(rig.log()));
+    result = runCli(rig.fixture, {"image", "red fox", "--count", "3", "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    const QJsonObject plain = jsonObject(result.out);
+    QCOMPARE(plain["variety"].toString(), QString("seeds"));
+    for (const QJsonValue &draft : plain["drafts"].toArray()) {
+        QVERIFY(!draft.toObject().contains("hint"));
+        QVERIFY(!draft.toObject().contains("prompt"));
+    }
+    QCOMPARE(imageCalls(rig.log()).size(), 1);
+    // Light adds a light after the framing.
+    result = runCli(rig.fixture, {"image", "red fox", "--variety", "light", "--count", "2", "--seed", "9", "--json"}, rig.env);
+    QCOMPARE(result.exitCode, 0);
+    const QStringList lit = Prompt::varietyHints(Prompt::Variety::Light, 2, 9);
+    QCOMPARE(jsonObject(result.out)["drafts"].toArray().at(1).toObject()["hint"].toString(), lit.at(1));
+}
+
+void LimgenTests::cli_imageVarietyRejectsWhatItDoesNotKnow() {
+    REQUIRE_BINARY();
+    CliImage rig;
+    for (const char *variety : {"wild", "", "Framing", "seeds,light"}) {
+        const CliResult result = runCli(rig.fixture, {"image", "red fox", "--variety", variety}, rig.env);
+        QVERIFY2(result.started, variety);
+        QVERIFY2(result.exitCode == 2, variety);
+        QCOMPARE(result.out, QString());
+        QVERIFY2(firstLine(result.err).contains("--variety"), qPrintable(result.err));
+        QVERIFY2(firstLine(result.err).contains("framing"), qPrintable(result.err)); // it names the choices
+    }
+    QCOMPARE(imageCalls(rig.log()).size(), 0);
+    QCOMPARE(filesUnder(rig.libraryDir()), QStringList());
+    const CliResult help = runCli(rig.fixture, {"help", "image"});
+    QVERIFY(help.out.contains("--variety"));
+}
+
+void LimgenTests::qml_theVarietyBoxBlocksTheKeysAndTilesShowTheirHint() {
+    HomeRig rig;
+    LOAD_WINDOW(rig.q);
+    QTest::keyClick(rig.q.window, '1');
+    QTRY_COMPARE(rig.screen(), QString("generic"));
+    rig.useAMakeableSize();
+    rig.q.studio->setPrompt("a red fox");
+    QQuickItem *generic = rig.itemById("GenericScreen");
+    QVERIFY(generic);
+    QQuickItem *box = nullptr;
+    for (QQuickItem *item : rig.q.items())
+        if (item->objectName() == "varietyBox")
+            box = item;
+    QVERIFY(box);
+    // The box follows the Studio.
+    rig.q.studio->setVarietyIndex(1);
+    QTRY_COMPARE(box->property("currentIndex").toInt(), 1);
+    // Open, it takes the keys: Space makes nothing.
+    QObject *popup = comboPopup(rig.q, "varietyBox");
+    QVERIFY(popup);
+    QMetaObject::invokeMethod(popup, "open");
+    QTRY_VERIFY(popup->property("opened").toBool());
+    QTRY_VERIFY(generic->property("dialogOpen").toBool());
+    QTest::keyClick(rig.q.window, Qt::Key_Space);
+    QTest::qWait(150);
+    QVERIFY(!rig.q.studio->running() && rig.q.studio->drafts().isEmpty());
+    QMetaObject::invokeMethod(popup, "close");
+    QTRY_VERIFY(!popup->property("opened").toBool());
+    QTRY_VERIFY(!generic->property("dialogOpen").toBool());
+    // Closed, Space makes the previews, and each done tile shows its hint.
+    QTest::keyClick(rig.q.window, Qt::Key_Space);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.q.studio->running() && rig.q.studio->drafts().size() == 4, 30000);
+    QStringList texts;
+    auto collect = [&] {
+        texts.clear();
+        for (QQuickItem *item : rig.q.items())
+            if (item->isVisible() && item->inherits("QQuickText"))
+                texts << item->property("text").toString();
+    };
+    for (int i = 0; i < 4; ++i) {
+        const QString hint = rig.q.studio->drafts().at(i).toMap()["hint"].toString();
+        QVERIFY(!hint.isEmpty());
+        QTRY_VERIFY2((collect(), texts.contains(hint)), qPrintable(hint));
+    }
+    // Full size, the caption names the seed and the hint of the selected one.
+    const QString first = rig.q.studio->drafts().at(0).toMap()["hint"].toString();
+    QTest::keyClick(rig.q.window, 'f');
+    QTRY_VERIFY(generic->property("fullView").toBool());
+    QTRY_VERIFY2((collect(), std::any_of(texts.begin(), texts.end(), [&](const QString &t) { return t.endsWith(" · " + first); })),
+                 qPrintable(texts.join('|')));
+    // Seeds only: no hint on any tile.
+    QTest::keyClick(rig.q.window, Qt::Key_Escape);
+    rig.q.studio->setVarietyIndex(0);
+    QTest::keyClick(rig.q.window, Qt::Key_Space);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.q.studio->running() && rig.q.studio->drafts().size() == 4, 30000);
+    collect();
+    for (const QString &hint : Prompt::framingHints())
+        QVERIFY2(!texts.contains(hint), qPrintable(hint));
+    NO_QML_WARNINGS(rig.q);
+}
+
+
+namespace {
+
+// Calls `action` just before the first queued call to `target` runs once `armed` says so (a one-shot
+// timer with a context object is one), from the application's event filter.
+struct BeforeTheNextQueuedCall : QObject {
+    QObject *target = nullptr;
+    std::function<bool()> armed;
+    std::function<void()> action;
+    bool fired = false;
+    bool eventFilter(QObject *watched, QEvent *event) override {
+        if (!fired && event->type() == QEvent::MetaCall && watched == target && armed()) {
+            fired = true;
+            action();
+        }
+        return false;
+    }
+};
+
+} // namespace
+
+void LimgenTests::batch_varietyCancelBetweenTwoRunsStartsNoMore() {
+    BatchRig rig;
+    QCOMPARE(int(rig.prepare(genericSettings(Prompt::Variety::Framing, 3))), int(Batch::Outcome::Ok));
+    // The engine's first run ends, and the next is queued from the event loop: the cancel lands in between.
+    BeforeTheNextQueuedCall filter;
+    filter.target = rig.batch.get();
+    filter.armed = [&] { return imageCalls(rig.sb.fakeLog()).size() == 1; };
+    filter.action = [&] { rig.batch->cancel(); };
+    qApp->installEventFilter(&filter);
+    rig.batch->start();
+    WAIT_FOR_BATCH(rig);
+    qApp->removeEventFilter(&filter);
+    QVERIFY(filter.fired);
+    QCOMPARE(int(rig.run.outcome), int(Batch::Outcome::Cancelled));
+    QCOMPARE(imageCalls(rig.sb.fakeLog()).size(), 1);
+    QVERIFY(rig.run.entries.isEmpty());
+    QCOMPARE(filesUnder(rig.sb.library()), QStringList());
+    QCOMPARE(filesUnder(rig.sb.fixture.cache), QStringList());
+    QVERIFY(!rig.batch->isRunning());
+}
+
+
+// The files are all there, but the engine said it saved only some of them before it died: not the exit crash.
+void LimgenTests::engine_aCrashAfterAPartialSavedLineIsAFailure() {
+    EnvGuard guard({"FAKE_SD_CLI_MODE", "FAKE_SD_CLI_LOG", "FAKE_SD_CLI_STEP_SECONDS"});
+    Fixture fixture;
+    QVERIFY(fixture.ok());
+    QVERIFY(writeScript(fixture.root.path() + "/partial-then-crash",
+                        "'" + fakeEngine.toUtf8() + "' \"$@\" | sed 's#2/2 images saved#1/2 images saved#'\n"
+                        "kill -ABRT $$\n"));
+    const EngineRequest request = runnableRequest(fixture.root.path(), 2, 3);
+    SdCppEngine engine(fixture.root.path() + "/partial-then-crash");
+    EngineRun run;
+    RUN_ENGINE(engine, run, request, 20000);
+    QVERIFY(QFileInfo::exists(request.outputDirectory + "/draft-1.png")); // everything was written
+    QVERIFY(run.failed);
+    QVERIFY(!run.finished);
+    QVERIFY(run.drafts.isEmpty());
+}
+
 #include "limgen_tests.moc"

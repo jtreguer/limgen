@@ -30,8 +30,10 @@ Rectangle {
             if (!view.draft)
                 return ""
             const seed = qsTr("Seed %1").arg(Number(view.draft.seed).toLocaleString(Qt.locale(), 'f', 0))
-            return view.draft.kept && view.draft.keptPath ? qsTr("%1 · kept as %2").arg(seed).arg(view.draft.keptPath.split("/").pop())
-                                                          : seed
+            if (view.draft.kept && view.draft.keptPath)
+                return qsTr("%1 · kept as %2").arg(seed).arg(view.draft.keptPath.split("/").pop())
+            // A generic preview's variety hint is model input, kept in English.
+            return view.draft.hint ? seed + " · " + view.draft.hint : seed
         }
     }
 

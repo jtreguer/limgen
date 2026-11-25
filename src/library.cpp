@@ -77,7 +77,7 @@ QJsonObject Library::metadata(const QString &id, const QDateTime &created, const
         {"subject", record.subject},
         {"prompt", record.prompt},
         {"negative", record.negative},
-        {"style", record.style},
+        {"style", record.style.isEmpty() ? QJsonValue() : QJsonValue(record.style)},
         {"model", QJsonObject{{"id", record.modelId},
                               {"level", record.level},
                               {"files_sha256", QJsonArray::fromStringList(record.filesSha256)}}},
@@ -90,6 +90,7 @@ QJsonObject Library::metadata(const QString &id, const QDateTime &created, const
         {"sampler", record.sampler},
         {"size", QJsonArray{record.width, record.height}},
         {"source", record.source.isEmpty() ? QJsonValue() : QJsonValue(record.source)},
+        {"generic", record.generic.isEmpty() ? QJsonValue() : QJsonValue(record.generic)},
         {"finish", QJsonValue()},
     };
 }

@@ -17,6 +17,10 @@ ApplicationWindow {
     Material.accent: theme.accent
     Material.roundedScale: theme.radius
 
+    // "home", "generic" or "theme": the screen shown. The window opens on
+    // home, with one big button for each of the other two.
+    property string screen: "home"
+    property bool genericVisited: false
     property bool helpVisible: false
     property bool fullView: false
     property bool promptVisible: false
@@ -26,10 +30,14 @@ ApplicationWindow {
     property bool quitting: false
     // Single-letter shortcuts are off while the user types, or a dialog is
     // up. Under the help only ? and Q act, so nothing changes out of sight.
-    readonly property bool typing: promptBar.typing
-    readonly property bool dialogOpen: modelPicker.opened || quitDialog.opened || themeDialog.opened
+    readonly property var generic: genericLoader.item
+    readonly property bool typing: (screen === "theme" && promptBar.typing) || (screen === "generic" && generic !== null && generic.typing)
+    readonly property bool dialogOpen: modelPicker.opened || quitDialog.opened || themeDialog.opened ||
+                                       (generic !== null && generic.dialogOpen)
     readonly property bool keysFree: !typing && !dialogOpen
     readonly property bool actionKeysFree: keysFree && !helpVisible
+    // The theme screen's keys act only while it is shown.
+    readonly property bool themeKeys: actionKeysFree && screen === "theme"
     readonly property var selectedDraft: backend.drafts.length > selected ? backend.drafts[selected] : null
     readonly property var libraryItem: backend.library.length > librarySelected ? backend.library[librarySelected] : null
     // The selection follows its image when the list changes (a discard, a
@@ -78,6 +86,19 @@ ApplicationWindow {
         const next = row * 2 + column
         if (next < count)
             selected = next
+    }
+
+    function openScreen(name) {
+        helpVisible = false
+        fullView = false
+        libraryVisible = false
+        if (name === "generic")
+            genericVisited = true
+        screen = name
+        if (name === "theme")
+            leaveFields()
+        else if (name === "generic" && generic)
+            generic.leaveFields()
     }
 
     function requestQuit() {
@@ -147,14 +168,15 @@ ApplicationWindow {
 
     Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; enabled: win.keysFree; onActivated: win.helpVisible = !win.helpVisible }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: win.keysFree; onActivated: win.requestQuit() }
-    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.generate() }
-    Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.rerun() }
-    Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: win.promptVisible = !win.promptVisible }
-    Shortcut { sequence: "M"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !backend.busy; onActivated: modelPicker.open() }
+    Shortcut { sequence: "H"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && win.screen !== "home"; onActivated: win.openScreen("home") }
+    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: win.themeKeys; onActivated: backend.generate() }
+    Shortcut { sequence: "R"; context: Qt.ApplicationShortcut; enabled: win.themeKeys; onActivated: backend.rerun() }
+    Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: win.themeKeys; onActivated: win.promptVisible = !win.promptVisible }
+    Shortcut { sequence: "M"; context: Qt.ApplicationShortcut; enabled: win.themeKeys && !backend.busy; onActivated: modelPicker.open() }
     Shortcut {
         sequence: "F"
         context: Qt.ApplicationShortcut
-        enabled: win.actionKeysFree
+        enabled: win.themeKeys
         onActivated: {
             if (win.fullView)
                 win.fullView = false
@@ -163,20 +185,20 @@ ApplicationWindow {
         }
     }
     // K, S and D act on the batch's drafts, so not while the library is open.
-    Shortcut { sequence: "K"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.libraryVisible; onActivated: backend.keep(win.selected) }
-    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.libraryVisible; onActivated: backend.keepAndSet(win.selected) }
-    Shortcut { sequence: "D"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.libraryVisible; onActivated: backend.discard(win.selected) }
-    Shortcut { sequence: "V"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: win.vary() }
-    Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.cycleBackground(1) }
-    Shortcut { sequence: "Shift+B"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.cycleBackground(-1) }
-    Shortcut { sequence: "L"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: win.toggleLibrary() }
+    Shortcut { sequence: "K"; context: Qt.ApplicationShortcut; enabled: win.themeKeys && !win.libraryVisible; onActivated: backend.keep(win.selected) }
+    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: win.themeKeys && !win.libraryVisible; onActivated: backend.keepAndSet(win.selected) }
+    Shortcut { sequence: "D"; context: Qt.ApplicationShortcut; enabled: win.themeKeys && !win.libraryVisible; onActivated: backend.discard(win.selected) }
+    Shortcut { sequence: "V"; context: Qt.ApplicationShortcut; enabled: win.themeKeys; onActivated: win.vary() }
+    Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; enabled: win.themeKeys; onActivated: backend.cycleBackground(1) }
+    Shortcut { sequence: "Shift+B"; context: Qt.ApplicationShortcut; enabled: win.themeKeys; onActivated: backend.cycleBackground(-1) }
+    Shortcut { sequence: "L"; context: Qt.ApplicationShortcut; enabled: win.themeKeys; onActivated: win.toggleLibrary() }
     // Off while typing, so a text field keeps its own undo.
-    Shortcut { sequences: [StandardKey.Undo]; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.undo() }
-    Shortcut { sequences: [StandardKey.Redo]; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree; onActivated: backend.redo() }
-    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(-1, 0) }
-    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(1, 0) }
-    Shortcut { sequence: "Up"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(0, -1) }
-    Shortcut { sequence: "Down"; context: Qt.ApplicationShortcut; enabled: win.actionKeysFree && !win.fullView; onActivated: win.move(0, 1) }
+    Shortcut { sequences: [StandardKey.Undo]; context: Qt.ApplicationShortcut; enabled: win.themeKeys; onActivated: backend.undo() }
+    Shortcut { sequences: [StandardKey.Redo]; context: Qt.ApplicationShortcut; enabled: win.themeKeys; onActivated: backend.redo() }
+    Shortcut { sequence: "Left"; context: Qt.ApplicationShortcut; enabled: win.themeKeys && !win.fullView; onActivated: win.move(-1, 0) }
+    Shortcut { sequence: "Right"; context: Qt.ApplicationShortcut; enabled: win.themeKeys && !win.fullView; onActivated: win.move(1, 0) }
+    Shortcut { sequence: "Up"; context: Qt.ApplicationShortcut; enabled: win.themeKeys && !win.fullView; onActivated: win.move(0, -1) }
+    Shortcut { sequence: "Down"; context: Qt.ApplicationShortcut; enabled: win.themeKeys && !win.fullView; onActivated: win.move(0, 1) }
     // Esc closes what is open, leaves a text field, cancels the batch, or
     // goes back from variations to plain batches, in that order. Dialogs
     // handle their own Esc.
@@ -187,6 +209,10 @@ ApplicationWindow {
         onActivated: {
             if (win.helpVisible)
                 win.helpVisible = false
+            else if (win.screen === "generic")
+                win.generic.handleEscape()
+            else if (win.screen !== "theme")
+                return
             else if (win.fullView)
                 win.fullView = false
             else if (win.libraryVisible)
@@ -207,13 +233,17 @@ ApplicationWindow {
         LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
         LayoutMirroring.childrenInherit: true
 
+        // The theme screen. It stays built while hidden, so its batch, its
+        // keeps and its undo carry on behind the other screens.
         ColumnLayout {
             anchors.fill: parent
             spacing: 0
+            visible: win.screen === "theme"
 
             PaletteBar {
                 Layout.fillWidth: true
                 onModelClicked: if (!backend.busy) modelPicker.open()
+                onHomeClicked: win.openScreen("home")
             }
 
             RowLayout {
@@ -298,9 +328,31 @@ ApplicationWindow {
             }
         }
 
+        Loader {
+            anchors.fill: parent
+            active: win.screen === "home"
+            sourceComponent: HomeScreen {
+                keysActive: win.actionKeysFree && win.screen === "home"
+                onOpen: (name) => win.openScreen(name)
+            }
+        }
+
+        // Built the first time it is opened, then kept, so its previews and
+        // result are still there after a visit to another screen.
+        Loader {
+            id: genericLoader
+            anchors.fill: parent
+            active: win.genericVisited
+            visible: win.screen === "generic"
+            sourceComponent: GenericScreen {
+                keysFree: win.actionKeysFree && win.screen === "generic"
+                onHome: win.openScreen("home")
+            }
+        }
+
         FullView {
             anchors.fill: parent
-            visible: win.fullView && win.shownDraft !== null && win.shownDraft.state === "done"
+            visible: win.screen === "theme" && win.fullView && win.shownDraft !== null && win.shownDraft.state === "done"
             draft: win.shownDraft
             onClosed: win.fullView = false
         }
@@ -308,6 +360,7 @@ ApplicationWindow {
         HelpOverlay {
             anchors.fill: parent
             visible: win.helpVisible
+            screen: win.screen
         }
     }
 
@@ -327,7 +380,11 @@ ApplicationWindow {
         Label {
             width: parent.width
             wrapMode: Text.Wrap
-            text: backend.running || backend.batchWaiting
+            text: studio.running
+                  ? qsTr("Previews are being made. Quitting stops them, and they are not kept.")
+                  : studio.upscaling
+                  ? qsTr("An image is being upscaled. Quitting stops it; upscale it again next time.")
+                  : backend.running || backend.batchWaiting
                   ? qsTr("A batch is running. Quitting stops it, and its drafts are not kept.")
                   : backend.keeping
                     ? qsTr("A kept draft is still being finished. Quitting stops it; keep the draft again to finish it.")
@@ -347,6 +404,7 @@ ApplicationWindow {
             }
         }
         onAccepted: {
+            studio.stop()
             backend.stopAll()
             win.quitting = true
             Qt.quit()

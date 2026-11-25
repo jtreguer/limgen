@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QJsonObject>
+#include <QSize>
 #include <QString>
+#include <QStringList>
 
 // The user's choices that outlive a session, in ~/.config/limgen/config.json
 // (docs/technical.md section 7): the model, the style, and how kept images
@@ -36,6 +38,29 @@ public:
     static constexpr double defaultStrength = 0.5;
     double strength() const;
     void setStrength(double strength);
+
+    // The engine build in use, by backend ("vulkan", "cuda"); empty for the
+    // first one installed.
+    QString engine() const { return m_values.value("engine").toString(); }
+    void setEngine(const QString &backend) { m_values.insert("engine", backend); }
+
+    // The Generic screen's last choices, under "generic": the target size
+    // (empty when none was chosen, which means the largest monitor's), how
+    // many previews (2, 4, 6 or 9; 4 by default), the palette ("" for none,
+    // "custom", or a theme's slug) and the custom colours ("#rrggbb", at
+    // most five), and how much the previews differ.
+    QSize genericSize() const;
+    void setGenericSize(const QSize &size);
+    static constexpr int defaultGenericCount = 4;
+    int genericCount() const;
+    void setGenericCount(int count);
+    QString genericPalette() const;
+    void setGenericPalette(const QString &palette);
+    QStringList genericColors() const;
+    void setGenericColors(const QStringList &colors);
+    // "seeds" (the default), "framing" or "light" (Prompt::varietyIds()).
+    QString genericVariety() const;
+    void setGenericVariety(const QString &variety);
 
     // Written beside the file and renamed into place.
     bool save(QString *error = nullptr) const;

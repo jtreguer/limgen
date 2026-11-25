@@ -1222,7 +1222,12 @@ test_pkgbuild_installs_what_the_desktop_file_names() {
   contains "$pkgbuild" "/usr/bin/limgen"
   contains "$pkgbuild" "/usr/share/applications/limgen.desktop"
   contains "$pkgbuild" "/usr/share/icons/hicolor/scalable/apps/limgen.svg"
-  contains "$pkgbuild" "/usr/lib/limgen/sd-cli"
+  # One folder per engine, where SdCppEngine::installed() looks, and no
+  # conflict between them, so both can be installed.
+  contains "$pkgbuild" '"$pkgdir/usr/lib/limgen/$engine/sd-cli"'
+  if grep -q "^ *conflicts=" "$root/pkgbuild/PKGBUILD"; then
+    fail "the engine packages must not conflict: each has its own folder"
+  fi
   exists "$root/pkgbuild/limgen.desktop"
   exists "$root/pkgbuild/limgen.svg"
   exists "$root/LICENSE"

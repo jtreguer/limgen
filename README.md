@@ -2,15 +2,36 @@
 
 ![limgen with four drafts of "oil rig at dusk" for a dark theme](docs/screenshot.jpg)
 
-limgen (Local IMage GENeration) makes desktop backgrounds for the current
-[Omarchy](https://omarchy.org) theme with an image model that runs on your own
-GPU, and adds the ones you keep to that theme's backgrounds, where Omarchy's
-background cycling picks them up.
+limgen (Local IMage GENeration) makes images with an image model that runs on
+your own GPU. It opens on two choices:
+
+- **Generic generation**: any image, at the size you choose, with a palette
+  if you want one, saved where you like.
+- **Theme backgrounds**: backgrounds for the current
+  [Omarchy](https://omarchy.org) theme, added to that theme's backgrounds,
+  where Omarchy's background cycling picks them up.
 
 There is no account, no cloud service and no telemetry. limgen goes online
 only to download a model, after showing you its size and licence and asking.
 
 ## What it does
+
+Generic generation:
+
+- You type what the image should show and choose its final size: your
+  monitor's, a common size (1080p, 1440p, 4K, ultrawide, portrait, square)
+  or your own width and height.
+- You choose how many small previews come first (2x1, 2x2, 2x3 or 3x3), the
+  model, the engine when you have more than one installed (Vulkan, CUDA),
+  and optionally a palette: any installed theme's, or up to five colours of
+  your own.
+- The models change little from one seed to the next, so Variety can give
+  each preview its own framing, and its own light, for previews that really
+  differ.
+- You pick the preview you like and upscale it to the size you chose, then
+  save it as PNG or JPEG wherever you want.
+
+Theme backgrounds:
 
 - You type a subject, such as "oil rig at dusk". limgen makes four drafts
   whose prompt carries the theme's colours and mood, and shows each one taking
@@ -39,11 +60,18 @@ only to download a model, after showing you its size and licence and asking.
 
 ## Install
 
-limgen is not in Omarchy's package repository yet. From a checkout:
+limgen is installed from a checkout:
 
 ```sh
 bin/install                                  # limgen and its Vulkan engine
 LIMGEN_ENGINES="vulkan cuda" bin/install     # also a CUDA engine (needs the cuda package)
+```
+
+Both engines can be installed side by side; the window lets you choose
+between them, and remembers the choice.
+
+```sh
+limgen open generic        # straight to Generic generation, e.g. from a Hyprland key binding
 ```
 
 `bin/install` builds the packages with `makepkg` and installs them, so limgen
@@ -70,6 +98,23 @@ uses Real-ESRGAN x4plus (67 MB, BSD 3-Clause), downloaded with the first
 model. `docs/models.md` says how these were chosen.
 
 ## Keys
+
+On the home screen, Left and Right choose, Enter opens; 1 opens Generic
+generation and 2 Theme backgrounds. H goes back home from either. `?` lists
+the keys of the screen you are on.
+
+Generic generation:
+
+| Key | Action |
+|---|---|
+| Space | Make the previews (or Enter in the prompt field) |
+| Esc | Close the full view, leave a field, stop the work, or go back to the previews |
+| Arrow keys | Move between previews |
+| F | Show the selected preview full size |
+| U | Upscale the selected preview to the chosen size |
+| Ctrl+S | Save the upscaled image |
+
+Theme backgrounds:
 
 | Key | Action |
 |---|---|
@@ -98,7 +143,8 @@ it, and 130 when interrupted. All but `skill` take `--json`.
 
 | Command | Does |
 |---|---|
-| `limgen` or `limgen open` | Opens the window |
+| `limgen` or `limgen open` | Opens the window on the home screen |
+| `limgen open generic` / `limgen open theme` | Opens the window on that screen, for a key binding |
 | `limgen palette` | The theme's palette and the words it becomes in prompts |
 | `limgen doctor [--verify]` | The engine, the GPU, the models, and what is missing |
 | `limgen models` | The models, installed or not, and whether they run here |
@@ -106,20 +152,25 @@ it, and 130 when interrupted. All but `skill` take `--json`.
 | `limgen generate "<subject>"` | Makes drafts for the current theme |
 | `limgen generate --from <id-or-file> --strength 0.5` | Makes variations of an image |
 | `limgen keep <id> [--set]` | Finishes a draft and adds it to the theme's backgrounds |
+| `limgen image "<prompt>" --size 1080x1920` | Makes previews of anything (`--palette`, `--count` up to 9, `--variety framing`) |
+| `limgen upscale <id> --output image.png` | Upscales a preview to its size and saves it |
 | `limgen set <id-or-file>` | Shows an image as the background now |
 | `limgen library [--theme <slug>]` | Lists everything limgen made |
 | `limgen skill install` | Installs a skill so coding agents can use limgen |
 
-`limgen help <command>` lists a command's options.
+`limgen help <command>` lists a command's options. `--engine vulkan` or
+`--engine cuda` runs another installed engine than the one chosen in the
+window.
 
 ## Where things go
 
 | Path | Contents |
 |---|---|
 | `~/.config/omarchy/backgrounds/<theme>/limgen-*` | the backgrounds you kept |
+| wherever you save them (`~/Pictures/limgen/` is offered first) | generic images |
 | `~/.local/share/limgen/library/` | every draft and finished image, with its prompt and settings |
 | `~/.local/share/limgen/models/` | downloaded models |
-| `~/.config/limgen/config.json` | the model, style and finishing settings you chose |
+| `~/.config/limgen/config.json` | the model, engine, style, finishing and Generic screen settings you chose |
 
 ## Languages
 

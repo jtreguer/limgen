@@ -222,3 +222,31 @@ Palette Palette::fromToml(const QString &text) {
             palette.words << colour.words;
     return palette;
 }
+
+Palette Palette::fromColors(const QStringList &hexes) {
+    Palette palette;
+    if (hexes.isEmpty()) {
+        palette.error = QCoreApplication::translate("Palette", "No colours chosen");
+        return palette;
+    }
+    if (hexes.size() > maxColors) {
+        palette.error = QCoreApplication::translate("Palette", "At most %1 colours").arg(maxColors);
+        return palette;
+    }
+    Rgb rgb;
+    for (const QString &given : hexes) {
+        const QString hex = given.trimmed().toLower();
+        if (!parseHex(hex, &rgb)) {
+            palette.error = QCoreApplication::translate("Palette", "%1 is not a colour like #1a2b3c").arg(given);
+            palette.colors.clear();
+            return palette;
+        }
+        PaletteColor colour{QString("colour %1").arg(palette.colors.size() + 1), hex, describe(hex)};
+        cielab(rgb, colour.lab);
+        palette.colors << colour;
+    }
+    for (const auto &colour : palette.colors)
+        if (!palette.words.contains(colour.words))
+            palette.words << colour.words;
+    return palette;
+}

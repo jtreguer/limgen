@@ -19,13 +19,16 @@ struct KeepSettings {
     double colorPass = 0.3; // 0 turns the colour pass off
     QString format = "png"; // or "jpeg"
     int jpegQuality = 92;
-    QSize size; // the final size; empty for the largest monitor's
+    QSize size; // the final size; empty for a generic draft's target, else the largest monitor's
+    // False for a generic image: the final is filed in the library and goes
+    // nowhere else, with no colour pass; the user saves it where they like.
+    bool install = true;
 };
 
 struct KeepResult {
     LibraryEntry draft;
     LibraryEntry final;     // invalid when the draft was already kept there
-    QString installed;      // the image in the theme's background folder
+    QString installed;      // the image in the theme's background folder; empty when not installed
     QString theme;          // the theme it went to, empty for the pictures folder
     bool alreadyKept = false;
 };
@@ -67,6 +70,12 @@ public:
     static QString fileName(const QString &subject, const QString &draftId, const QString &format);
     // The A1111-style text other image tools read from a PNG or JPEG.
     static QString parameters(const QJsonObject &metadata);
+    // Writes a copy of a final (a PNG) to `path`: the same bytes for a .png,
+    // encoded as JPEG at `jpegQuality` with `parameters` in it otherwise.
+    // Written beside `path` and renamed into place, replacing a file there
+    // (the user chose it). Returns what went wrong, or an empty string. For
+    // the Generic screen's Save and limgen upscale --output.
+    static QString saveCopy(const QString &final, const QString &path, const QString &parameters, int jpegQuality);
 
 signals:
     // From 0 to 1: mostly the upscale's tiles, then the saving.
